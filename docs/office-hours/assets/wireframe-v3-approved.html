@@ -1,0 +1,140 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Wireframe v3 — Conversation-First, Memory-Transparent</title>
+<style>
+  /* Rough wireframe v3: chat is the primary interface; the Memory Engine is a
+     live, always-visible companion pane that reacts to every message. */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #fafafa; color: #222; padding: 14px; }
+  .frame { max-width: 1320px; margin: 0 auto; border: 2px solid #999; background: #fff; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #ccc; padding: 8px 14px; }
+  .topbar .logo { font-weight: 700; font-size: 14px; }
+  .topbar .stats { font-size: 11.5px; color: #666; }
+  .timeline { border-bottom: 1px solid #ccc; padding: 8px 14px 4px; }
+  .timeline h3 { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: #777; margin-bottom: 5px; }
+  .tl-track { position: relative; height: 40px; border: 1px solid #ddd; background: repeating-linear-gradient(90deg,#fff,#fff 79px,#eee 79px,#eee 80px); }
+  .tl-dots { font-size: 9px; letter-spacing: 2px; color: #555; padding: 4px 6px; line-height: 1.5; }
+  .tl-marker { position: absolute; top: 0; bottom: 0; border-left: 2px dashed #333; }
+  .tl-marker .lbl { position: absolute; top: 2px; left: 4px; font-size: 9px; background: #fff; border: 1px solid #888; border-radius: 8px; padding: 0 5px; white-space: nowrap; }
+  .tl-months { display: flex; justify-content: space-between; font-size: 9px; color: #888; padding: 2px 4px; }
+  .cols { display: flex; min-height: 580px; }
+  /* CHAT: primary. Wide, center of gravity, everything happens here. */
+  .chat { flex: 1.15; border-right: 1px solid #ccc; padding: 14px; display: flex; flex-direction: column; }
+  .chat h3, .engine h3 { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: #777; margin-bottom: 8px; }
+  .msg { border: 1px solid #bbb; border-radius: 8px; padding: 9px 12px; margin-bottom: 6px; max-width: 90%; font-size: 13px; line-height: 1.5; }
+  .user { margin-left: auto; background: #eee; }
+  .cite { display: inline-block; border: 1px solid #888; border-radius: 10px; padding: 0 6px; font-size: 10.5px; background: #fff; cursor: pointer; white-space: nowrap; }
+  .cite.active { border: 2px solid #333; font-weight: 600; }
+  /* Inline memory receipts: after any ingestion, chat shows what the engine did. */
+  .receipt { font-size: 10.5px; color: #555; margin: 0 0 12px 6px; }
+  .receipt .chip { display: inline-block; border: 1px dashed #999; border-radius: 9px; padding: 0 6px; margin-right: 4px; background: #fcfcfc; }
+  .photo { width: 120px; height: 80px; border: 1px solid #aaa; background: repeating-linear-gradient(45deg,#f2f2f2,#f2f2f2 6px,#e6e6e6 6px,#e6e6e6 12px); display: flex; align-items: center; justify-content: center; font-size: 10px; color: #888; margin-bottom: 4px; }
+  .composer { margin-top: auto; display: flex; gap: 8px; }
+  .composer input { flex: 1; border: 1px solid #aaa; border-radius: 6px; padding: 10px; font-size: 13px; }
+  .composer .btn { border: 1px solid #888; border-radius: 6px; padding: 10px 12px; background: #eee; font-size: 12.5px; }
+  /* ENGINE PANE: always visible, live; reacts to the selected/most recent message. */
+  .engine { flex: 0.85; padding: 12px; background: #f7f7f7; overflow-y: auto; }
+  .panel { border: 1px solid #bbb; border-radius: 6px; background: #fff; padding: 9px; margin-bottom: 10px; }
+  .panel h4 { font-size: 11px; margin-bottom: 7px; color: #333; }
+  .memrow { border: 1px solid #ccc; border-radius: 5px; padding: 5px 7px; margin-bottom: 5px; font-size: 11px; background:#fff; }
+  .memrow .meta { display: flex; gap: 4px; margin-top: 2px; flex-wrap: wrap; }
+  .badge { font-size: 8.5px; border: 1px solid #999; border-radius: 8px; padding: 0 5px; color: #444; }
+  .graph pre { font-family: ui-monospace, monospace; font-size: 9.5px; line-height: 1.45; color: #333; background: #fdfdfd; border: 1px dashed #bbb; padding: 6px; overflow-x: auto; }
+  .queries pre { font-family: ui-monospace, monospace; font-size: 9.5px; background: #fdfdfd; border: 1px solid #ccc; padding: 5px; margin-top: 4px; overflow-x: auto; }
+  .queries summary { font-size: 10.5px; cursor: pointer; color: #555; }
+  .note { font-size: 9px; color: #999; margin-top: 3px; }
+  .live { font-size: 9px; color: #555; border: 1px solid #aaa; border-radius: 8px; padding: 0 6px; margin-left: 6px; }
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="topbar">
+    <div class="logo">▦ Fitness Memory Agent</div>
+    <div class="stats">4,182 memories · 312 days · 23 insights · CockroachDB ●●●</div>
+  </div>
+
+  <!-- Timeline: always-visible memory context, slimmer than v2. -->
+  <div class="timeline">
+    <h3>Your memory — 312 days</h3>
+    <div class="tl-track">
+      <div class="tl-dots">·· ····· ·· ······· ···· ·· ········ ····· ··········· ······· ············ ········· ··············· ···········</div>
+      <div class="tl-marker" style="left:56%"><span class="lbl">◆ May 12 protein ↑</span></div>
+      <div class="tl-marker" style="left:74%"><span class="lbl">◆ Jun 2 body fat ↓</span></div>
+      <div class="tl-marker" style="left:97%"><span class="lbl">now</span></div>
+    </div>
+    <div class="tl-months"><span>Sep</span><span>Nov</span><span>Jan</span><span>Mar</span><span>May</span><span>Jul</span></div>
+  </div>
+
+  <div class="cols">
+    <!-- CHAT: the primary interface. Log, ask, upload — all here. -->
+    <div class="chat">
+      <h3>Conversation</h3>
+
+      <!-- Ingestion turn: meal photo + text becomes memories, receipt shown inline. -->
+      <div class="msg user">
+        <div class="photo">meal photo</div>
+        250g curd, 3 eggs, 200g chicken
+      </div>
+      <div class="receipt">✦ 1 memory created: <span class="chip">meal · lunch · 46g protein · conf 0.9</span> <span class="chip">+ embedding</span> — <u>view in engine →</u></div>
+      <div class="msg">Logged your lunch — 46g protein, ~610 kcal. That puts you at 128g so far today; on pace for your 150g target.</div>
+
+      <!-- Question turn: evidence-cited answer; engine pane reacts. -->
+      <div class="msg user">What changed before my body fat started dropping?</div>
+      <div class="msg">
+        Your body fat began falling around <span class="cite active">Jun 2 · scan 21.4%</span>. Two changes preceded it:
+        <br><br>
+        1. Protein rose ~96g → ~142g/day from <span class="cite">May 12</span><br>
+        2. Sleep crossed 7.5h/night after <span class="cite">May 19</span>
+        <br><br>
+        I flagged this on <span class="cite">Jun 3 · insight #ins_0231</span> — the drop lags the protein change by ~3 weeks. Evidence on the right →
+      </div>
+
+      <div class="composer">
+        <input placeholder="Ask anything, or log it — meals, workouts, sleep, reports…">
+        <div class="btn">📷</div><div class="btn">📄</div><div class="btn">Send</div>
+      </div>
+    </div>
+
+    <!-- ENGINE PANE: always on, follows the conversation. -->
+    <div class="engine">
+      <h3>Memory engine <span class="live">live — following conversation</span></h3>
+      <div class="panel">
+        <h4>Evidence — insight #ins_0231 · conf 0.82 · flagged Jun 3</h4>
+        <div class="memrow"><b>Body scan</b> 21.4% BF · Jun 2
+          <div class="meta"><span class="badge">live</span><span class="badge">conf 1.0</span><span class="badge">mem_8842</span></div>
+        </div>
+        <div class="memrow"><b>Body scan</b> 23.1% BF · May 3 (est.)
+          <div class="meta"><span class="badge">reconstructed</span><span class="badge">conf 0.7</span><span class="badge">mem_5310</span></div>
+        </div>
+        <div class="memrow"><b>Meal</b> 46g protein · May 12
+          <div class="meta"><span class="badge">reconstructed</span><span class="badge">conf 0.9</span><span class="badge">mem_4102</span></div>
+        </div>
+        <div class="note">…44 more memories in evidence set</div>
+      </div>
+      <div class="panel graph">
+        <h4>Reasoning</h4>
+        <pre>
+[protein 96→142g]  [sleep ≥7.5h]
+  26 memories        18 memories
+      └──────┬───────┘
+             ▼ lag ≈ 3 wk
+    [body fat 23.1 → 21.4%]
+             ▼
+ ◆ #ins_0231 (conf 0.82)
+ retracts if 3+ counterexamples/30d</pre>
+      </div>
+      <div class="panel queries">
+        <h4>Retrieval</h4>
+        <details>
+          <summary>SQL aggregation + vector search (2 queries)</summary>
+          <pre>SELECT date_trunc('week', event_time), avg(…)
+FROM memories WHERE type='meal' …;</pre>
+        </details>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
