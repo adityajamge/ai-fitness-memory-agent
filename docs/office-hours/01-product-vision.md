@@ -42,14 +42,17 @@ intelligence — the builder's own framing, recorded as the project's architectu
 The agent answers with dated, memory-ID-cited evidence:
 
 > "Protein rose ~96→142g/day from **May 12**; sleep crossed 7.5h/night after **May 19**;
-> body fat began falling **Jun 2** — I flagged this on **Jun 3**, the drop lags the protein
-> change by ~3 weeks."
+> body fat began falling **Jun 2** — the drop lags the protein change by ~3 weeks. This
+> pattern is flagged in your history as a derived insight."
 
 Three properties make this the money shot:
 
 1. **Provably impossible for a stateless assistant** — it requires months of structured history.
-2. **"I flagged this on Jun 3"** — the derived insight existed *before* the question was asked
-   (event-driven consolidation, [03-memory-engine.md](03-memory-engine.md)).
+2. **The insight already existed before the question was asked** (event-driven consolidation,
+   [03-memory-engine.md](03-memory-engine.md)). Framing is honestly bi-temporal
+   ([ADR-13.10](09-decisions.md#adr-13)): insights over reconstructed history use event-time
+   language; the **"flagged the moment it happened"** beat is delivered live on camera — log a
+   real workout, watch the insight appear with a truthful `created_at = now`.
 3. **Every claim is clickable** down to raw memory rows and the queries that produced them
    (glass-box UI, [07-glass-box-ui.md](07-glass-box-ui.md)).
 
@@ -64,7 +67,7 @@ real cause."
 | Agentic Memory Design | Two-tier memory (episodic events + derived insights with lineage/retraction); confidence + provenance first-class; memory that computes, not just recalls |
 | Technical Implementation | Custom Memory Engine on CockroachDB (vector index + JSONB + SQL aggregation in one consistent store); 3 CockroachDB tools evidenced |
 | Real-World Impact | Conversational capture attacks the #1 fitness-app churn cause; lifelong health memory is a real unmet need |
-| Production Readiness | Deploy-early, judge sandbox isolation, cost guards, observability + failure story, sanitized public dataset |
+| Production Readiness | Deploy-early, standard multi-user model with per-user isolation, never-lose-input ingestion, observability + failure story, sanitized repo dataset |
 | Creativity & Originality | "The agent already knew" demo; glass-box evidence UI; the why-not-Mem0 answer rendered on screen |
 
 ## Non-goals (for the hackathon)

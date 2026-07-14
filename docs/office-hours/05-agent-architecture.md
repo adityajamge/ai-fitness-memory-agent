@@ -26,7 +26,10 @@ flowchart LR
     PLAN --> AN["analyze_series<br/>(on-demand consolidation)"]
     AGG & REC & TL & AN --> CTX["Engine: context assembly<br/>+ ranking (memory IDs kept)"]
     CTX --> NARRATE["LLM narrates answer<br/>with [memory-ID] citations"]
-    NARRATE --> OUT["Chat + engine-pane payload<br/>(evidence rows, lineage, queries)"]
+    CTX -->|"deterministic byproduct"| TRACE["EvidenceTrace<br/>(queries · evidence · lineage · ranking)"]
+    NARRATE --> VALIDATE["Engine: citation validation<br/>(every cited ID must be in trace)"]
+    TRACE --> VALIDATE
+    VALIDATE --> OUT["Chat (validated answer) +<br/>engine pane (renders trace via app API)"]
     ROUTE -->|both| LOG
     LOG -.->|"ingest may trigger"| INSIGHT["event-driven consolidation<br/>→ new derived insight"]
 ```
@@ -43,13 +46,34 @@ Notes:
 - All model calls (chat narration, extraction, vision, embeddings) go through one provider
   interface owned by the app, defaulting to **Amazon Bedrock**.
 - The Memory Engine takes that interface as a dependency — it never imports a provider SDK.
-- Embedding model choice + dimensions is [OQ1](10-open-questions.md); the `VECTOR` column
-  dims follow it.
+- Embeddings: Titan Text Embeddings V2, 512-dim, normalized ([ADR-13.2](09-decisions.md#adr-13)).
 - Acceptance check: switching provider must be a config change, zero memory-layer edits.
+
+## Conversation state ([ADR-13.14](09-decisions.md#adr-13))
+
+LangGraph's built-in **PostgresSaver checkpointer runs on CockroachDB** (Postgres wire
+compat) and holds graph execution state — thread checkpoints, resumability. It is verified
+by a **day-one canary** (same gate class as the vector index; fallback is a thin hand-rolled
+checkpointer). The app's own `turns` + `evidence_traces` tables, written in one transaction
+when a turn completes, are the source of truth for everything the UI renders. Known
+footguns handled at setup: `.setup()` once, `autocommit=True` + `dict_row`, thread_id < 255
+chars, strict msgpack deserialization, no blobs in graph state (S3 URLs only).
 
 ## Answer contract (what "narrate" must produce)
 
 Every factual claim in an answer carries a memory-ID citation that the UI can resolve to
-evidence rows ([07-glass-box-ui.md](07-glass-box-ui.md)). If the engine's assembled context
-doesn't support a claim, the narrator must not make it — the glass box makes hallucination
-visible, which is a feature: it keeps the demo honest and the judges convinced.
+evidence rows ([07-glass-box-ui.md](07-glass-box-ui.md)). The narrator may only cite IDs
+present in the turn's `EvidenceTrace` — and this is **enforced, not requested**: the engine
+mechanically validates every citation against the trace after generation
+([ADR-12](09-decisions.md#adr-12)). Invalid citations are flagged in the UI.
+
+**Honest scope of that guarantee ([ADR-13.13](09-decisions.md#adr-13)):** mechanical
+validation proves citations resolve to real evidence; it does not prove the prose states
+the cited numbers/dates/directions correctly — that fidelity is covered by the
+citation-compliance **eval**, and the UI lets any reader compare claim against evidence
+with one click. The glass box makes hallucination visible, which is a feature: it keeps the
+demo honest and the judges convinced.
+
+**The LLM produces natural language only.** All structured UI data — evidence rows,
+lineage, queries, timeline — comes from the deterministic `EvidenceTrace`, fetched by the
+UI through the app API. Model output is never the source of glass-box data.

@@ -21,34 +21,48 @@ it must also **survive sanitization** ([ADR-7](09-decisions.md#adr-7)).
 
 ## Milestone 1 — The Spine (weekend-scale)
 
-- [ ] `git init`, repo scaffold, MIT/Apache-2.0 license visible
+- [ ] `git init`, repo scaffold (monorepo `engine/ agent/ api/ web/ cli/`, one Dockerfile),
+      MIT/Apache-2.0 license visible
 - [ ] ccloud CLI: provision CockroachDB Cloud cluster — **screen-record it** (tool evidence)
-- [ ] **Day one: verify distributed vector indexing on the chosen tier** (toy table:
-      dimensionality, index build, query latency) — hard-gate load-bearing; also verify
-      tier/budget limits
-- [ ] `memories` table + vector/inverted/secondary indexes ([04-database-design.md](04-database-design.md))
-- [ ] LangGraph ingestion node: text → typed events via Bedrock
-- [ ] Seed replay CLI; reconstruct ~3 months of history through the **production pipeline**
-- [ ] **Verify the causal story exists in the data** (go/no-go on the demo script)
+- [ ] **Day-one canary #1: vector indexing** — `VECTOR(512)` index on the chosen tier, assert
+      K-NN ordering on normalized vectors; verify tier/budget limits; canary becomes a
+      permanent CI test (ADR-13.8)
+- [ ] **Day-one canary #2: LangGraph PostgresSaver on CockroachDB** — `.setup()`, write/read
+      a checkpoint; fallback: thin hand-rolled checkpointer (ADR-13.8)
+- [ ] `memories` + `users`/`turns`/`evidence_traces` tables, vector/inverted/secondary
+      indexes ([04-database-design.md](04-database-design.md))
+- [ ] Pydantic payload registry `engine/types.py` (ADR-13.6)
+- [ ] LangGraph ingestion node: text → typed events via Bedrock, 16A failure policy
+      (success-direct, note-on-failure)
+- [ ] Seed replay CLI **with extraction-output caching** (re-runs must not re-call Bedrock)
+      and small-batch inserts (vector-index footgun); reconstruct ~3 months through the
+      **production pipeline**
+- [ ] **Verify the causal story exists in the data** (go/no-go; 13A event-time framing)
 - [ ] Two tools: `aggregate_memories`, `recall_memories`
+- [ ] Simple email+password auth + sessions (ADR-13.15; abuse/spend controls deferred → TODOS)
+- [ ] **Re-derive the budget line-item** (App Runner idle, CockroachDB tier, cached replay
+      Bedrock cost, live-eval lane) — update README constraint
 - [ ] Bare chat answering the money question
-- [ ] **Minimal hosted deploy** of that bare chat (deploy-early), including **cost guards /
-      request caps** before the URL is public
+- [ ] **Hosted deploy on AWS App Runner** (deploy-early — a submittable URL exists from
+      Milestone 1 onward)
 
 ## Milestone 2 — The Engine
 
-- [ ] Event-driven consolidation: on-ingest scoped scans + `analyze_series` on demand;
-      derived insights with provenance + retraction ([03-memory-engine.md](03-memory-engine.md))
-- [ ] Timeline, aggregation, context-assembly + ranking modules
+- [ ] Consolidation: synchronous scoped scans in-request under the ~300ms budget +
+      `analyze_series` on demand; ruptures PELT + bounded lag scan; pattern-strength scoring
+      (ADR-13.12); typed retraction-condition evaluation (ADR-13.11)
+- [ ] Timeline, aggregation, context-assembly + ranking modules (hard token cap, tested)
 - [ ] Photo ingestion: S3 + Bedrock vision → meal events
-- [ ] Full reconstruction replay (6–12 months, sanitized derivative for the public DB)
+- [ ] Embedding backfill: opportunistic on next ingest + manual CLI command
+- [ ] Full reconstruction replay (6–12 months) into the builder's account
+- [ ] **End-to-end turn latency budget measured** (ingest turn, query turn, both-turn) —
+      target: receipt < 3s perceived; document the profile
 
 ## Milestone 3 — The Glass Box
 
-- [ ] Web UI per wireframe v3, built in ranked order (1→7), lineage graph first-to-cut
-      ([07-glass-box-ui.md](07-glass-box-ui.md))
-- [ ] Judge sandbox: write-capable, isolated, pristine demo user protected ([OQ3](10-open-questions.md))
-- [ ] Hosted deploy of the full app (target per [OQ2](10-open-questions.md))
+- [ ] Web UI per wireframe v3, built in ranked order (1→8; empty states are rank 4; lineage
+      graph first-to-cut) ([07-glass-box-ui.md](07-glass-box-ui.md))
+- [ ] Full app deployed to App Runner (image already flowing since M1)
 
 ## Milestone 4 — Submission
 
@@ -62,5 +76,10 @@ it must also **survive sanitization** ([ADR-7](09-decisions.md#adr-7)).
 
 ## Standing next step
 
-Run `/plan-eng-review` on the design (it auto-discovers the approved design doc) before
-Milestone 1 code — it locks [the open questions](10-open-questions.md) that block M1.
+~~Run `/plan-eng-review`~~ **Done 2026-07-12** — all M1-blocking questions locked
+([ADR-13](09-decisions.md#adr-13)). Next: the Assignment (OQ5 — verify the causal story in
+real data), then Milestone 1.
+
+**Day-to-day execution** of these milestones lives in
+[../implementation-roadmap.md](../implementation-roadmap.md) — 8 phases mapping T1–T18 onto
+this document's milestone contract (Phases 1–4 ≈ M1, Phase 5 ≈ M2, Phase 6 ≈ M3, Phase 7 ≈ M4).

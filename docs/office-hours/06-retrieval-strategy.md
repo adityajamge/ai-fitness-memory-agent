@@ -16,6 +16,60 @@ The Memory Engine therefore treats **SQL aggregation as a first-class memory ope
 alongside vector search — in one transactionally consistent CockroachDB store, so computed
 facts and semantic recall never disagree.
 
+## <a name="query-planning"></a>The query-planning boundary (where NL understanding ends)
+
+There is exactly one place in the system that understands natural language: the **LangGraph
+planner node** ([05-agent-architecture.md](05-agent-architecture.md)). Everything below the
+tool-call boundary is deterministic.
+
+```
+Natural language ("What changed before my body fat started dropping?")
+        │
+        ▼
+┌─ Agent (LLM) ────────────────────────────────────────────────┐
+│  Planner: classify turn (ingest / query / both),             │
+│  select tools, fill TYPED parameter slots                    │
+└──────────────────────────────────────────────────────────────┘
+        │  structured tool calls only, e.g.
+        │  analyze_series(metric="body_fat_pct")
+        │  aggregate_memories(metric="protein_g", agg="avg",
+        │                     group_by="week", date_range=…)
+        ▼
+┌─ Memory Engine (deterministic) ──────────────────────────────┐
+│  Query builders → parameterized SQL / vector search          │
+│  → evidence + ranking → context block + EvidenceTrace        │
+└──────────────────────────────────────────────────────────────┘
+        │                                   │
+        ▼                                   ▼
+   LLM narrates (prose + citations)    Glass-box UI (renders trace)
+```
+
+Boundary contract:
+
+- The planner's entire output is **structured tool calls with typed slots** (validated like
+  any payload). "Mixed retrieval" is the planner issuing several tool calls; assembly merges
+  them into one ranked evidence set with one trace — it is not an engine mode.
+- The engine **never interprets language**. The `question` field in the trace is carried for
+  display, not parsed. Swapping the LLM provider changes who fills the slots, never what
+  executes ([ADR-13](09-decisions.md#adr-13) model-independence).
+
+## <a name="query-construction"></a>Query construction: closed builder families, never free-form
+
+The engine contains a **closed set of parameterized query builders** — aggregation
+(sum/avg/count over a payload field, grouped by period), last/first-event lookup, timeline
+slice, vector K-NN, insight lookup. A tool call selects a builder and fills its typed slots;
+the builder composes SQL from vetted fragments with **bound parameters only**. Dynamic in
+the narrow sense (filters/grouping assembled per request from a finite vocabulary), but:
+
+- **No LLM-generated SQL, ever.** The model can only choose a builder and fill typed slots.
+- **Zero injection surface by construction** — no query string ever interpolates user content.
+- **The executed-SQL panel stays testable** — every builder family has fixture tests, so the
+  glass box displays queries from a known, verified family.
+
+Food/item filters (e.g. "when did I last eat chicken?") have two paths: structured
+containment over extracted payload items (inverted index) and vector search over `summary`
+as the fuzzy fallback. The planner may request either; the trace records which ran.
+
 ## Question → retrieval-path mapping
 
 | Question shape | Path | Example |
@@ -43,6 +97,14 @@ Candidate evidence (aggregates, timeline slices, semantic hits, insights) is ran
 Assembly preserves memory IDs end-to-end so citations survive into the UI. Context
 optimization enforces a token budget: aggregates are compact by nature; raw-event inclusion
 is capped and summarized beyond the cap.
+
+Every assembly also **emits a deterministic `EvidenceTrace`** — executed queries (SQL +
+vector, with parameters), the selected evidence set, participating insights with lineage,
+and the ranking scores that justified selection. The trace, not the model's output, drives
+the glass-box UI ([ADR-12](09-decisions.md#adr-12),
+[03-memory-engine.md](03-memory-engine.md#6-evidence-trace-builder-adr-12)). This is also
+what makes the consistency argument below *verifiable* rather than asserted: the queries
+shown on screen are the queries that ran.
 
 ## Consistency property worth stating
 

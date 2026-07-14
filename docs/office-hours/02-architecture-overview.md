@@ -22,12 +22,13 @@ flowchart TB
         RETRIEVE["Hybrid retrieval<br/>(SQL aggregation + vector search)"]
         CONSOLIDATE["Event-driven consolidation<br/>(changepoints, lagged correlations →<br/>derived insight memories)"]
         ASSEMBLE["Context assembly + ranking"]
+        TRACE["Evidence trace builder<br/>(deterministic byproduct of assembly —<br/>queries · evidence · lineage · ranking)"]
     end
 
     subgraph AWS["AWS"]
-        BEDROCK["Amazon Bedrock<br/>(LLM · vision · embeddings)"]
+        BEDROCK["Amazon Bedrock<br/>(LLM · vision · Titan embeddings 512-dim)"]
         S3["Amazon S3<br/>(meal photos · report files)"]
-        LAMBDA["AWS Lambda<br/>(only where it adds value —<br/>candidate: consolidation worker)"]
+        APPRUNNER["AWS App Runner<br/>(hosts the single app container)"]
     end
 
     subgraph CRDB["CockroachDB Cloud (system of record)"]
@@ -45,7 +46,8 @@ flowchart TB
     CONSOLIDATE --> MEMORIES
     RETRIEVE --> MEMORIES
     ASSEMBLE --> RETRIEVE
-    TOOLS -->|"answers + evidence refs"| ENGINE_PANE
+    ASSEMBLE --> TRACE
+    TRACE -->|"EvidenceTrace (via app API,<br/>never through the LLM)"| ENGINE_PANE
     Agent --> BEDROCK
 ```
 
@@ -53,7 +55,7 @@ flowchart TB
 
 | Component | Responsibility | Key doc |
 |---|---|---|
-| **Memory Engine** | Ingestion, hybrid retrieval, timeline reconstruction, aggregation, event-driven consolidation, context assembly, ranking, context optimization. A clean internal package with no LLM-provider dependence. | [03](03-memory-engine.md) |
+| **Memory Engine** | Ingestion, hybrid retrieval, timeline reconstruction, aggregation, event-driven consolidation, context assembly, ranking, context optimization, **deterministic evidence-trace construction** ([ADR-12](09-decisions.md#adr-12)). A clean internal package with no LLM-provider dependence. | [03](03-memory-engine.md) |
 | **CockroachDB Cloud** | System of record: memories (typed JSONB events + embeddings + derived insights), conversations, user profile. One transactionally consistent store for both SQL aggregation and vector search. | [04](04-database-design.md) |
 | **LangGraph agent** | Model-agnostic orchestration; calls tools the engine exposes; never touches the DB directly. | [05](05-agent-architecture.md) |
 | **Web app** | Conversation-first UI with always-visible engine pane, timeline, memory receipts. | [07](07-glass-box-ui.md) |
@@ -63,12 +65,19 @@ flowchart TB
 
 | Service | Role | Load-bearing? |
 |---|---|---|
-| **Amazon Bedrock** | Default LLM for the agent; vision extraction for meal photos; embeddings | Yes — primary |
+| **Amazon Bedrock** | Default LLM for the agent; vision extraction for meal photos; Titan V2 embeddings (512-dim, normalized) | Yes — primary |
 | **Amazon S3** | Meal photos and blood-report file storage (referenced from memory payloads) | Yes |
-| **AWS Lambda** | Candidate host for the consolidation worker and/or ingestion webhook — adopted **only where it adds value** (builder rule: no infra for completeness) | Conditional |
+| **AWS App Runner** | Hosts the single Docker image (FastAPI + built Vite/React SPA); deploys in Milestone 1 (deploy-early) | Yes |
 
-Hosting target for the web app is open ([OQ2](10-open-questions.md)) but deploys in
-Milestone 1 regardless (deploy-early rule, [08-roadmap.md](08-roadmap.md)).
+**Lambda is not in the runtime architecture** — consolidation runs synchronously in the
+ingestion request with a time budget ([ADR-13.1](09-decisions.md#adr-13)); no scheduler, no
+queue (builder rule: no infra for completeness).
+
+**Application model:** standard multi-user SaaS — email+password accounts, per-user row
+scoping, every new account starts with empty memory ([ADR-13.4](09-decisions.md#adr-13)).
+Conversation state: LangGraph PostgresSaver checkpointer on CockroachDB for graph execution
+state; the app's `turns` + `evidence_traces` tables are the source of truth for UI rendering
+([ADR-13.14](09-decisions.md#adr-13)).
 
 ## CockroachDB tool usage (hackathon requirement: ≥2, we evidence 3)
 
@@ -87,5 +96,8 @@ engine pane update.
 
 **Query turn** (user asks the money question):
 question → agent plans retrieval → engine runs SQL aggregation + vector search (+ existing
-derived insights) → context assembly ranks evidence → LLM narrates answer **with memory-ID
-citations** → engine pane shows evidence rows, reasoning lineage, and the executed queries.
+derived insights) → context assembly ranks evidence **and emits an `EvidenceTrace` as a
+deterministic byproduct** (executed queries, evidence set, insight lineage, ranking) →
+LLM narrates answer **with memory-ID citations validated against the trace** → engine pane
+renders the trace directly via the app API — **UI data never passes through the model**
+([ADR-12](09-decisions.md#adr-12)).

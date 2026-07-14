@@ -8,6 +8,11 @@
 > (`/plan-eng-review`, `/autoplan`), implementation, and reviews. If code and these docs
 > disagree, either the code is wrong or a decision changed — in the latter case, update the
 > doc and record the change in [09-decisions.md](09-decisions.md).
+>
+> **Engineering review completed 2026-07-12** (`/plan-eng-review`): 14 decisions locked —
+> stack, hosting, embeddings, multi-user model, failure policies, analytics honesty — see
+> [ADR-12 and ADR-13](09-decisions.md#adr-12). Only OQ5 (causal story) and OQ6 (report
+> parsing depth) remain open ([10-open-questions.md](10-open-questions.md)).
 
 ## The project in three sentences
 
@@ -32,8 +37,10 @@ flagged the insight when the data arrived.
 | [06-retrieval-strategy.md](06-retrieval-strategy.md) | Hybrid SQL + vector retrieval, when each path fires, ranking | Building retrieval or debugging answers |
 | [07-glass-box-ui.md](07-glass-box-ui.md) | UI philosophy, approved wireframe v3, ranked sub-features + cut order | Building the UI |
 | [08-roadmap.md](08-roadmap.md) | Milestones 1–4, the Assignment, degradation strategy, submission checklist | Planning any week |
-| [09-decisions.md](09-decisions.md) | ADRs: decisions, trade-offs, assumptions, **rejected alternatives** | Before re-opening any settled question |
-| [10-open-questions.md](10-open-questions.md) | The 7 open questions and where each gets decided | Before /plan-eng-review |
+| [09-decisions.md](09-decisions.md) | ADRs: decisions, trade-offs, assumptions, **rejected alternatives** (incl. ADR-12 evidence traces, ADR-13 eng-review lockdown) | Before re-opening any settled question |
+| [10-open-questions.md](10-open-questions.md) | Open questions — 5 of 7 resolved 2026-07-12; OQ5/OQ6 remain | Before starting Milestone 1 |
+| [11-implementation-tasks.md](11-implementation-tasks.md) | The 18 review-derived tasks, parallelization lanes, outside-voice dispositions | Planning any build session |
+| [12-test-plan.md](12-test-plan.md) | Coverage map (33 paths), eval suites, failure-modes table, test infra | Writing any code or test |
 
 Assets (approved wireframe v3 PNG + HTML) live in [assets/](assets/).
 
@@ -47,4 +54,6 @@ Assets (approved wireframe v3 PNG + HTML) live in [assets/](assets/).
 - **Model independence:** the memory layer has no LLM/provider dependence. CockroachDB-native
   by design — that's the point, not lock-in.
 - **No infrastructure built solely for completeness** (builder's explicit rule).
-- **Budget:** ~$50–100 total for 40 days; cost guards (request caps) before any public URL.
+- **Budget:** ~$50–100 total for 40 days — re-derived line-item in Milestone 1. Abuse/spend
+  controls are explicitly out of scope this iteration ([ADR-13.15](09-decisions.md#adr-13));
+  accepted risk, monitored via billing alerts.
