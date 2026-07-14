@@ -61,6 +61,14 @@ compile to **SQL aggregation over typed payloads**; narrative/semantic questions
 **vector search over embeddings**; complex questions combine both plus existing derived
 insights. One consistent store means no sync gap between the two.
 
+The engine's query layer is a **closed set of parameterized builder families**
+([06 → query construction](06-retrieval-strategy.md#query-construction)) — tool calls fill
+typed slots, builders compose SQL from vetted fragments with bound parameters. The engine
+never interprets natural language; that ends at the agent's planner
+([06 → query-planning boundary](06-retrieval-strategy.md#query-planning)). Insight reuse is
+a structured, freshness-checked lookup
+([06 → insight reuse](06-retrieval-strategy.md#insight-reuse)).
+
 ### 4. Event-driven consolidation (NOT scheduled)
 Builder decision ([ADR-3](09-decisions.md#adr-3)): consolidation runs
 - **on ingest** — scoped to the series the new event touches, **synchronously inside the

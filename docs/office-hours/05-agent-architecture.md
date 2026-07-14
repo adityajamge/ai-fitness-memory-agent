@@ -19,7 +19,7 @@ flowchart LR
     IN["User turn<br/>(text / photo / file)"] --> ROUTE{"Intent<br/>routing"}
     ROUTE -->|ingest| LOG["log_memory<br/>(engine ingestion)"]
     LOG --> RECEIPT["Memory receipt<br/>+ coaching response"]
-    ROUTE -->|query| PLAN["Retrieval planning"]
+    ROUTE -->|query| PLAN["Retrieval planning<br/>(the ONLY NL-understanding layer —<br/>emits typed tool calls only)"]
     PLAN --> AGG["aggregate_memories"]
     PLAN --> REC["recall_memories"]
     PLAN --> TL["get_timeline"]
@@ -40,6 +40,15 @@ Notes:
   following 7.5h+ sleep"), which is the proactive-feeling moment without any scheduler.
 - The agent **never issues raw SQL**; tools are the engine's contract
   ([03-memory-engine.md](03-memory-engine.md)).
+
+## The query-planning boundary
+
+The planner node is the **only** place in the system that understands natural language. Its
+entire output is structured tool calls with typed, validated parameter slots; "mixed
+retrieval" is the planner issuing several tool calls, merged by the engine's assembly into
+one ranked evidence set with one trace. Below the tool-call boundary everything is
+deterministic — builder-composed parameterized SQL and vector search, heuristic ranking,
+trace emission. Full contract: [06-retrieval-strategy.md → query-planning boundary](06-retrieval-strategy.md#query-planning).
 
 ## Model independence contract
 

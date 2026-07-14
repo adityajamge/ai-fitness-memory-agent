@@ -81,18 +81,46 @@ as the fuzzy fallback. The planner may request either; the trace records which r
 | Mixed | Both + assembly | "How's my recovery been since I started creatine?" |
 
 Routing is the retrieval-planning step of the agent graph
-([05-agent-architecture.md](05-agent-architecture.md)); the engine owns query construction.
+([05-agent-architecture.md](05-agent-architecture.md)); the engine owns query construction
+([builder families above](#query-construction)).
+
+## <a name="insight-reuse"></a>Insight reuse: structured match first, semantic second
+
+"Return an existing insight instead of recomputing" is a **structured lookup, not a semantic
+one**. Insight payloads carry the series/metric identifiers they are about (metric, correlated
+series pair, lag window), so `analyze_series(metric="body_fat_pct")` first runs an indexed
+query: `status='active'` insights whose payload references that metric (inverted index).
+
+The match passes a **freshness rule**: insights carry `last_evaluated_at`, maintained by the
+consolidation pass — and since every relevant ingest re-touches affected insights
+synchronously ([ADR-13.1](09-decisions.md#adr-13)), insights are current *by construction*
+in normal operation. If the series has events newer than `last_evaluated_at` (possible after
+a budget-overflow deferral), the engine recomputes on demand; otherwise it returns the
+existing insight with its lineage.
+
+Semantic recall over insight embeddings (insights are ordinary memories with embedded
+hypothesis text) exists as the **secondary discovery path** — open-ended `recall_memories`
+can surface insights the planner didn't map to a specific series.
 
 ## Ranking & assembly (design-level)
 
-Candidate evidence (aggregates, timeline slices, semantic hits, insights) is ranked by:
+Ranking is **entirely deterministic** — a documented heuristic composite score, no LLM
+anywhere in the ranking path (same determinism boundary as [ADR-12](09-decisions.md#adr-12),
+same honesty posture as the pattern-strength score, ADR-13.12). Same inputs → same ranking,
+and the per-candidate scores are recorded in `EvidenceTrace.ranking`, so "why the engine
+picked these memories" is itself glass-box material. Candidate evidence (aggregates,
+timeline slices, semantic hits, insights) is scored on:
 
-1. **Relevance** to the question (semantic score / filter match)
+1. **Relevance** to the question (vector distance for semantic candidates; filter/exact match
+   for structured ones)
 2. **Confidence** (reconstructed low-confidence memories rank below live ones; the answer can
    hedge: "around early May — estimated")
 3. **Recency / temporal proximity** to the question's window
 4. **Tier** — a high-confidence derived insight that already answers the question outranks
    re-deriving from raw events
+
+plus **diversity caps** (the budget must not fill with near-identical rows). Exact weights
+are implementation detail; the commitments above are architectural.
 
 Assembly preserves memory IDs end-to-end so citations survive into the UI. Context
 optimization enforces a token budget: aggregates are compact by nature; raw-event inclusion
