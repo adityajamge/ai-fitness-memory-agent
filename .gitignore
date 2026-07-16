@@ -1,0 +1,50 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.python-version
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# --- Node / web (Vite app lands in web/ at Phase 6) ---
+node_modules/
+web/dist/
+*.tsbuildinfo
+.vite/
+
+# --- Environment & secrets (never commit credentials) ---
+.env
+.env.*
+!.env.example
+*.pem
+
+# --- Personal health data: raw reconstruction inputs stay local (ADR-7) ---
+data/raw/
+reconstruction/
+
+# --- Replay extraction cache (local Bedrock-output cache, T8) ---
+.replay-cache/
+
+# --- Tooling state ---
+.gstack/
+.claude/settings.local.json
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- Test / E2E artifacts ---
+playwright-report/
+test-results/

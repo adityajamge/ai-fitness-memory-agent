@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ai-fitness-memory-agent"
+version = "0.1.0"
+description = "AI health companion with persistent, lifelong memory — a custom Memory Engine on CockroachDB driving a glass-box UI. CockroachDB × AWS Agentic Memory Hackathon entry."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Aditya Babanrao Jamge" }]
+requires-python = ">=3.10"
+# Runtime dependencies are added phase-by-phase (see docs/implementation-roadmap.md).
+# Phase 1+: psycopg, sqlalchemy-cockroachdb or raw psycopg, langgraph,
+#           langgraph-checkpoint-postgres, pydantic, fastapi, boto3, ruptures.
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[tool.hatch.build.targets.wheel]
+# Monorepo top-level packages (see README.md → Repository structure).
+packages = ["engine", "agent", "api", "cli", "evals"]
+
+[tool.pytest.ini_options]
+testpaths = ["engine/tests", "agent/tests", "api/tests", "cli/tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
