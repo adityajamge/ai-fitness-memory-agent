@@ -138,12 +138,21 @@ earlier ADRs or docs.
 1. **Consolidation executes synchronously in the ingestion request** with a hard time budget
    (~300ms); overflow defers to on-demand `analyze_series`. Retraction-condition evaluation
    rides the same pass. **Lambda is out of the runtime architecture** (AWS = Bedrock + S3 +
-   App Runner). *(Rejected: async queue/worker — infra for a single-user-scale demo.)*
+   the app host — ECS Express Mode since the 13.3 amendment). *(Rejected: async
+   queue/worker — infra for a single-user-scale demo.)*
 2. **Embeddings: Bedrock Titan Text Embeddings V2, 512-dim, normalized**; `VECTOR(512)`.
    CockroachDB's C-SPANN index is Euclidean-only; unit vectors make L2 ≡ cosine.
 3. **Hosting: AWS App Runner**, single Docker image (FastAPI serving the built Vite/React
    SPA); deploy-early in Milestone 1. *(Rejected: ECS+ALB — setup cost without demo-visible
    benefit; Lambda+APIGW — cold starts + SSE friction.)*
+   **Amended 2026-07-19 → Amazon ECS Express Mode.** App Runner stopped accepting new
+   customers on 2026-04-30 (we had no service yet); AWS's recommended successor is ECS
+   Express Mode, which removes exactly the setup cost the original rejection was about:
+   one wizard/action provisions Fargate + a shared ALB + HTTPS URL + auto scaling. Same
+   single image, same deploy-early property; CI deploys via the official
+   `aws-actions/amazon-ecs-deploy-express-service` action ([../deploy.md](../deploy.md)).
+   Budget shape changes (always-on Fargate task + ALB share instead of App Runner
+   per-request idle) — folded into the T13 re-derivation.
 4. **Pure production multi-user model** (builder's firm decision): standard SaaS accounts;
    every new user starts with empty memory; **no judge sandbox, no seed cloning, no
    sample-data onboarding**. The builder's account is a mature account bootstrapped through
@@ -214,7 +223,8 @@ earlier ADRs or docs.
    (Milestone 1, day one canary — permanent in CI).
 3. Bedrock vision extraction is good enough for meal photos without fine-tuning (fallback:
    text-first logging remains fully functional).
-4. Budget stays ≈ $50–100 for 40 days — **must be re-derived line-item** (App Runner idle
+4. Budget stays ≈ $50–100 for 40 days — **must be re-derived line-item** (Fargate + ALB share
+   since the 13.3 amendment, previously App Runner idle
    cost, CockroachDB tier, replay Bedrock runs with extraction caching, evals) as a
    Milestone 1 task; abuse controls are out of scope (ADR-13.15), so this assumption also
    rests on no hostile traffic.

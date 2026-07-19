@@ -33,7 +33,7 @@ Without persistence, that state lives in process memory and dies with the proces
 
 1. **Multi-turn conversations across requests.** Each HTTP request is a fresh graph
    invocation; the checkpointer is how turn *n+1* sees turns *1..n*.
-2. **Resume after crash or deploy.** App Runner restarts the container; conversations
+2. **Resume after crash or deploy.** The host (ECS) restarts the container; conversations
    continue where they left off.
 3. **Replayability/time-travel of graph execution** (LangGraph can resume from any stored
    checkpoint id) — not a feature we surface, but it shapes the storage model below.

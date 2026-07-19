@@ -28,7 +28,7 @@ flowchart TB
     subgraph AWS["AWS"]
         BEDROCK["Amazon Bedrock<br/>(LLM · vision · Titan embeddings 512-dim)"]
         S3["Amazon S3<br/>(meal photos · report files)"]
-        APPRUNNER["AWS App Runner<br/>(hosts the single app container)"]
+        ECSEXPRESS["Amazon ECS Express Mode<br/>(Fargate + ALB — hosts the single app container)"]
     end
 
     subgraph CRDB["CockroachDB Cloud (system of record)"]
@@ -67,7 +67,7 @@ flowchart TB
 |---|---|---|
 | **Amazon Bedrock** | Default LLM for the agent; vision extraction for meal photos; Titan V2 embeddings (512-dim, normalized) | Yes — primary |
 | **Amazon S3** | Meal photos and blood-report file storage (referenced from memory payloads) | Yes |
-| **AWS App Runner** | Hosts the single Docker image (FastAPI + built Vite/React SPA); deploys in Milestone 1 (deploy-early) | Yes |
+| **Amazon ECS Express Mode** | Hosts the single Docker image (FastAPI + built Vite/React SPA) on Fargate + shared ALB; deploys in Milestone 1 (deploy-early). *Originally App Runner — closed to new customers 2026-04-30; ADR-13.3 amendment* | Yes |
 
 **Lambda is not in the runtime architecture** — consolidation runs synchronously in the
 ingestion request with a time budget ([ADR-13.1](09-decisions.md#adr-13)); no scheduler, no

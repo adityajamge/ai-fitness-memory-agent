@@ -1,78 +1,97 @@
-# Deployment — App Runner via ECR (T10, ADR-13.7 / ADR-11 deploy-early)
+# Deployment — Amazon ECS Express Mode via ECR (T10, ADR-13.3 as amended / ADR-11 deploy-early)
 
 One Docker image (FastAPI; the built Vite SPA joins it in Phase 6), hosted on
-**AWS App Runner**, delivered by CI: every push to `main` that passes tests is
-pushed to ECR as `:latest` + `:<sha>`, and App Runner auto-deploys `:latest`.
-No manual deploy step exists after the one-time setup below.
+**Amazon ECS Express Mode** (Fargate + shared ALB with a managed HTTPS URL),
+delivered by CI: every push to `main` that passes tests is pushed to ECR and
+deployed via the official `aws-actions/amazon-ecs-deploy-express-service`
+action. No manual deploy step exists after the one-time setup below.
+
+> **Why not App Runner?** The original decision (ADR-13.3) chose App Runner,
+> but AWS closed it to new customers on 2026-04-30 and recommends ECS Express
+> Mode instead. Express Mode removes the setup cost that made us reject plain
+> ECS+ALB originally: one wizard provisions the Fargate service, load balancer,
+> health checks, auto scaling, and networking. See the ADR-13.3 amendment in
+> [office-hours/09-decisions.md](office-hours/09-decisions.md).
 
 ```
-push to main ──► GitHub Actions (lint · pytest vs real CockroachDB · image build)
+push to main ──► GitHub Actions (lint · pytest vs real CockroachDB · image build + smoke test)
                         │  deploy job (gated on AWS_DEPLOY_ENABLED)
-                        ▼
-                 ECR ai-fitness-memory-agent:latest
-                        │  auto-deploy
-                        ▼
-                 App Runner service ──► public URL  (health check: GET /healthz, port 8080)
+                        ├── push image to ECR  (:<sha> for traceable rollbacks, :latest for humans)
+                        └── amazon-ecs-deploy-express-service@v1  (deploys :<sha>)
+                                     │
+                                     ▼
+                 ECS Express service ──► public HTTPS URL  (ALB health check, port 8080)
 ```
 
-## One-time AWS setup (manual, ~15 min)
+Region: **us-east-1** (N. Virginia — where the ECR repository lives; the ECS
+service must be in the same region). The CockroachDB Cloud cluster stays in
+ap-south-1 — the cross-region app→DB hop adds latency that the T12 latency
+profile (Phase 5) should measure and document.
 
-Region: **us-east-1** (N. Virginia — where the ECR repository lives; App Runner
-must be in the same region as its ECR source). The CockroachDB Cloud cluster
-stays in ap-south-1 — the cross-region app→DB hop adds latency that the T12
-latency profile (Phase 5) should measure and document.
+## One-time AWS setup
 
-1. **ECR repository** — ✅ created 2026-07-19:
-   `589077667696.dkr.ecr.us-east-1.amazonaws.com/ai-fitness-memory-agent`
+Already done (2026-07-19): ✅ ECR repository
+(`589077667696.dkr.ecr.us-east-1.amazonaws.com/ai-fitness-memory-agent`),
+✅ IAM user `ci-deploy` with the ECR push policy, ✅ GitHub secrets
+(`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`).
 
-2. **IAM user for CI** (push-only) — Console → IAM → Users → Create `ci-deploy`,
-   no console access, attach this inline policy:
+Remaining steps, in order:
+
+1. **Extend the `ci-deploy` IAM policy** so CI can also deploy the Express
+   service (add these statements alongside the existing ECR ones; the PassRole
+   ARNs come from step 3):
 
    ```json
-   {
-     "Version": "2012-10-17",
-     "Statement": [
-       { "Effect": "Allow", "Action": "ecr:GetAuthorizationToken", "Resource": "*" },
-       { "Effect": "Allow",
-         "Action": ["ecr:BatchCheckLayerAvailability", "ecr:CompleteLayerUpload",
-                     "ecr:InitiateLayerUpload", "ecr:PutImage", "ecr:UploadLayerPart",
-                     "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
-         "Resource": "arn:aws:ecr:us-east-1:589077667696:repository/ai-fitness-memory-agent" }
-     ]
-   }
+   { "Effect": "Allow",
+     "Action": ["ecs:CreateExpressGatewayService", "ecs:UpdateExpressGatewayService",
+                 "ecs:DescribeExpressGatewayService", "ecs:DescribeServices",
+                 "ecs:RegisterTaskDefinition"],
+     "Resource": "*" },
+   { "Effect": "Allow",
+     "Action": "iam:PassRole",
+     "Resource": ["<EXECUTION_ROLE_ARN>", "<INFRASTRUCTURE_ROLE_ARN>"] }
    ```
 
-   Create an access key (use case: "Application running outside AWS").
+2. **First image into ECR** — push to `main` with the `AWS_DEPLOY_ENABLED`
+   variable still unset: the deploy job is skipped, but you can then run
+   step 3's wizard against a manually pushed image — OR simply set
+   `AWS_DEPLOY_ENABLED=true` *after* step 3. Easiest: temporarily set only the
+   ECR push half by letting CI run once with `AWS_DEPLOY_ENABLED=true` and
+   the role variables unset — the push step succeeds, the deploy step fails,
+   and ECR is populated. Then continue with step 3 and re-run the job.
 
-3. **GitHub repo settings** (`Settings → Secrets and variables → Actions`):
-   - Secrets: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (from step 2)
-   - Variables: `AWS_DEPLOY_ENABLED` = `true`, `AWS_REGION` = `us-east-1`
+3. **Create the service once via the console wizard** (this is also what
+   creates the two roles with the right managed policies) — Console → ECS →
+   **Deploy with Express Mode**:
+   - Image: `589077667696.dkr.ecr.us-east-1.amazonaws.com/ai-fitness-memory-agent:latest`
+   - Task execution role / infrastructure role: **Create new role** in each dropdown
+   - Additional configurations: service name `ai-fitness-memory-agent`,
+     container port **8080**, health check path **/healthz**,
+     CPU **0.25 vCPU** / memory **0.5 GB** (smallest — see budget line-item),
+     environment variables: none in Phase 1 (`DATABASE_URL` + Bedrock config
+     arrive in Phase 2 as env vars/secrets, never baked into the image)
+   - Note the two role ARNs it created and the service URL
+     (`…ecs.us-east-1.on.aws`).
 
-4. **First image** — push to `main` (or re-run the workflow); the deploy job
-   populates ECR. App Runner can't create a service from an empty repository,
-   so do this before step 5.
+4. **Finish GitHub repo settings** (`Settings → Secrets and variables → Actions`):
+   - Variables: `AWS_DEPLOY_ENABLED` = `true`, `AWS_REGION` = `us-east-1`,
+     `ECS_EXECUTION_ROLE_ARN` and `ECS_INFRASTRUCTURE_ROLE_ARN` = the ARNs from step 3
+   - Backfill step 1's PassRole statement with those same two ARNs.
 
-5. **App Runner service** — Console → App Runner → Create service:
-   - Source: **Container registry / Amazon ECR** → `ai-fitness-memory-agent:latest`
-   - Deployment trigger: **Automatic** (this is what makes CI pushes go live)
-   - ECR access role: let the console create `AppRunnerECRAccessRole`
-   - Service name: `ai-fitness-memory-agent` · Port: **8080**
-   - Instance: 0.25 vCPU / 0.5 GB (smallest — see budget in
-     [office-hours/README.md](office-hours/README.md))
-   - Health check: protocol **HTTP**, path **/healthz**
-   - Environment variables: none in Phase 1 (`DATABASE_URL` and Bedrock config
-     arrive in Phase 2 — add them as App Runner **secrets/env vars**, never in the image)
-
-6. **Verify** — open the default `https://….awsapprunner.com` URL: the hello
-   page renders and `/healthz` returns `{"status":"ok"}`. Save the URL in the
-   README (hackathon compliance table) when Milestone 1 lands.
+5. **Verify** — push to `main` (or re-run the workflow): the deploy job pushes
+   the image and the Express action redeploys the service; the hello page
+   renders at the service URL and `/healthz` returns `{"status":"ok"}`. Save
+   the URL in the README (hackathon compliance table) when Milestone 1 lands.
 
 ## Operational notes
 
-- **Rollback:** App Runner console → service → Deployments → redeploy a previous
-  image tag (CI pushes every commit as `:<sha>`).
-- **Pause to save budget:** the service can be paused from the console between
-  work sessions (billing stops for compute; see budget line-item).
+- **Rollback:** re-run the deploy action with a previous `:<sha>` tag (CI
+  pushes every commit by SHA), or redeploy from the ECS console.
+- **Cost shape** (differs from App Runner — see T13 budget): the Fargate task
+  runs continuously (0.25 vCPU / 0.5 GB ≈ $9–10/mo in us-east-1) plus an ALB
+  share (Express Mode shares one ALB across up to 25 of your Express services;
+  with only this service, the full ALB ≈ $16–18/mo). No scale-to-zero. Delete
+  or scale down the service between work sessions if budget demands.
 - **Local run (no Docker needed):** `uvicorn api.main:app --port 8080`
 - **Image is CI-verified:** every push builds the Dockerfile and smoke-tests
   `/healthz` + `/`, so a broken image can't reach `main` unnoticed.

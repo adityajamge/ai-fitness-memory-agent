@@ -1,7 +1,8 @@
 """FastAPI app entrypoint — Phase 1 deploy-early placeholder (T10, ADR-11).
 
-Serves a hello page and a health endpoint so the App Runner pipeline exists
-before any feature code does; every later phase improves this live app.
+Serves a hello page and a health endpoint so the deploy pipeline (ECS Express
+Mode) exists before any feature code does; every later phase improves this
+live app.
 Auth, turns, traces, SSE, and SPA serving arrive in Phase 2+
 (docs/office-hours/02-architecture-overview.md).
 """
@@ -38,7 +39,7 @@ _HELLO = """<!doctype html>
 
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
-    """App Runner HTTP health check target."""
+    """ALB health check target (ECS Express Mode)."""
     return {"status": "ok"}
 
 

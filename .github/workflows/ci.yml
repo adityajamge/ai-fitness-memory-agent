@@ -2,7 +2,8 @@
 # the day-one canaries (vector index, checkpointer) run here on every push and
 # fail hard if the DB is missing (CI env var → REQUIRE_DB semantics in the tests).
 # The Docker image is built and smoke-tested on every push so the deploy artifact
-# can never rot. The deploy job pushes to ECR; App Runner auto-deploys from :latest.
+# can never rot. The deploy job pushes to ECR and deploys the :sha tag to
+# Amazon ECS Express Mode (ADR-13.3 as amended 2026-07-19; see docs/deploy.md).
 
 name: CI
 
@@ -64,7 +65,7 @@ jobs:
           curl -fsS http://localhost:8080/ | grep -i "Memory Agent"
 
   deploy:
-    name: Push image to ECR (App Runner auto-deploys)
+    name: Push to ECR + deploy to ECS Express Mode
     needs: test
     # Gated on a repo variable so CI is green before the one-time AWS setup
     # (docs/deploy.md) is done. Flip AWS_DEPLOY_ENABLED to 'true' to activate.
@@ -83,9 +84,24 @@ jobs:
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push (:latest triggers App Runner auto-deploy)
+      - name: Build and push (:sha = the deployed, rollback-able artifact)
         env:
           IMAGE: ${{ steps.ecr.outputs.registry }}/ai-fitness-memory-agent
         run: |
           docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
           docker push --all-tags "$IMAGE"
+
+      - name: Deploy to ECS Express Mode
+        id: deploy
+        uses: aws-actions/amazon-ecs-deploy-express-service@v1
+        with:
+          service-name: ai-fitness-memory-agent
+          image: ${{ steps.ecr.outputs.registry }}/ai-fitness-memory-agent:${{ github.sha }}
+          execution-role-arn: ${{ vars.ECS_EXECUTION_ROLE_ARN }}
+          infrastructure-role-arn: ${{ vars.ECS_INFRASTRUCTURE_ROLE_ARN }}
+          container-port: "8080"
+          cpu: "256"
+          memory: "512"
+
+      - name: Service URL
+        run: echo "Deployed to ${{ steps.deploy.outputs.endpoint }}"

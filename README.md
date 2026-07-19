@@ -10,7 +10,7 @@ started dropping?"* gets a dated, memory-ID-cited answer, with a **glass-box UI*
 raw evidence rows and the actual SQL + vector queries that produced it.
 
 **Status: Phase 1 (cloud foundations).** Day-one canaries (vector index, checkpointer)
-green against CockroachDB Cloud; CI + App Runner deploy pipeline in place
+green against CockroachDB Cloud; CI + ECS Express Mode deploy pipeline in place
 ([docs/deploy.md](docs/deploy.md)). Built solo with Claude Code; deadline 2026-08-19.
 Execution plan: [docs/implementation-roadmap.md](docs/implementation-roadmap.md).
 
@@ -22,7 +22,8 @@ retraction, and construction of `EvidenceTrace` artifacts that drive the UI. A m
 **LangGraph agent** (Amazon Bedrock by default) is the only natural-language layer — it emits
 typed tool calls; the LLM narrates but never generates SQL and never feeds the glass box.
 Storage is **CockroachDB** (typed JSONB payloads + `VECTOR(512)` embeddings in one
-transactionally consistent store); hosting is a single Docker image on **AWS App Runner**;
+transactionally consistent store); hosting is a single Docker image on **Amazon ECS
+Express Mode** (Fargate + ALB);
 photos/reports live in **S3**. Standard multi-user SaaS — every account starts with empty
 memory. Full design: [docs/office-hours/](docs/office-hours/README.md).
 
@@ -62,7 +63,8 @@ builds + smoke-tests the Docker image. Deployment: [docs/deploy.md](docs/deploy.
 
 - **CockroachDB tools:** Distributed Vector Indexing (runtime), Managed MCP Server
   (AI-assisted development), ccloud CLI (cluster provisioning — recorded)
-- **AWS services:** Amazon Bedrock (LLM, vision, Titan embeddings), Amazon S3, AWS App Runner
+- **AWS services:** Amazon Bedrock (LLM, vision, Titan embeddings), Amazon S3, Amazon ECS
+  (Express Mode)
 
 ## License
 

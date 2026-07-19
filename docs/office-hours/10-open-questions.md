@@ -10,7 +10,7 @@
 | # | Question | Resolution |
 |---|---|---|
 | ~~OQ1~~ | Embedding model + dimensionality | **Bedrock Titan Text Embeddings V2, 512-dim, normalized** (`VECTOR(512)`); unit vectors make L2 ≡ cosine on CockroachDB's Euclidean-only C-SPANN index |
-| ~~OQ2~~ | Hosting target | **AWS App Runner**, single Docker image (FastAPI + built Vite/React SPA); deploys in Milestone 1 with the bare chat |
+| ~~OQ2~~ | Hosting target | **AWS App Runner**, single Docker image (FastAPI + built Vite/React SPA); deploys in Milestone 1 with the bare chat. *Amended 2026-07-19: **Amazon ECS Express Mode** — App Runner closed to new customers 2026-04-30; see ADR-13.3 amendment* |
 | ~~OQ3~~ | Judge sandbox isolation | **Superseded by the production multi-user model:** standard accounts, per-user row scoping, simple email+password auth; no sandbox, no sample-data onboarding. Judges sign up like any user (empty account); deep-history features are demonstrated via the builder's mature account (video / walkthrough) — accepted trade-off |
 | ~~OQ4~~ | Consolidation analytics scope | **Labeled heuristic pattern flags:** daily bucketing (gaps stay missing — no interpolation), `ruptures` PELT changepoints, bounded lag scan (7–35d) over whitelisted series pairs, documented heuristic "pattern strength" score — presented as hypothesis, never causal inference |
 | ~~OQ7~~ | Retraction mechanics | **Typed retraction-condition objects** in InsightPayload ({metric, comparator/direction, window_days, min_count}), evaluated deterministically in the synchronous consolidation pass; prose rendered FROM the object for the UI |

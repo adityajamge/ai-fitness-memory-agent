@@ -1,6 +1,6 @@
-# Single app image (ADR-13.7): FastAPI serving API + (from Phase 6) the built Vite SPA.
-# Deployed to AWS App Runner; CI builds this on every push so it can never rot.
-# Phase 6 adds a node build stage for web/ and copies its dist/ into the image.
+# Single app image (ADR-13.3): FastAPI serving API + (from Phase 6) the built Vite SPA.
+# Deployed to Amazon ECS Express Mode (Fargate + ALB); CI builds this on every push
+# so it can never rot. Phase 6 adds a node build stage for web/ and copies its dist/.
 
 FROM python:3.12-slim
 
@@ -20,5 +20,5 @@ RUN pip install --no-cache-dir .
 USER app
 EXPOSE 8080
 
-# App Runner default port; health check: GET /healthz
+# Container port 8080; ALB health check: GET /healthz
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8080"]

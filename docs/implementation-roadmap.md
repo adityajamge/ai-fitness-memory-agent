@@ -47,20 +47,22 @@
   PostgresSaver compatibility) are cheap to test and catastrophic to discover late. Deploy
   friction is paid once, now — from here on, every phase improves a *live* app (ADR-11).
 - **Related tasks:** **T1** (vector canary), **T2** (PostgresSaver canary), **T10**
-  (Dockerfile + CI + App Runner), **T13** (budget line-item).
+  (Dockerfile + CI + ECS Express Mode deploy — originally App Runner, amended
+  2026-07-19 per ADR-13.3), **T13** (budget line-item).
 - **Deliverables:**
   - CockroachDB Cloud cluster provisioned via **ccloud CLI — screen-recorded** (tool evidence)
   - `VECTOR(512)` canary green against Docker CockroachDB AND once against the real cluster
   - PostgresSaver canary green (or the fallback decision made and recorded in 09-decisions)
   - GitHub Actions CI: lint + pytest with single-node CockroachDB service container
-  - Docker image (FastAPI serving a hello page) deployed to **App Runner** — public URL live
+  - Docker image (FastAPI serving a hello page) deployed to **Amazon ECS Express Mode**
+    (App Runner closed to new customers — ADR-13.3 amendment) — public URL live
   - Budget line-item written into `docs/office-hours/README.md`
 - **Dependencies:** Phase 0 (repo exists).
 - **Definition of Done:** CI green on main; both canaries are permanent tests; hitting the
-  App Runner URL returns the app; ccloud recording saved to evidence folder.
+  ECS Express service URL returns the app; ccloud recording saved to evidence folder.
 - **Demo checkpoint:** open a public URL on your phone; show CI passing with a real
   CockroachDB in the loop; show the ccloud provisioning recording.
-- **Suggested commit milestone:** `feat(infra): cluster, canaries, CI, App Runner deploy-early`
+- **Suggested commit milestone:** `feat(infra): cluster, canaries, CI, ECS Express deploy-early`
 
 ---
 
@@ -223,7 +225,7 @@
 
 | Task | Phase | | Task | Phase |
 |---|---|---|---|---|
-| T1 vector canary | 1 | | T10 Docker/CI/App Runner | 1 |
+| T1 vector canary | 1 | | T10 Docker/CI/ECS Express | 1 |
 | T2 PostgresSaver canary | 1 | | T11 empty states | 6 |
 | T3 payload registry | 2 | | T12 latency profile | 5 |
 | T4 ingestion failure policy | 2 | | T13 budget line-item | 1 |

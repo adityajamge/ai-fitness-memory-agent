@@ -40,10 +40,10 @@ it must also **survive sanitization** ([ADR-7](09-decisions.md#adr-7)).
 - [ ] **Verify the causal story exists in the data** (go/no-go; 13A event-time framing)
 - [ ] Two tools: `aggregate_memories`, `recall_memories`
 - [ ] Simple email+password auth + sessions (ADR-13.15; abuse/spend controls deferred → TODOS)
-- [ ] **Re-derive the budget line-item** (App Runner idle, CockroachDB tier, cached replay
+- [ ] **Re-derive the budget line-item** (Fargate + ALB share — ADR-13.3 amendment, CockroachDB tier, cached replay
       Bedrock cost, live-eval lane) — update README constraint
 - [ ] Bare chat answering the money question
-- [ ] **Hosted deploy on AWS App Runner** (deploy-early — a submittable URL exists from
+- [ ] **Hosted deploy on Amazon ECS Express Mode** (orig. App Runner; ADR-13.3 amendment) (deploy-early — a submittable URL exists from
       Milestone 1 onward)
 
 ## Milestone 2 — The Engine
@@ -62,7 +62,7 @@ it must also **survive sanitization** ([ADR-7](09-decisions.md#adr-7)).
 
 - [ ] Web UI per wireframe v3, built in ranked order (1→8; empty states are rank 4; lineage
       graph first-to-cut) ([07-glass-box-ui.md](07-glass-box-ui.md))
-- [ ] Full app deployed to App Runner (image already flowing since M1)
+- [ ] Full app deployed to ECS Express Mode (image already flowing since M1)
 
 ## Milestone 4 — Submission
 
