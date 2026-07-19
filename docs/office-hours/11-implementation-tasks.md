@@ -39,7 +39,7 @@
 - [ ] **T9 (P1, ~2d / ~3h)** — api — Simple email+password auth + sessions; per-user scoping enforced and tested as a security boundary
   - Surfaced by: D14 builder decision (ADR-13.15) + test gap "user A cannot read user B"
   - Files: `api/auth.py`, `api/tests/test_scoping.py`
-- [ ] **T10 (P1, ~1d / ~2h)** — infra — Dockerfile (FastAPI + built Vite SPA) + App Runner deploy + GitHub Actions CI with single-node CockroachDB service
+- [ ] **T10 (P1, ~1d / ~2h)** — infra — Dockerfile (FastAPI + built Vite SPA) + App Runner deploy + GitHub Actions CI with single-node CockroachDB service 🔶 2026-07-19: code complete (`Dockerfile`, `.dockerignore`, `.github/workflows/ci.yml`, `api/main.py` hello app, [../deploy.md](../deploy.md)); tick when the one-time AWS setup is done and the live URL serves
   - Surfaced by: Arch issue 3 (3A) + test infra (8A); deploy-early rule
   - Files: `Dockerfile`, `.github/workflows/ci.yml` · Verify: live URL serves the bare chat in Milestone 1
 - [ ] **T11 (P2, ~1.5d / ~2h)** — web — Empty-state design for new accounts (timeline, stats, insights, engine pane): inviting, not broken

@@ -1,0 +1,15 @@
+# Keep the build context to exactly what the Dockerfile COPYs.
+.git
+.github
+.gstack
+.env
+.replay-cache
+.pytest_cache
+.ruff_cache
+**/__pycache__
+*.pyc
+data/
+reconstruction/
+docs/
+web/
+**/tests/

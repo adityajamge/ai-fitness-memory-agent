@@ -11,10 +11,12 @@ license = { file = "LICENSE" }
 authors = [{ name = "Aditya Babanrao Jamge" }]
 requires-python = ">=3.10"
 # Runtime dependencies are added phase-by-phase (see docs/implementation-roadmap.md).
-# Still to come: langgraph, pydantic, fastapi, boto3, ruptures.
+# Still to come: langgraph, pydantic, boto3, ruptures.
 dependencies = [
     "psycopg[binary]>=3.2",              # Phase 1 — CockroachDB via Postgres wire protocol
     "langgraph-checkpoint-postgres>=2",  # Phase 1 — PostgresSaver canary (T2, ADR-13.8)
+    "fastapi>=0.115",                    # Phase 1 — deploy-early hello app (T10, ADR-11)
+    "uvicorn[standard]>=0.30",           # Phase 1 — ASGI server for the single container
 ]
 
 [dependency-groups]

@@ -1,0 +1,91 @@
+# CI (T10, ADR-13.8): lint + pytest against a REAL single-node CockroachDB —
+# the day-one canaries (vector index, checkpointer) run here on every push and
+# fail hard if the DB is missing (CI env var → REQUIRE_DB semantics in the tests).
+# The Docker image is built and smoke-tested on every push so the deploy artifact
+# can never rot. The deploy job pushes to ECR; App Runner auto-deploys from :latest.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CRDB_VERSION: v26.2.4 # matches the version the canaries were verified against
+
+jobs:
+  test:
+    name: Lint + tests (real CockroachDB) + image build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # Service containers can't override the image command, and CockroachDB
+      # needs `start-single-node --insecure` — so plain docker run instead.
+      - name: Start single-node CockroachDB
+        run: |
+          docker run -d --name crdb \
+            -p 26257:26257 -p 8081:8080 \
+            cockroachdb/cockroach:${CRDB_VERSION} start-single-node --insecure
+          for i in $(seq 1 30); do
+            curl -fsS "http://localhost:8081/health?ready=1" && break
+            [ "$i" = 30 ] && { echo "CockroachDB never became ready"; docker logs crdb; exit 1; }
+            sleep 1
+          done
+
+      - name: Install
+        run: pip install -e . --group dev
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Tests incl. canaries (fail hard without DB — CI is set)
+        env:
+          DATABASE_URL: postgresql://root@localhost:26257/defaultdb?sslmode=disable
+        run: pytest -v
+
+      - name: Build app image
+        run: docker build -t ai-fitness-memory-agent:ci .
+
+      - name: Smoke-test the image
+        run: |
+          docker run -d --name app -p 8080:8080 ai-fitness-memory-agent:ci
+          for i in $(seq 1 20); do
+            curl -fsS http://localhost:8080/healthz && break
+            [ "$i" = 20 ] && { echo "app never became healthy"; docker logs app; exit 1; }
+            sleep 1
+          done
+          curl -fsS http://localhost:8080/ | grep -i "Memory Agent"
+
+  deploy:
+    name: Push image to ECR (App Runner auto-deploys)
+    needs: test
+    # Gated on a repo variable so CI is green before the one-time AWS setup
+    # (docs/deploy.md) is done. Flip AWS_DEPLOY_ENABLED to 'true' to activate.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'ap-south-1' }}
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push (:latest triggers App Runner auto-deploy)
+        env:
+          IMAGE: ${{ steps.ecr.outputs.registry }}/ai-fitness-memory-agent
+        run: |
+          docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
+          docker push --all-tags "$IMAGE"

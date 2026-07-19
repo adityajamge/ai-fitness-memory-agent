@@ -9,7 +9,9 @@ CockroachDB — then reasons across months of history: *"What changed before my 
 started dropping?"* gets a dated, memory-ID-cited answer, with a **glass-box UI** showing the
 raw evidence rows and the actual SQL + vector queries that produced it.
 
-**Status: Phase 0 (scaffold).** Built solo with Claude Code; deadline 2026-08-19.
+**Status: Phase 1 (cloud foundations).** Day-one canaries (vector index, checkpointer)
+green against CockroachDB Cloud; CI + App Runner deploy pipeline in place
+([docs/deploy.md](docs/deploy.md)). Built solo with Claude Code; deadline 2026-08-19.
 Execution plan: [docs/implementation-roadmap.md](docs/implementation-roadmap.md).
 
 ## Architecture in one paragraph
@@ -45,11 +47,16 @@ re-opening anything.
 ## Development
 
 ```bash
-pip install -e . --group dev   # editable install + pytest/ruff
-pytest                         # test suites arrive with each phase
+pip install -e . --group dev        # editable install + pytest/ruff (needs pip ≥ 25.1)
+pytest                              # canaries skip visibly without a DB; REQUIRE_DB=1 to enforce
+uvicorn api.main:app --port 8080    # run the app locally
 ```
 
 Python ≥ 3.10. Runtime dependencies are added phase-by-phase (see `pyproject.toml`).
+Tests run against a real single-node CockroachDB — start one with
+`docker run -d -p 26257:26257 cockroachdb/cockroach:v26.2.4 start-single-node --insecure`
+(or a native binary; see canary docstrings). CI does the same on every push and also
+builds + smoke-tests the Docker image. Deployment: [docs/deploy.md](docs/deploy.md).
 
 ## Hackathon compliance (evidence lands in later phases)
 
