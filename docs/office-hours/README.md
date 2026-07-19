@@ -44,6 +44,11 @@ flagged the insight when the data arrived.
 
 Assets (approved wireframe v3 PNG + HTML) live in [assets/](assets/).
 
+Implementation-level **engineering deep dives** (canonical references for specific
+subsystems — e.g. the LangGraph-checkpointing-on-CockroachDB compatibility layer) live in
+[../engineering/](../engineering/README.md); day-to-day execution phases in
+[../implementation-roadmap.md](../implementation-roadmap.md).
+
 ## Hard constraints (never violate)
 
 - **Hackathon gates:** public OSS repo (MIT/Apache-2.0 visible), hosted demo URL, <3-min public

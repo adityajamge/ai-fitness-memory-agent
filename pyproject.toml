@@ -11,9 +11,11 @@ license = { file = "LICENSE" }
 authors = [{ name = "Aditya Babanrao Jamge" }]
 requires-python = ">=3.10"
 # Runtime dependencies are added phase-by-phase (see docs/implementation-roadmap.md).
-# Phase 1+: psycopg, sqlalchemy-cockroachdb or raw psycopg, langgraph,
-#           langgraph-checkpoint-postgres, pydantic, fastapi, boto3, ruptures.
-dependencies = []
+# Still to come: langgraph, pydantic, fastapi, boto3, ruptures.
+dependencies = [
+    "psycopg[binary]>=3.2",              # Phase 1 — CockroachDB via Postgres wire protocol
+    "langgraph-checkpoint-postgres>=2",  # Phase 1 — PostgresSaver canary (T2, ADR-13.8)
+]
 
 [dependency-groups]
 dev = [

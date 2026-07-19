@@ -12,12 +12,12 @@
 
 ## Task list
 
-- [ ] **T1 (P1, human: ~0.5d / CC: ~1h)** — engine/db — Day-one canary #1: `VECTOR(512)` index + K-NN ordering on normalized vectors; becomes a permanent CI test
+- [x] **T1 (P1, human: ~0.5d / CC: ~1h)** — engine/db — Day-one canary #1: `VECTOR(512)` index + K-NN ordering on normalized vectors; becomes a permanent CI test ✅ 2026-07-17: green vs local single-node v26.2.4 AND the real Cloud cluster
   - Surfaced by: Step 0 — C-SPANN is preview, Euclidean-only; tier verification (ADR-13.2/13.8)
   - Files: `engine/tests/test_vector_canary.py` · Verify: pytest against single-node CockroachDB Docker AND once against the real cluster
-- [ ] **T2 (P1, ~0.5d / ~1h)** — agent — Day-one canary #2: LangGraph PostgresSaver on CockroachDB (`.setup()`, write/read a checkpoint); fallback = thin hand-rolled checkpointer
+- [x] **T2 (P1, ~0.5d / ~1h)** — agent — Day-one canary #2: LangGraph PostgresSaver on CockroachDB (`.setup()`, write/read a checkpoint); fallback = thin hand-rolled checkpointer ✅ 2026-07-17: stock saver FAILS (Postgres-only read SQL); fallback = thin subclass `agent/checkpointer.py`; green vs local AND Cloud cluster (ADR-13.8 outcome)
   - Surfaced by: Outside voice #10 — unverified compatibility bet (ADR-13.8)
-  - Files: `agent/tests/test_checkpointer_canary.py`
+  - Files: `agent/tests/test_checkpointer_canary.py` · Implementation details: [../engineering/cockroachdb-postgressaver.md](../engineering/cockroachdb-postgressaver.md)
 - [ ] **T3 (P1, ~1d / ~1h)** — engine — Pydantic payload registry per memory type, `extra="allow"`, typed hot-field accessors
   - Surfaced by: Code quality issue 6 (6A) — key-drift prevention (ADR-13.6)
   - Files: `engine/types.py` · Verify: drift-canary test (unknown keys accepted, known keys typed)

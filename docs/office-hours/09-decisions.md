@@ -167,6 +167,17 @@ earlier ADRs or docs.
 8. **Tests run against real single-node CockroachDB Docker** (local + CI) with a day-one
    vector-index canary AND a day-one **LangGraph PostgresSaver-on-CockroachDB canary** (same
    risk class, same gate). Bedrock mocked behind the injected model interface.
+   *Canary outcomes (2026-07-17):* vector canary green. PostgresSaver canary: **stock saver
+   fails on CockroachDB** — its read query uses an unaliased set-returning function and 2-D
+   `bytea` arrays (structurally rejected, cockroachdb #32552). The pre-agreed fallback
+   landed far smaller than feared: `agent/checkpointer.py` `CockroachDBSaver`, a thin
+   subclass rewriting only the read query (jsonb aggregates) + two loader overrides;
+   `.setup()` migrations and all write paths run unmodified. Both canaries green against
+   local single-node v26.2.4 AND the real CockroachDB Cloud cluster.
+   *Engineering deep dive:* the complete investigation, compatibility analysis, debugging
+   timeline, and implementation rationale are documented in
+   [../engineering/cockroachdb-postgressaver.md](../engineering/cockroachdb-postgressaver.md)
+   — the canonical reference for this layer; link there rather than re-explaining it.
 9. **Evals:** extraction golden set (~30 cases, tolerance ranges) + citation-compliance set
    (~15 cases) — run against the **live model** (separate lane from mocked CI), manual
    trigger + pre-demo checklist.
@@ -209,3 +220,5 @@ earlier ADRs or docs.
    rests on no hostile traffic.
 5. LangGraph PostgresSaver works on CockroachDB (day-one canary — same gate class as vector
    indexing; fallback is a thin hand-rolled checkpointer if the canary fails).
+   **Resolved 2026-07-17:** stock saver fails; fallback landed as a thin read-path subclass
+   (`agent/checkpointer.py`), canary green vs local and the real Cloud cluster (ADR-13.8).
