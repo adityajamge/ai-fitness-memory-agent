@@ -17,15 +17,16 @@ push to main ──► GitHub Actions (lint · pytest vs real CockroachDB · ima
 
 ## One-time AWS setup (manual, ~15 min)
 
-Region: **ap-south-1** (Mumbai — same as the CockroachDB Cloud cluster). If App
-Runner is unavailable there on your account, use `ap-southeast-1` and set the
-`AWS_REGION` repo variable to match.
+Region: **us-east-1** (N. Virginia — where the ECR repository lives; App Runner
+must be in the same region as its ECR source). The CockroachDB Cloud cluster
+stays in ap-south-1 — the cross-region app→DB hop adds latency that the T12
+latency profile (Phase 5) should measure and document.
 
-1. **ECR repository** — Console → ECR → Create repository → name
-   `ai-fitness-memory-agent` (private, defaults fine).
+1. **ECR repository** — ✅ created 2026-07-19:
+   `589077667696.dkr.ecr.us-east-1.amazonaws.com/ai-fitness-memory-agent`
 
 2. **IAM user for CI** (push-only) — Console → IAM → Users → Create `ci-deploy`,
-   no console access, attach this inline policy (replace `<ACCOUNT_ID>`):
+   no console access, attach this inline policy:
 
    ```json
    {
@@ -36,7 +37,7 @@ Runner is unavailable there on your account, use `ap-southeast-1` and set the
          "Action": ["ecr:BatchCheckLayerAvailability", "ecr:CompleteLayerUpload",
                      "ecr:InitiateLayerUpload", "ecr:PutImage", "ecr:UploadLayerPart",
                      "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
-         "Resource": "arn:aws:ecr:ap-south-1:<ACCOUNT_ID>:repository/ai-fitness-memory-agent" }
+         "Resource": "arn:aws:ecr:us-east-1:589077667696:repository/ai-fitness-memory-agent" }
      ]
    }
    ```
@@ -45,7 +46,7 @@ Runner is unavailable there on your account, use `ap-southeast-1` and set the
 
 3. **GitHub repo settings** (`Settings → Secrets and variables → Actions`):
    - Secrets: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (from step 2)
-   - Variables: `AWS_DEPLOY_ENABLED` = `true`, `AWS_REGION` = `ap-south-1`
+   - Variables: `AWS_DEPLOY_ENABLED` = `true`, `AWS_REGION` = `us-east-1`
 
 4. **First image** — push to `main` (or re-run the workflow); the deploy job
    populates ECR. App Runner can't create a service from an empty repository,
