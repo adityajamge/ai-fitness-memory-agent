@@ -76,6 +76,15 @@
 
 ## Phase 2 — Memory Write Path *(~3–4 days)*
 
+> **Status 2026-07-20:** T3 ✅ · T4 ✅ · T9 ✅ · T15 ✅ — engine write path, email+password
+> auth with per-user scoping, and embedding backfill implemented; **25 Phase-2 tests green**
+> against real single-node CockroachDB (registry drift canary, ingestion failure matrix,
+> auth, cross-user scoping) + existing canaries. Full schema (`memories`, `users`, `sessions`,
+> `user_profile`, `turns`, `evidence_traces`) is live; `turns`/`evidence_traces` are created
+> but written in Phase 6 (T7), photo/S3 vision ingestion is Phase 5 — both intentional scope
+> boundaries. Transaction semantics + never-lose-input guarantee documented in
+> [engineering/ingestion-transaction-boundaries.md](engineering/ingestion-transaction-boundaries.md).
+
 - **Objective:** talking to the app creates trustworthy, typed, never-lost memories.
 - **Why this phase exists:** ingestion is half the product (premise 3). Everything downstream
   — retrieval, insights, traces, replay — consumes what this phase writes, so its contracts
