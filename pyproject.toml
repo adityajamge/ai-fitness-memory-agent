@@ -11,18 +11,21 @@ license = { file = "LICENSE" }
 authors = [{ name = "Aditya Babanrao Jamge" }]
 requires-python = ">=3.10"
 # Runtime dependencies are added phase-by-phase (see docs/implementation-roadmap.md).
-# Still to come: langgraph, pydantic, boto3, ruptures.
+# Still to come: langgraph, ruptures (Phase 5 consolidation).
 dependencies = [
     "psycopg[binary]>=3.2",              # Phase 1 — CockroachDB via Postgres wire protocol
     "langgraph-checkpoint-postgres>=2",  # Phase 1 — PostgresSaver canary (T2, ADR-13.8)
     "fastapi>=0.115",                    # Phase 1 — deploy-early hello app (T10, ADR-11)
     "uvicorn[standard]>=0.30",           # Phase 1 — ASGI server for the single container
+    "pydantic>=2",                       # Phase 2 — payload type registry (T3, ADR-13.6)
+    "boto3>=1.34",                       # Phase 2 — Bedrock extraction + Titan V2 embeddings
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
+    "httpx>=0.27",  # Phase 2 — FastAPI TestClient (auth + scoping tests)
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -39,3 +42,8 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI's `param: T = Depends(...)` is the framework's required idiom, not a mutable
+# default-arg bug — B008 is a false positive here.
+"api/routers/*" = ["B008"]

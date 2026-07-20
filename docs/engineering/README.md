@@ -18,3 +18,4 @@ Conventions:
 | Document | Subject |
 |---|---|
 | [cockroachdb-postgressaver.md](cockroachdb-postgressaver.md) | LangGraph checkpointing on CockroachDB: why stock `PostgresSaver` fails, the T2 canary investigation, and the `CockroachDBSaver` compatibility layer (`agent/checkpointer.py`) |
+| [ingestion-transaction-boundaries.md](ingestion-transaction-boundaries.md) | The Phase 2 write path (`engine/ingestion.py`): transaction boundaries, the never-lose-input guarantee, and how partial extraction / validation / embedding failures interact with it (ADR-13.5) |
