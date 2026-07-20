@@ -59,6 +59,30 @@ subsystems — e.g. the LangGraph-checkpointing-on-CockroachDB compatibility lay
 - **Model independence:** the memory layer has no LLM/provider dependence. CockroachDB-native
   by design — that's the point, not lock-in.
 - **No infrastructure built solely for completeness** (builder's explicit rule).
-- **Budget:** ~$50–100 total for 40 days — re-derived line-item in Milestone 1. Abuse/spend
+- **Budget:** ~$50–100 total — line-item re-derived 2026-07-19 (T13), see
+  [Budget line-item](#budget-line-item-t13-re-derived-2026-07-19) below. Abuse/spend
   controls are explicitly out of scope this iteration ([ADR-13.15](09-decisions.md#adr-13));
   accepted risk, monitored via billing alerts.
+
+## Budget line-item (T13, re-derived 2026-07-19)
+
+Window: 2026-07-19 → submission 2026-08-19 (~31 days). Reflects the locked architecture
+after the ADR-13.3 amendment (ECS Express Mode replaced App Runner — the cost shape moved
+from per-request idle to an always-on Fargate task + ALB).
+
+| Item | Basis | Est. (window) |
+|---|---|---|
+| CockroachDB Cloud Basic (ap-south-1) | $15/mo free credit = 50M RUs + 10 GiB storage; demo scale sits well inside; overage $0.20/M RU, $0.50/GiB-mo | **$0** (monitor console) |
+| ECS Fargate task (0.25 vCPU / 0.5 GB, 24/7, us-east-1) | ≈ $0.0123/hr ≈ $0.30/day | **~$9** |
+| Application Load Balancer (Express Mode; sole service, so full ALB) | $0.0225/hr + LCUs (negligible at demo traffic) | **~$17** |
+| ECR + S3 | image tags ($0.10/GiB-mo) + meal photos/report files | **<$2** |
+| Bedrock — replay, one full pass | extraction over 6–12 months of history; **re-runs $0 by design** (T8 extraction cache) | **$5–15** |
+| Bedrock — dev/demo turns + live eval lanes | ~45 eval cases × a few runs, demo takes, vision extraction; Titan V2 embeddings negligible (512-dim, tiny inputs) | **$10–20** |
+| **Total** | | **≈ $43–63** |
+
+Within the $50–100 envelope with margin. Biggest lever if it tightens: the fixed ~$26/mo
+ECS+ALB block — the Express service can be deleted/recreated between work sessions in
+minutes (pipeline is fully automated, [../deploy.md](../deploy.md)). Second lever: the
+replay extraction cache (T8) makes prompt-iteration reruns free. Assumption unchanged from
+ADR-13: no hostile traffic (no abuse controls this iteration); billing alerts are the
+backstop.

@@ -39,7 +39,7 @@
 - [ ] **T9 (P1, ~2d / ~3h)** — api — Simple email+password auth + sessions; per-user scoping enforced and tested as a security boundary
   - Surfaced by: D14 builder decision (ADR-13.15) + test gap "user A cannot read user B"
   - Files: `api/auth.py`, `api/tests/test_scoping.py`
-- [ ] **T10 (P1, ~1d / ~2h)** — infra — Dockerfile (FastAPI + built Vite SPA) + **ECS Express Mode** deploy (orig. App Runner — closed to new customers; ADR-13.3 amendment) + GitHub Actions CI with single-node CockroachDB service 🔶 2026-07-19: code complete (`Dockerfile`, `.dockerignore`, `.github/workflows/ci.yml`, `api/main.py` hello app, [../deploy.md](../deploy.md)); tick when the one-time AWS setup is done and the live URL serves
+- [x] **T10 (P1, ~1d / ~2h)** — infra — Dockerfile (FastAPI + built Vite SPA) + **ECS Express Mode** deploy (orig. App Runner — closed to new customers; ADR-13.3 amendment) + GitHub Actions CI with single-node CockroachDB service ✅ 2026-07-19: live and verified — push→CI→ECR→Express pipeline exercised end-to-end; URL in [../deploy.md](../deploy.md) (Phase 1 serves the hello page; "bare chat" beat lands with Milestone 1)
   - Surfaced by: Arch issue 3 (3A) + test infra (8A); deploy-early rule
   - Files: `Dockerfile`, `.github/workflows/ci.yml` · Verify: live URL serves the bare chat in Milestone 1
 - [ ] **T11 (P2, ~1.5d / ~2h)** — web — Empty-state design for new accounts (timeline, stats, insights, engine pane): inviting, not broken
@@ -48,7 +48,7 @@
 - [ ] **T12 (P2, ~1d / ~1.5h)** — api — Measure + document end-to-end turn latency (ingest / query / both); receipt < 3s perceived target
   - Surfaced by: Outside voice #13 — only consolidation was budgeted
   - Files: `docs/latency.md`
-- [ ] **T13 (P2, ~0.5d / ~30min)** — docs — Re-derive the budget line-item (Fargate + ALB share per ADR-13.3 amendment, CockroachDB tier, cached replay Bedrock cost, live eval lane)
+- [x] **T13 (P2, ~0.5d / ~30min)** — docs — Re-derive the budget line-item (Fargate + ALB share per ADR-13.3 amendment, CockroachDB tier, cached replay Bedrock cost, live eval lane) ✅ 2026-07-19: ≈$43–63 for the remaining window, inside the $50–100 envelope — table in [README.md → Budget line-item](README.md#budget-line-item-t13-re-derived-2026-07-19)
   - Surfaced by: Outside voice #16 — $50–100 predates the locked choices
   - Files: `docs/office-hours/README.md`
 - [ ] **T14 (P2, ~2d / ~3h)** — evals — Live-model eval lane: extraction golden set (~30) + citation compliance (~15), separate from mocked CI

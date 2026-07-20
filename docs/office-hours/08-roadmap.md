@@ -21,14 +21,16 @@ it must also **survive sanitization** ([ADR-7](09-decisions.md#adr-7)).
 
 ## Milestone 1 — The Spine (weekend-scale)
 
-- [ ] `git init`, repo scaffold (monorepo `engine/ agent/ api/ web/ cli/`, one Dockerfile),
-      MIT/Apache-2.0 license visible
-- [ ] ccloud CLI: provision CockroachDB Cloud cluster — **screen-record it** (tool evidence)
-- [ ] **Day-one canary #1: vector indexing** — `VECTOR(512)` index on the chosen tier, assert
+- [x] `git init`, repo scaffold (monorepo `engine/ agent/ api/ web/ cli/`, one Dockerfile),
+      MIT/Apache-2.0 license visible ✅ 2026-07-16
+- [x] ccloud CLI: provision CockroachDB Cloud cluster — **screen-record it** (tool evidence)
+      ✅ cluster provisioned 2026-07-17; recording still to be saved to the evidence folder
+- [x] **Day-one canary #1: vector indexing** — `VECTOR(512)` index on the chosen tier, assert
       K-NN ordering on normalized vectors; verify tier/budget limits; canary becomes a
-      permanent CI test (ADR-13.8)
-- [ ] **Day-one canary #2: LangGraph PostgresSaver on CockroachDB** — `.setup()`, write/read
-      a checkpoint; fallback: thin hand-rolled checkpointer (ADR-13.8)
+      permanent CI test (ADR-13.8) ✅ 2026-07-17 (green vs local + Cloud cluster)
+- [x] **Day-one canary #2: LangGraph PostgresSaver on CockroachDB** — `.setup()`, write/read
+      a checkpoint; fallback: thin hand-rolled checkpointer (ADR-13.8) ✅ 2026-07-17 — stock
+      saver fails; thin subclass landed ([../engineering/cockroachdb-postgressaver.md](../engineering/cockroachdb-postgressaver.md))
 - [ ] `memories` + `users`/`turns`/`evidence_traces` tables, vector/inverted/secondary
       indexes ([04-database-design.md](04-database-design.md))
 - [ ] Pydantic payload registry `engine/types.py` (ADR-13.6)
@@ -40,11 +42,13 @@ it must also **survive sanitization** ([ADR-7](09-decisions.md#adr-7)).
 - [ ] **Verify the causal story exists in the data** (go/no-go; 13A event-time framing)
 - [ ] Two tools: `aggregate_memories`, `recall_memories`
 - [ ] Simple email+password auth + sessions (ADR-13.15; abuse/spend controls deferred → TODOS)
-- [ ] **Re-derive the budget line-item** (Fargate + ALB share — ADR-13.3 amendment, CockroachDB tier, cached replay
-      Bedrock cost, live-eval lane) — update README constraint
+- [x] **Re-derive the budget line-item** (Fargate + ALB share — ADR-13.3 amendment, CockroachDB tier, cached replay
+      Bedrock cost, live-eval lane) — update README constraint ✅ 2026-07-19: ≈$43–63,
+      table in [README.md](README.md#budget-line-item-t13-re-derived-2026-07-19)
 - [ ] Bare chat answering the money question
-- [ ] **Hosted deploy on Amazon ECS Express Mode** (orig. App Runner; ADR-13.3 amendment) (deploy-early — a submittable URL exists from
-      Milestone 1 onward)
+- [x] **Hosted deploy on Amazon ECS Express Mode** (orig. App Runner; ADR-13.3 amendment) (deploy-early — a submittable URL exists from
+      Milestone 1 onward) ✅ 2026-07-19 — live, CI→ECR→Express pipeline verified end-to-end
+      (URL in [../deploy.md](../deploy.md))
 
 ## Milestone 2 — The Engine
 

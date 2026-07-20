@@ -9,10 +9,18 @@ CockroachDB — then reasons across months of history: *"What changed before my 
 started dropping?"* gets a dated, memory-ID-cited answer, with a **glass-box UI** showing the
 raw evidence rows and the actual SQL + vector queries that produced it.
 
-**Status: Phase 1 (cloud foundations).** Day-one canaries (vector index, checkpointer)
-green against CockroachDB Cloud; CI + ECS Express Mode deploy pipeline in place
+**Status: Phase 1 — deployment complete ✅ (2026-07-19).** Day-one canaries (vector index,
+checkpointer) green against CockroachDB Cloud; CI/CD live end-to-end: every push to `main`
+tests against real CockroachDB, builds the image, and deploys to ECS Express Mode
 ([docs/deploy.md](docs/deploy.md)). Built solo with Claude Code; deadline 2026-08-19.
 Execution plan: [docs/implementation-roadmap.md](docs/implementation-roadmap.md).
+
+## Live deployment
+
+- **Application:** https://ai-2e921ede8718444985c5b24e7fb23497.ecs.us-east-1.on.aws
+  (Phase 1 hello page — the product lands here phase by phase)
+- **Health check:** [/healthz](https://ai-2e921ede8718444985c5b24e7fb23497.ecs.us-east-1.on.aws/healthz)
+- **API docs (FastAPI):** [/docs](https://ai-2e921ede8718444985c5b24e7fb23497.ecs.us-east-1.on.aws/docs)
 
 ## Architecture in one paragraph
 

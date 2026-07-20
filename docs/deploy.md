@@ -1,5 +1,12 @@
 # Deployment — Amazon ECS Express Mode via ECR (T10, ADR-13.3 as amended / ADR-11 deploy-early)
 
+> **Status: VERIFIED IN PRODUCTION — last verified 2026-07-19.**
+> Current target: Amazon ECS Express Mode (originally App Runner; ADR-13.3 amendment).
+> Live URL: <https://ai-2e921ede8718444985c5b24e7fb23497.ecs.us-east-1.on.aws>
+> (health: `/healthz` → `{"status":"ok"}`). The full pipeline below — push to `main` →
+> CI tests vs real CockroachDB → image build → ECR → Express deploy — has been exercised
+> end-to-end; this guide is tested, not aspirational.
+
 One Docker image (FastAPI; the built Vite SPA joins it in Phase 6), hosted on
 **Amazon ECS Express Mode** (Fargate + shared ALB with a managed HTTPS URL),
 delivered by CI: every push to `main` that passes tests is pushed to ECR and
@@ -28,14 +35,13 @@ service must be in the same region). The CockroachDB Cloud cluster stays in
 ap-south-1 — the cross-region app→DB hop adds latency that the T12 latency
 profile (Phase 5) should measure and document.
 
-## One-time AWS setup
+## One-time AWS setup — ✅ ALL COMPLETED 2026-07-19
 
-Already done (2026-07-19): ✅ ECR repository
-(`589077667696.dkr.ecr.us-east-1.amazonaws.com/ai-fitness-memory-agent`),
-✅ IAM user `ci-deploy` with the ECR push policy, ✅ GitHub secrets
-(`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`).
-
-Remaining steps, in order:
+Everything below is done: ECR repository
+(`589077667696.dkr.ecr.us-east-1.amazonaws.com/ai-fitness-memory-agent`), IAM user
+`ci-deploy` (ECR push + ECS Express + PassRole), GitHub secrets and variables, the
+Express service, and the first CI-driven deploy. The steps are kept for
+reproducibility (e.g. recreating the stack in another region):
 
 1. **Extend the `ci-deploy` IAM policy** so CI can also deploy the Express
    service (add these statements alongside the existing ECR ones; the PassRole

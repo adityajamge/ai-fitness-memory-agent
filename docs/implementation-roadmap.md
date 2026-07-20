@@ -42,6 +42,14 @@
 
 ## Phase 1 — Cloud Foundations, Canaries & Deploy-Early *(~2–3 days)*
 
+> **Status 2026-07-19:** T1 ✅ · T2 ✅ (checkpointer fallback landed — see
+> [engineering/cockroachdb-postgressaver.md](engineering/cockroachdb-postgressaver.md)) ·
+> T10 ✅ **live** ([deploy.md](deploy.md) has the URL; CI→ECR→ECS Express verified
+> end-to-end) · T13 ✅ (≈$43–63, inside envelope —
+> [budget line-item](office-hours/README.md#budget-line-item-t13-re-derived-2026-07-19)).
+> **Sole remaining item: the ccloud recording** → [docs/evidence/](evidence/README.md);
+> then the phase is formally complete.
+
 - **Objective:** every external dependency proven or disproven in week one; a live URL exists.
 - **Why this phase exists:** the two riskiest bets (CockroachDB vector indexing on your tier,
   PostgresSaver compatibility) are cheap to test and catastrophic to discover late. Deploy
