@@ -18,10 +18,11 @@
 - [x] **T2 (P1, ~0.5d / ~1h)** — agent — Day-one canary #2: LangGraph PostgresSaver on CockroachDB (`.setup()`, write/read a checkpoint); fallback = thin hand-rolled checkpointer ✅ 2026-07-17: stock saver FAILS (Postgres-only read SQL); fallback = thin subclass `agent/checkpointer.py`; green vs local AND Cloud cluster (ADR-13.8 outcome)
   - Surfaced by: Outside voice #10 — unverified compatibility bet (ADR-13.8)
   - Files: `agent/tests/test_checkpointer_canary.py` · Implementation details: [../engineering/cockroachdb-postgressaver.md](../engineering/cockroachdb-postgressaver.md)
-- [ ] **T3 (P1, ~1d / ~1h)** — engine — Pydantic payload registry per memory type, `extra="allow"`, typed hot-field accessors
+- [x] **T3 (P1, ~1d / ~1h)** — engine — Pydantic payload registry per memory type, `extra="allow"`, typed hot fields ✅ 2026-07-20: 9 types registered; drift canary green (`engine/tests/test_types.py`)
   - Surfaced by: Code quality issue 6 (6A) — key-drift prevention (ADR-13.6)
   - Files: `engine/types.py` · Verify: drift-canary test (unknown keys accepted, known keys typed)
-- [ ] **T4 (P1, ~1d / ~1.5h)** — engine — Ingestion failure policy: success-direct, note-on-failure, supersede-on-retry; nullable embeddings
+  - Note: hot fields are plain Pydantic attributes on the validated model — no separate accessor methods were needed
+- [x] **T4 (P1, ~1d / ~1.5h)** — engine — Ingestion failure policy: success-direct, note-on-failure, supersede-on-retry; nullable embeddings ✅ 2026-07-20: failure matrix of [../engineering/ingestion-transaction-boundaries.md](../engineering/ingestion-transaction-boundaries.md) §9 implemented and tested; deviations recorded in that doc's §13 (all closed: D3+D1 2026-07-21, D2 2026-07-22)
   - Surfaced by: Arch issue 5 (5A) + outside voice #6 (16A → ADR-13.5)
   - Files: `engine/ingestion.py` · Verify: extraction-failure fixture → note persists, receipt states "parsing incomplete"
 - [ ] **T5 (P1, ~1.5d / ~2h)** — engine — Typed retraction-condition schema + deterministic evaluator in the consolidation pass
@@ -36,9 +37,10 @@
 - [ ] **T8 (P1, ~2d / ~3h)** — cli — Replay CLI: extraction-output cache (re-runs never re-call Bedrock), small-batch inserts, idempotent resume
   - Surfaced by: Outside voice #7 (replay = dominant cost) + Step 0 vector-batch footgun
   - Files: `cli/replay.py` · Verify: interrupted run resumes without duplicates; second run makes zero model calls
-- [ ] **T9 (P1, ~2d / ~3h)** — api — Simple email+password auth + sessions; per-user scoping enforced and tested as a security boundary
+- [x] **T9 (P1, ~2d / ~3h)** — api — Simple email+password auth + sessions; per-user scoping enforced and tested as a security boundary ✅ 2026-07-20: scrypt hashing, opaque HttpOnly session cookie, scoping enforced in every `engine/repository.py` query
   - Surfaced by: D14 builder decision (ADR-13.15) + test gap "user A cannot read user B"
-  - Files: `api/auth.py`, `api/tests/test_scoping.py`
+  - Files: `api/auth.py` (primitives), `api/routers/auth.py` (routes), `api/deps.py` (`get_current_user` boundary), `api/tests/test_scoping.py`
+  - Note: a cross-user read returns **404**, not 403 — existence is not probeable (see [12-test-plan.md](12-test-plan.md) failure-modes table)
 - [x] **T10 (P1, ~1d / ~2h)** — infra — Dockerfile (FastAPI + built Vite SPA) + **ECS Express Mode** deploy (orig. App Runner — closed to new customers; ADR-13.3 amendment) + GitHub Actions CI with single-node CockroachDB service ✅ 2026-07-19: live and verified — push→CI→ECR→Express pipeline exercised end-to-end; URL in [../deploy.md](../deploy.md) (Phase 1 serves the hello page; "bare chat" beat lands with Milestone 1)
   - Surfaced by: Arch issue 3 (3A) + test infra (8A); deploy-early rule
   - Files: `Dockerfile`, `.github/workflows/ci.yml` · Verify: live URL serves the bare chat in Milestone 1
@@ -54,9 +56,10 @@
 - [ ] **T14 (P2, ~2d / ~3h)** — evals — Live-model eval lane: extraction golden set (~30) + citation compliance (~15), separate from mocked CI
   - Surfaced by: Test issue 9 (9A) + outside voice #14 — an eval against a mock tests the fixture
   - Files: `evals/extraction.py`, `evals/citation.py`
-- [ ] **T15 (P2, ~0.5d / ~1h)** — engine — Embedding backfill trigger: opportunistic on next ingest + manual CLI command
+- [x] **T15 (P2, ~0.5d / ~1h)** — engine — Embedding backfill trigger: opportunistic on next ingest + manual CLI command ✅ 2026-07-20: `IngestionService.backfill_embeddings` + post-commit opportunistic sweep + `python -m cli.backfill`
   - Surfaced by: Outside voice #12 — backfill had no execution home (no scheduler exists by design)
   - Files: `engine/ingestion.py`, `cli/backfill.py`
+  - Test gap closed 2026-07-22: opportunistic half in `engine/tests/test_ingestion.py`, CLI entry point in `cli/tests/test_backfill.py` (page draining, idempotency, embed-outage termination, user discovery, `--user`/`--all`/argparse)
 - [ ] **T16 (P3, ~0.5d / ~1h)** — api/web — Batch-fetch evidence rows by ID (`WHERE id = ANY(...)`); in-process cache for timeline/stats queries
   - Surfaced by: Performance advisory notes
   - Files: `api/evidence.py`

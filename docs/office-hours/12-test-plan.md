@@ -8,6 +8,12 @@
 
 ## Coverage map (all paths are planned-GAPs until implemented)
 
+> **Implemented as of 2026-07-22 (Phase 2):** the `engine/ingestion` block except photo/S3
+> (Phase 5), the whole `engine/types` block, both canaries, the signup/scoping user flows,
+> the Bedrock-provider empty-result contract (D1), the CLI backfill, and the reprocess
+> endpoint (D2) — **56 Phase-2 tests + 2 canaries = 58 collected**. Everything else below
+> is still a planned gap.
+
 ```
 CODE PATHS                                               USER FLOWS
 [+] engine/ingestion                                     [+] Signup → first log
@@ -19,10 +25,10 @@ CODE PATHS                                               USER FLOWS
   ├── photo → S3 → vision extraction                      ├── [→E2E] money question → cited answer
   ├── S3 failure → turn still persists                    │        → chips resolve → trace panel
   ├── embedding fails → NULL embedding row                ├── "protein in June" → aggregate matches
-  └── backfill (next-ingest + CLI) re-embeds              │        known account numbers
+  └── backfill (next-ingest + CLI) re-embeds ✓            │        known account numbers
 [+] engine/types (6A registry)                            [+] Interaction edges
   ├── per-type validation accepts extra keys              ├── double-submit same meal (deliberate,
-  └── typed hot-field accessors (drift canary)            │        defined behavior)
+  └── typed hot fields coerce/reject (drift canary)       │        defined behavior)
 [+] engine/retrieval                                      ├── [→E2E] slow Bedrock (10s) → UI state
   ├── aggregate: sum/avg, day/week grouping,              ├── session expiry mid-conversation
   │        type+date filters, EMPTY RESULT, tz edges      └── [→E2E] user A cannot read user B's
@@ -72,7 +78,7 @@ TOTAL: 33 paths  |  E2E: 4 (Playwright)  |  EVAL: 2 (live-model lane)
 | Consolidation | scan exceeds budget | yes | defer to on-demand | nothing (by design; insight arrives later) |
 | Trace persistence | turn-commit failure | yes | single transaction (13.14) | turn retriable, never half-recorded |
 | Citation | model cites bad ID | yes | validation flag | visible flag in UI |
-| Scoping | cross-user access attempt | yes (security) | denied at query layer | 403 |
+| Scoping | cross-user access attempt | yes (security) | denied at query layer | 404 (indistinguishable from "not found" — existence is not probeable) |
 | Replay | interrupt mid-run | yes | idempotent resume | resume command |
 | Budget | hostile usage exhausts Bedrock spend | no | none (deferred, ADR-13.15) | model-call errors → note-fallback (non-silent) |
 

@@ -59,8 +59,16 @@ def _meal_provider() -> FakeModelProvider:
 
 
 @pytest.fixture()
-def client():
+def app_provider() -> FakeModelProvider:
+    """The app's injected provider. Tests that need to flip failure modes between calls
+    (e.g. fail an ingest to create a note, then reprocess it successfully) request this
+    alongside `client` and mutate its attributes — the fake is mutable by design."""
+    return _meal_provider()
+
+
+@pytest.fixture()
+def client(app_provider):
     _require_db()
-    app = create_app(provider=_meal_provider())
+    app = create_app(provider=app_provider)
     with TestClient(app) as test_client:
         yield test_client

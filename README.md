@@ -9,16 +9,20 @@ CockroachDB — then reasons across months of history: *"What changed before my 
 started dropping?"* gets a dated, memory-ID-cited answer, with a **glass-box UI** showing the
 raw evidence rows and the actual SQL + vector queries that produced it.
 
-**Status: Phase 1 — deployment complete ✅ (2026-07-19).** Day-one canaries (vector index,
-checkpointer) green against CockroachDB Cloud; CI/CD live end-to-end: every push to `main`
-tests against real CockroachDB, builds the image, and deploys to ECS Express Mode
-([docs/deploy.md](docs/deploy.md)). Built solo with Claude Code; deadline 2026-08-19.
-Execution plan: [docs/implementation-roadmap.md](docs/implementation-roadmap.md).
+**Status: Phase 2 — memory write path complete ✅ (2026-07-20).** Signing up and logging a
+meal creates typed, embedded, never-lost memories in CockroachDB (`POST /api/auth/signup`,
+`POST /api/ingest`), behind per-user scoping that is tested as a security boundary. Phase 1
+before it: day-one canaries (vector index, checkpointer) green against CockroachDB Cloud and
+CI/CD live end-to-end — every push to `main` tests against real CockroachDB, builds the image,
+and deploys to ECS Express Mode ([docs/deploy.md](docs/deploy.md)). Retrieval and the agent
+land in Phase 3; the glass-box UI in Phase 6. Built solo with Claude Code; deadline
+2026-08-19. Execution plan: [docs/implementation-roadmap.md](docs/implementation-roadmap.md).
 
 ## Live deployment
 
 - **Application:** https://ai-2e921ede8718444985c5b24e7fb23497.ecs.us-east-1.on.aws
-  (Phase 1 hello page — the product lands here phase by phase)
+  (status page — the product lands here phase by phase; the Phase-2 write-path routes need
+  the runtime configuration in [docs/deploy.md → Runtime configuration](docs/deploy.md#runtime-configuration-phase-2-onward))
 - **Health check:** [/healthz](https://ai-2e921ede8718444985c5b24e7fb23497.ecs.us-east-1.on.aws/healthz)
 - **API docs (FastAPI):** [/docs](https://ai-2e921ede8718444985c5b24e7fb23497.ecs.us-east-1.on.aws/docs)
 
@@ -42,7 +46,7 @@ engine/     Memory Engine package (deterministic core)     → Phase 2+
 agent/      LangGraph agent: planner, tools, narration     → Phase 3
 api/        FastAPI app: auth, turns, traces, SSE, SPA     → Phase 2+
 web/        Vite + React glass-box UI                      → Phase 6
-cli/        Replay (seed reconstruction) + backfill tools  → Phase 4
+cli/        migrate + embedding backfill → Phase 2; replay → Phase 4
 evals/      Live-model eval suites                         → Phase 7
 docs/       Canonical design docs (source of truth)
   office-hours/            Architecture, ADRs, task backlog, test plan

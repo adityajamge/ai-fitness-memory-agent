@@ -79,6 +79,20 @@ def test_note_type_routes_and_persists(db, user_id):
     assert row["type"] == "note"
 
 
+def test_contentless_turn_is_a_noop_not_a_note(db, user_id):
+    """D1: a provider-affirmed contentless turn ("thanks!") writes nothing.
+
+    The counterpart — content the provider could not type — raises ExtractionError and is
+    covered by test_extraction_failure_persists_note below. Together they are the whole
+    empty-result contract as the engine sees it."""
+    svc = _service(db, FakeModelProvider([]))  # empty == affirmed contentless
+    receipt = svc.ingest_text(user_id, "thanks!")
+
+    assert receipt.parse_status == "ok"
+    assert receipt.message == "nothing to log"
+    assert receipt.created == []
+
+
 def test_extraction_failure_persists_note(db, user_id):
     """16A: extraction fails -> note persists, receipt 'saved — parsing incomplete'."""
     provider = FakeModelProvider(extract_error=True)
@@ -172,6 +186,96 @@ def test_reprocess_still_failing_leaves_note_active(db, user_id):
     assert reprocessed.parse_status == "incomplete"
     assert reprocessed.created == []
     assert _fetch(db, user_id, note_id)["status"] == "active"
+
+
+def test_replay_note_fallback_stays_reconstructed(db, user_id):
+    """D3: a replay turn whose extraction fails must persist a *reconstructed* note.
+
+    Mislabelling it 'live' would claim we observed something we actually inferred from old
+    records — the exact honesty property ADR-13.10 protects. Guards the T8 replay path
+    (03-memory-engine.md §2) before it exists.
+    """
+    svc = _service(db, FakeModelProvider(extract_error=True))
+    receipt = svc.ingest_text(
+        user_id,
+        "May 12: rough notes, high protein day",
+        source="replay",
+        provenance="reconstructed",
+    )
+
+    assert receipt.parse_status == "incomplete"
+    row = _fetch(db, user_id, receipt.created[0].id)
+    assert row["type"] == "note"
+    assert row["provenance"] == "reconstructed"
+    assert row["source"] == "replay"
+
+
+def test_validation_failure_during_replay_stays_reconstructed(db, user_id):
+    """The other note path (stage-B validation failure) must preserve origin too."""
+    bad = ExtractedEvent(
+        type="body_scan",
+        event_time=datetime(2026, 5, 12, 7, 0, tzinfo=timezone.utc),
+        tz="Asia/Kolkata",
+        confidence=0.4,
+        summary="body scan",
+        payload={"body_fat_pct": "not-a-number"},
+    )
+    receipt = _service(db, FakeModelProvider([bad])).ingest_text(
+        user_id, "May 12 scan", source="replay", provenance="reconstructed"
+    )
+    row = _fetch(db, user_id, receipt.created[0].id)
+    assert row["type"] == "note"
+    assert row["provenance"] == "reconstructed"
+    assert row["source"] == "replay"
+
+
+def test_reprocess_reconstructed_note_yields_reconstructed_memories(db, user_id):
+    """D3: upgrading a parse is not a change of origin — the typed events a reconstructed
+    note becomes are themselves reconstructed, and the superseded note keeps its origin."""
+    note_receipt = _service(db, FakeModelProvider(extract_error=True)).ingest_text(
+        user_id, "May 12: 250g curd, 3 eggs", source="replay", provenance="reconstructed"
+    )
+    note_id = note_receipt.created[0].id
+
+    reprocessed = _service(db, FakeModelProvider([_meal_event()])).reprocess_note(user_id, note_id)
+    assert reprocessed.parse_status == "ok"
+    assert reprocessed.superseded_note_id == note_id
+
+    typed = _fetch(db, user_id, reprocessed.created[0].id)
+    assert typed["type"] == "meal"
+    assert typed["provenance"] == "reconstructed"
+    assert typed["source"] == "replay"
+
+    note_row = _fetch(db, user_id, note_id)
+    assert note_row["status"] == "superseded"
+    assert note_row["provenance"] == "reconstructed"
+
+
+def test_reprocess_live_note_stays_live(db, user_id):
+    """The default path is unchanged: a live note upgrades into live typed memories."""
+    note_receipt = _service(db, FakeModelProvider(extract_error=True)).ingest_text(
+        user_id, "250g curd, 3 eggs"
+    )
+    reprocessed = _service(db, FakeModelProvider([_meal_event()])).reprocess_note(
+        user_id, note_receipt.created[0].id
+    )
+    typed = _fetch(db, user_id, reprocessed.created[0].id)
+    assert typed["provenance"] == "live"
+    assert typed["source"] == "chat"
+
+
+def test_reprocess_is_scoped_to_owner(db, user_id):
+    """A note is only reprocessable by its owner — the repository lookup is user-scoped."""
+    import uuid
+
+    note_receipt = _service(db, FakeModelProvider(extract_error=True)).ingest_text(
+        user_id, "unparseable blob"
+    )
+    svc = _service(db, FakeModelProvider([_meal_event()]))
+    with pytest.raises(ValueError):
+        svc.reprocess_note(uuid.uuid4(), note_receipt.created[0].id)
+    # Untouched for the real owner.
+    assert _fetch(db, user_id, note_receipt.created[0].id)["status"] == "active"
 
 
 def test_cross_user_get_returns_none(db, user_id):

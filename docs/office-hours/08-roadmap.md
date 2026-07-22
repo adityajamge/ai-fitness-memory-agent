@@ -31,17 +31,24 @@ it must also **survive sanitization** ([ADR-7](09-decisions.md#adr-7)).
 - [x] **Day-one canary #2: LangGraph PostgresSaver on CockroachDB** — `.setup()`, write/read
       a checkpoint; fallback: thin hand-rolled checkpointer (ADR-13.8) ✅ 2026-07-17 — stock
       saver fails; thin subclass landed ([../engineering/cockroachdb-postgressaver.md](../engineering/cockroachdb-postgressaver.md))
-- [ ] `memories` + `users`/`turns`/`evidence_traces` tables, vector/inverted/secondary
-      indexes ([04-database-design.md](04-database-design.md))
-- [ ] Pydantic payload registry `engine/types.py` (ADR-13.6)
-- [ ] LangGraph ingestion node: text → typed events via Bedrock, 16A failure policy
-      (success-direct, note-on-failure)
+- [x] `memories` + `users`/`sessions`/`turns`/`evidence_traces`/`user_profile` tables,
+      vector/inverted/secondary indexes ([04-database-design.md](04-database-design.md))
+      ✅ 2026-07-20 — [../../engine/schema.sql](../../engine/schema.sql); `turns` and
+      `evidence_traces` are created but not written until T7 (Phase 6)
+- [x] Pydantic payload registry `engine/types.py` (ADR-13.6) ✅ 2026-07-20 — 9 types,
+      `extra="allow"`, drift canary green
+- [x] Ingestion path: text → typed events via Bedrock, 16A failure policy (success-direct,
+      note-on-failure, supersede-on-retry) ✅ 2026-07-20 —
+      [../../engine/ingestion.py](../../engine/ingestion.py) behind `POST /api/ingest`.
+      It is a service + route, **not** a LangGraph node; the graph wraps it in Phase 3.
 - [ ] Seed replay CLI **with extraction-output caching** (re-runs must not re-call Bedrock)
       and small-batch inserts (vector-index footgun); reconstruct ~3 months through the
       **production pipeline**
 - [ ] **Verify the causal story exists in the data** (go/no-go; 13A event-time framing)
 - [ ] Two tools: `aggregate_memories`, `recall_memories`
-- [ ] Simple email+password auth + sessions (ADR-13.15; abuse/spend controls deferred → TODOS)
+- [x] Simple email+password auth + sessions (ADR-13.15; abuse/spend controls deferred → TODOS)
+      ✅ 2026-07-20 — scrypt + opaque session cookie; per-user scoping tested as a security
+      boundary ([../../api/tests/test_scoping.py](../../api/tests/test_scoping.py))
 - [x] **Re-derive the budget line-item** (Fargate + ALB share — ADR-13.3 amendment, CockroachDB tier, cached replay
       Bedrock cost, live-eval lane) — update README constraint ✅ 2026-07-19: ≈$43–63,
       table in [README.md](README.md#budget-line-item-t13-re-derived-2026-07-19)
@@ -57,7 +64,8 @@ it must also **survive sanitization** ([ADR-7](09-decisions.md#adr-7)).
       (ADR-13.12); typed retraction-condition evaluation (ADR-13.11)
 - [ ] Timeline, aggregation, context-assembly + ranking modules (hard token cap, tested)
 - [ ] Photo ingestion: S3 + Bedrock vision → meal events
-- [ ] Embedding backfill: opportunistic on next ingest + manual CLI command
+- [x] Embedding backfill: opportunistic on next ingest + manual CLI command ✅ 2026-07-20
+      (landed early with the Phase 2 write path — [../../cli/backfill.py](../../cli/backfill.py))
 - [ ] Full reconstruction replay (6–12 months) into the builder's account
 - [ ] **End-to-end turn latency budget measured** (ingest turn, query turn, both-turn) —
       target: receipt < 3s perceived; document the profile

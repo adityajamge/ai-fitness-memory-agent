@@ -50,7 +50,31 @@ class ModelProvider(Protocol):
 
     def extract_events(self, text: str, *, now: datetime, tz: str) -> list[ExtractedEvent]:
         """Turn a user message into typed events. ``now``/``tz`` anchor relative dates
-        ("yesterday", "this morning"). Raises ExtractionError on failure."""
+        ("yesterday", "this morning").
+
+        **The empty-result contract (load-bearing — this is what keeps never-lose-input
+        honest).** A provider has exactly three outcomes, and an empty list is a *positive
+        assertion*, not a shrug:
+
+        =========================  ===================================================
+        Outcome                    Meaning
+        =========================  ===================================================
+        ``[ExtractedEvent, ...]``  Loggable content found and typed.
+        ``[]``                     **The provider affirms the turn holds no loggable
+                                   health content** — "thanks!", "what did I eat?".
+                                   The engine records nothing and replies "nothing to
+                                   log". No note is written.
+        ``ExtractionError``        Everything else: the call failed, the output was
+                                   malformed, OR the turn plainly carried content the
+                                   provider could not type. The engine falls back to a
+                                   note, so the input survives.
+        =========================  ===================================================
+
+        A provider that cannot tell "nothing to log" from "I failed to parse this" **must
+        raise** rather than return ``[]`` — returning ``[]`` on unparsed content is the one
+        way to silently drop a user's input. See
+        ``docs/engineering/ingestion-transaction-boundaries.md`` §5.
+        """
         ...
 
     def embed(self, texts: list[str]) -> list[list[float]]:

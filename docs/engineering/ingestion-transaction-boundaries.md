@@ -93,12 +93,19 @@ work with no durable side effects; everything at it is atomic; everything below 
 
 A turn may extract to several events (though most single turns produce one). Two sub-cases:
 
-- **Extraction returns zero events** for a turn that clearly contained loggable content: this
-  is a parse failure → **note path**. (An intentionally contentless turn — e.g. "thanks!" —
-  extracting to zero events is a legitimate no-op, not a note; the model interface signals
-  the difference by raising `ExtractionError` for the former and returning `[]` for the
-  latter. For Phase 2 the conservative default is: empty result on a non-trivial input →
-  note.)
+- **Extraction returns zero events:** the model interface signals intent by raising
+  `ExtractionError` when the input clearly contained loggable content (→ **note path**) and
+  returning `[]` only for a genuinely contentless turn — e.g. "thanks!" — which is a
+  legitimate no-op (`parse_status="ok"`, message `"nothing to log"`), not a note.
+
+  **The provider is what makes this real** (D1, fixed 2026-07-21). The engine cannot tell the
+  two apart — it sees an empty list either way — so the decision is pushed to the only
+  component that can make it. `BedrockProvider`'s forced tool carries a **required
+  `no_loggable_content` boolean**: an empty `events` list is accepted as a no-op only when the
+  model affirms it with `true`; a `false`, missing, or non-boolean flag raises
+  `ExtractionError` and routes the turn to the note path. A model that answers in prose
+  instead of calling the tool already raised. The contract is written out in
+  `engine/model.py::extract_events` and any future provider must honor it.
 - **Extraction returns N events, k of which fail Pydantic validation:** the **entire turn
   falls back to the note path** (raw text preserved), and the validation error is captured for
   observability.
@@ -158,8 +165,13 @@ Losing an embedding degrades recall temporarily; it never loses a memory.
 ## 8. `reprocess_note` — the supersession transaction
 
 `reprocess_note(user_id, note_id)` is the recovery path that upgrades a note into typed
-events (invoked opportunistically or from CLI; it is what the test-plan path "retry succeeds →
-typed events supersede note" exercises).
+events; it is what the test-plan path "retry succeeds → typed events supersede note"
+exercises. Its product surface is **`POST /api/memories/{id}/reprocess`**
+(`api/routers/ingest.py`, D2 — added 2026-07-22): authenticated, user-scoped, returning the
+same receipt shape as `/api/ingest`; every ineligible target (nonexistent, another user's,
+not a note, already superseded) is a uniform 404. An *opportunistic* trigger (retrying notes
+without being asked) was deliberately not added — it spends Bedrock calls on turns the user
+didn't initiate, and belongs with Phase 3's agent turn model if it belongs anywhere.
 
 - Stages (A)–(C) run on the note's stored raw text, off-transaction, exactly as `ingest_text`.
 - **On success**, a **single write transaction** does both: INSERT the new typed event
@@ -177,7 +189,8 @@ typed events supersede note" exercises).
 | Failure point | In a txn? | What commits | `parse_status` | User sees | Recovery |
 |---|---|---|---|---|---|
 | Extraction fails after inline retry | no | 1 note (raw text) | `incomplete` | "saved — parsing incomplete" | `reprocess_note` |
-| Extraction returns empty on real input | no | 1 note | `incomplete` | "saved — parsing incomplete" | `reprocess_note` |
+| Extraction returns empty, model affirms contentless | no | nothing | `ok` | "nothing to log" | n/a (no-op by design) |
+| Extraction returns empty on real input | no | 1 note (raw text) | `incomplete` | "saved — parsing incomplete" | `reprocess_note` |
 | One+ events fail validation | no | 1 note (raw text) | `incomplete` | "saved — parsing incomplete" | `reprocess_note` |
 | Embedding fails | no (pre-txn) | typed events, `embedding=NULL` | `ok` | "…(embedding pending)" | backfill / CLI |
 | DB write fails (D)/(D') | yes | nothing (rollback) | — (turn errors) | retriable error | resubmit turn |
@@ -185,8 +198,11 @@ typed events supersede note" exercises).
 | `reprocess_note` extraction fails | no | nothing | — | note unchanged | reprocess later |
 | `reprocess_note` DB write fails | yes | nothing (rollback) | — | note unchanged | reprocess later |
 
-**Silent-loss cells: zero.** Every non-success outcome is either an honest receipt, an
-honest retriable error, or a no-op that leaves recoverable state.
+**Silent-loss cells: zero** (restored 2026-07-21 when D1 was fixed —
+[§13](#13-known-deviations-audited-2026-07-21)). Every non-success outcome is either an honest
+receipt, an honest retriable error, or a no-op that leaves recoverable state. The "empty on
+real input" row depends on providers honoring the empty-result contract; `BedrockProvider`
+enforces it, and any new provider must too.
 
 ## 10. Double-submit (defined behavior)
 
@@ -215,10 +231,33 @@ completes"). This document's boundary does not move — the trace/turn writes ar
 statements inside the *existing* single transaction, preserving rule 2 (atomic turn) and the
 turn-commit-failure guarantee. Phase 2 creates those tables but does not write to them.
 
+## 13. Known deviations (audited 2026-07-21)
+
+Three places where the code and this specification disagreed, found by a full repo-vs-docs
+audit at the end of Phase 2 — documented here rather than silently rewritten into the spec,
+because each is a behavior decision, not a typo. **All three are now fixed** (D3 + D1 on
+2026-07-21, D2 on 2026-07-22); the table is kept as the record of what drifted and how it
+was closed.
+
+| # | Deviation | Spec says | Code does | Impact |
+|---|---|---|---|---|
+| ~~**D1**~~ | Empty extraction on contentful input | note path, `incomplete` (§5, §9) | ~~no-op receipt, `ok`, "nothing to log"~~ | **FIXED 2026-07-21** — resolved in the *provider*, not the engine: required `no_loggable_content` flag on the forced tool, unaffirmed empties raise `ExtractionError`. `IngestionService` unchanged. 9 offline tests in `agent/tests/test_bedrock_provider.py` |
+| ~~**D2**~~ | `reprocess_note` reachability | "invoked opportunistically or from CLI" (§8) | ~~no caller outside tests~~ | **FIXED 2026-07-22** — `POST /api/memories/{id}/reprocess` (authenticated, scoped, uniform 404 for ineligible targets); 7 tests in `api/tests/test_reprocess.py`. Opportunistic trigger deliberately not added (§8) |
+| ~~**D3**~~ | Note-fallback provenance | notes inherit the turn's `source`/`provenance` | ~~`_persist_note` hardcoded `provenance="live"`; `reprocess_note` hardcoded `source="chat"`/`provenance="live"`~~ | **FIXED 2026-07-21** — both now thread the caller's / the note's own origin; `get_note_text` became `get_note` so reprocessing can read it back. Guarded by 4 tests in `engine/tests/test_ingestion.py` |
+
+D3 was the one with a deadline attached: had it survived into T8, reconstructed notes would
+have entered the database mislabelled as live observations — exactly the honesty property
+ADR-13.10 exists to protect. The replay CLI can now push `source="replay",
+provenance="reconstructed"` through `ingest_text` and every outcome, including both note
+fallbacks and any later reprocess, stays reconstructed.
+
 ## Maintenance notes
 
 - Revisit if ADR-13.5 changes, if per-event partial acceptance is adopted (§5), or when T7
   adds turn/trace writes to the transaction (§12) — update §4 and §12 together.
+- All §13 deviations are closed (last: D2, 2026-07-22); the struck-through rows stay as the
+  record. If a new spec-vs-code drift is ever found, add it there the same way rather than
+  silently rewriting the sections above.
 - Do **not** move model calls inside the transaction to "save a round-trip" (rule 1) — it
   reintroduces long transactions and network-dependent lock hold times.
 - The all-or-nothing validation rule (§5) is load-bearing for the binary receipt model; changing
@@ -229,7 +268,7 @@ turn-commit-failure guarantee. Phase 2 creates those tables but does not write t
 | File | Relationship |
 |---|---|
 | `engine/ingestion.py` | Implements this specification |
-| `engine/repository.py` | The parameterized, user-scoped write queries invoked inside (D)/(D') |
+| `engine/repository.py` | The parameterized, user-scoped write queries invoked inside (D)/(D'); `get_note` supplies the note's text + origin to `reprocess_note` |
 | `engine/db.py` | `transaction()` context manager + `setup_schema` |
 | `engine/types.py` | Stage (B) validation (T3, ADR-13.6) |
 | `engine/model.py` | `ModelProvider` contract; `ExtractionError` / `EmbeddingError` |

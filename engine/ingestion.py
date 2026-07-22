@@ -20,7 +20,7 @@ from engine.memory import Memory
 from engine.model import EmbeddingError, ExtractedEvent, ExtractionError, ModelProvider
 from engine.repository import (
     fetch_unembedded,
-    get_note_text,
+    get_note,
     insert_memories,
     mark_superseded,
     set_embedding,
@@ -87,7 +87,7 @@ class IngestionService:
             events = self._extract_with_retry(text, now=now, tz=tz)
         except ExtractionError:
             logger.info("extraction failed for user %s; falling back to note", user_id)
-            return self._persist_note(user_id, text, source, now, tz)
+            return self._persist_note(user_id, text, source, provenance, now, tz)
 
         # Empty result means the provider judged the turn contentless (see model.py contract);
         # contentful-but-unparseable input raises ExtractionError instead and is handled above.
@@ -99,7 +99,7 @@ class IngestionService:
             memories = self._build_memories(user_id, events, source, provenance)
         except (ValidationError, UnknownMemoryType) as exc:
             logger.info("validation failed for user %s (%s); note fallback", user_id, exc)
-            return self._persist_note(user_id, text, source, now, tz)
+            return self._persist_note(user_id, text, source, provenance, now, tz)
 
         # (C) embeddings — nullable, off-transaction
         self._attach_embeddings(memories)
@@ -118,18 +118,27 @@ class IngestionService:
     def reprocess_note(self, user_id: UUID, note_id: UUID) -> Receipt:
         """Upgrade an existing note into typed events; on success supersede the note in one
         transaction (transaction-boundaries doc §8). On any failure the note is left
-        untouched and active — nothing lost, nothing duplicated."""
+        untouched and active — nothing lost, nothing duplicated.
+
+        The new typed events inherit the note's own ``source`` and ``provenance``: upgrading
+        a parse is not a change of origin, so a reconstructed note yields reconstructed
+        memories."""
         with self.db.transaction() as cur:
-            text = get_note_text(cur, user_id, note_id)
-        if text is None:
+            note = get_note(cur, user_id, note_id)
+        # `text` is NOT NULL for every note we write (NotePayload requires it); the guard
+        # keeps a hand-edited row from reaching extraction as None.
+        if note is None or note["text"] is None:
             raise ValueError(f"no active note {note_id} for user {user_id}")
+        text = note["text"]
 
         now = datetime.now(timezone.utc)
         try:
             events = self._extract_with_retry(text, now=now, tz=self.default_tz)
             if not events:
                 raise ExtractionError("empty re-extraction")
-            memories = self._build_memories(user_id, events, source="chat", provenance="live")
+            memories = self._build_memories(
+                user_id, events, source=note["source"], provenance=note["provenance"]
+            )
         except (ExtractionError, ValidationError, UnknownMemoryType):
             logger.info("reprocess of note %s still fails; leaving it active", note_id)
             return Receipt(parse_status="incomplete", message=_MSG_INCOMPLETE)
@@ -217,15 +226,18 @@ class IngestionService:
             m.embedding = vec
 
     def _persist_note(
-        self, user_id: UUID, text: str, source: str, now: datetime, tz: str
+        self, user_id: UUID, text: str, source: str, provenance: str, now: datetime, tz: str
     ) -> Receipt:
+        """Write the raw input as a single note, preserving the turn's own ``source`` and
+        ``provenance``. A note is a *representation of the same turn*, so it must not be
+        relabelled: a failed parse during replay stays ``reconstructed``, never ``live``."""
         note = Memory(
             user_id=user_id,
             event_time=now,
             tz=tz,
             type="note",
             source=source,
-            provenance="live",
+            provenance=provenance,
             confidence=_NOTE_CONFIDENCE,
             summary=text,
             payload={"text": text},

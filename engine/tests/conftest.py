@@ -38,7 +38,14 @@ class FakeModelProvider:
 
     ``events`` is returned by extract_events; toggles inject the failure modes the
     transaction-boundaries doc enumerates. Attributes are mutable so a test can flip
-    behavior between calls (e.g. fail, then succeed on reprocess)."""
+    behavior between calls (e.g. fail, then succeed on reprocess).
+
+    It honors the empty-result contract (``engine/model.py``): an empty ``events`` list is
+    the *affirmed-contentless* case ("thanks!") and returns ``[]``, while ``extract_error``
+    models everything else — a failed call or a turn the provider could not type — by
+    raising ``ExtractionError``. There is deliberately no toggle for "returns [] on real
+    content": that is the contract violation `BedrockProvider` now prevents
+    (agent/tests/test_bedrock_provider.py), not a behavior the engine must tolerate."""
 
     def __init__(
         self,

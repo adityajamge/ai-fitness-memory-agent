@@ -8,7 +8,13 @@
 payloads; new attributes (a new nutrient, a new metric) must never require a migration.
 Structure lives in per-type payload conventions, not columns.
 
-## Core table (design-level sketch — exact DDL locked at /plan-eng-review)
+## Core table (design-level sketch)
+
+> **The DDL now lives in [`engine/schema.sql`](../../engine/schema.sql)** (applied
+> idempotently by `engine/db.py::setup_schema` at app startup and via `python -m cli.migrate`,
+> landed with Phase 2). The sketch below is the design intent; the schema file is what runs.
+> They currently agree — if they ever diverge, the schema file wins and this section is the
+> bug.
 
 ```sql
 CREATE TABLE memories (
@@ -33,8 +39,8 @@ CREATE TABLE memories (
 -- Secondary index on (user_id, type, event_time) for timeline + aggregation scans
 ```
 
-Adjacent tables ([ADR-13.14](09-decisions.md#adr-13)): `users` (email+password auth,
-sessions — simple by design, ADR-13.15), `turns` (per-turn UI-rendering record, referenced
+Adjacent tables ([ADR-13.14](09-decisions.md#adr-13)): `users` + `sessions` (email+password
+auth with opaque session tokens — simple by design, ADR-13.15), `turns` (per-turn UI-rendering record, referenced
 memory IDs) + `evidence_traces` (the **persisted `EvidenceTrace`** per answer/ingestion turn,
 JSONB referencing memory IDs, never copying payloads — written in the same transaction as the
 turn; see [03-memory-engine.md](03-memory-engine.md#6-evidence-trace-builder-adr-12)),
@@ -76,8 +82,10 @@ New nutrient tomorrow? Add a key inside `payload.nutrition`. No migration.
 - Retraction **never deletes**: `status='retracted'`. The engine's history of being wrong is
   itself memory (and demo material).
 - Supersession chains via `superseded_by` (an improved insight replaces an older one).
-- Open mechanics (who evaluates retraction conditions, on-ingest vs. on-read):
-  [OQ7](10-open-questions.md).
+- Mechanics (who evaluates retraction conditions, on-ingest vs. on-read) were settled by
+  [ADR-13.11](09-decisions.md#adr-13) (typed conditions, deterministic evaluator) and
+  [ADR-13.1](09-decisions.md#adr-13) (evaluated in the sync consolidation pass that rides
+  ingestion); [OQ7](10-open-questions.md) is closed. Implementation is T5/T6, Phase 5.
 - Default reads filter `status='active'`; the glass-box UI can surface retracted insights
   deliberately.
 

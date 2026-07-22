@@ -74,8 +74,9 @@ reproducibility (e.g. recreating the stack in another region):
    - Additional configurations: service name `ai-fitness-memory-agent`,
      container port **8080**, health check path **/healthz**,
      CPU **0.25 vCPU** / memory **0.5 GB** (smallest — see budget line-item),
-     environment variables: none in Phase 1 (`DATABASE_URL` + Bedrock config
-     arrive in Phase 2 as env vars/secrets, never baked into the image)
+     environment variables: none were set in Phase 1 — Phase 2's `DATABASE_URL` +
+     Bedrock config are still outstanding (see
+     [Runtime configuration](#runtime-configuration-phase-2-onward) below)
    - Note the two role ARNs it created and the service URL
      (`…ecs.us-east-1.on.aws`).
 
@@ -88,6 +89,31 @@ reproducibility (e.g. recreating the stack in another region):
    the image and the Express action redeploys the service; the hello page
    renders at the service URL and `/healthz` returns `{"status":"ok"}`. Save
    the URL in the README (hackathon compliance table) when Milestone 1 lands.
+
+## Runtime configuration (Phase 2 onward)
+
+Phase 1 needed no environment variables — the hello page and `/healthz` have no
+dependencies. **The Phase 2 write path does.** The container reads its config through
+[`engine/config.py`](../engine/config.py); the deployed service must have at least:
+
+| Variable | Purpose | Notes |
+|---|---|---|
+| `DATABASE_URL` | CockroachDB Cloud connection string | secret — set on the Express service, never baked into the image |
+| `AWS_REGION` | Bedrock region | defaults to `us-east-1` |
+| `EXTRACTION_MODEL_ID` / `EMBEDDING_MODEL_ID` | model overrides | optional; defaults in `engine/config.py` |
+| `DEFAULT_TZ` | fallback timezone for events the model can't place | optional; defaults to `Asia/Kolkata` |
+
+Bedrock access comes from the task role, not from keys in env vars — the task execution /
+infrastructure roles created by the Express wizard need `bedrock:InvokeModel` added for
+ingestion to work.
+
+> **Status: not yet verified on the deployed service.** As of 2026-07-21 there is no record
+> that these were configured in ECS, and the app deliberately tolerates an unreachable
+> database at startup so the ALB health check stays green
+> ([`api/main.py`](../api/main.py) lifespan). That means **`/healthz` can report ok while
+> every `/api/*` route fails** — do not treat a green health check as proof the write path
+> is live. Verify with a real signup + ingest against the deployed URL before the Phase 2
+> demo checkpoint, and update this line with the result.
 
 ## Operational notes
 

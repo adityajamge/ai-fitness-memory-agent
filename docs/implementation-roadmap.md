@@ -76,14 +76,24 @@
 
 ## Phase 2 — Memory Write Path *(~3–4 days)*
 
-> **Status 2026-07-20:** T3 ✅ · T4 ✅ · T9 ✅ · T15 ✅ — engine write path, email+password
-> auth with per-user scoping, and embedding backfill implemented; **25 Phase-2 tests green**
-> against real single-node CockroachDB (registry drift canary, ingestion failure matrix,
-> auth, cross-user scoping) + existing canaries. Full schema (`memories`, `users`, `sessions`,
-> `user_profile`, `turns`, `evidence_traces`) is live; `turns`/`evidence_traces` are created
-> but written in Phase 6 (T7), photo/S3 vision ingestion is Phase 5 — both intentional scope
-> boundaries. Transaction semantics + never-lose-input guarantee documented in
+> **Status 2026-07-22 (verified against the code):** T3 ✅ · T4 ✅ · T9 ✅ · T15 ✅ — engine
+> write path, email+password auth with per-user scoping, and embedding backfill implemented;
+> **56 Phase-2 tests green** against real single-node CockroachDB (registry drift canary 6,
+> ingestion failure matrix + provenance 15, Bedrock empty-result contract 9, CLI backfill 11,
+> auth 6, cross-user scoping 2, reprocess endpoint 7) — **58 collected in total** with the
+> two Phase-1 canaries. Full schema (`memories`, `users`, `sessions`, `user_profile`,
+> `turns`, `evidence_traces`) is live; `turns`/`evidence_traces` are created but written in
+> Phase 6 (T7), photo/S3 vision ingestion is Phase 5 — both intentional scope boundaries.
+> Transaction semantics + never-lose-input guarantee documented in
 > [engineering/ingestion-transaction-boundaries.md](engineering/ingestion-transaction-boundaries.md).
+>
+> **Known Phase-2 gaps** (audited 2026-07-21 — see that doc's §13). Fixed 2026-07-21: the
+> note fallback no longer hardcodes `provenance='live'`, so replay notes stay `reconstructed`
+> when T8 lands (D3); the provider now distinguishes "nothing to log" from "couldn't parse
+> this" via a required `no_loggable_content` flag, closing the last silent-input-loss path
+> (D1). The CLI backfill entry point gained its own test suite 2026-07-22
+> (`cli/tests/test_backfill.py`), and `reprocess_note` is now reachable via
+> `POST /api/memories/{id}/reprocess` (D2, 2026-07-22). **No known Phase-2 gaps remain.**
 
 - **Objective:** talking to the app creates trustworthy, typed, never-lost memories.
 - **Why this phase exists:** ingestion is half the product (premise 3). Everything downstream

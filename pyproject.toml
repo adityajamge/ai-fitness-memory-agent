@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ai-fitness-memory-agent"
-version = "0.1.0"
+version = "0.2.0"  # tracks the phase: 0.1 = Phase 1 deploy spine, 0.2 = Phase 2 write path
 description = "AI health companion with persistent, lifelong memory — a custom Memory Engine on CockroachDB driving a glass-box UI. CockroachDB × AWS Agentic Memory Hackathon entry."
 readme = "README.md"
 license = { file = "LICENSE" }

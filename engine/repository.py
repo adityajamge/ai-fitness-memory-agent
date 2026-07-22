@@ -108,16 +108,20 @@ def get_memory(cur: psycopg.Cursor, user_id: UUID, memory_id: UUID) -> dict | No
     return cur.fetchone()
 
 
-def get_note_text(cur: psycopg.Cursor, user_id: UUID, note_id: UUID) -> str | None:
-    """Return the raw text of an active note for reprocessing, or None if not an eligible
-    active note owned by this user."""
+def get_note(cur: psycopg.Cursor, user_id: UUID, note_id: UUID) -> dict | None:
+    """Return an active note's raw text **and its origin** (``source``, ``provenance``) for
+    reprocessing, or None if not an eligible active note owned by this user.
+
+    The origin columns are what let ``reprocess_note`` re-emit typed events carrying the same
+    provenance the note was written with — a reconstructed note must never be upgraded into
+    memories labelled ``live`` (ADR-13.10 honesty posture; replay pushes ``reconstructed``
+    through this same pipeline, see 03-memory-engine.md §2)."""
     cur.execute(
         """
-        SELECT payload ->> 'text' AS text
+        SELECT payload ->> 'text' AS text, source, provenance
         FROM memories
         WHERE id = %s AND user_id = %s AND type = 'note' AND status = 'active'
         """,
         [note_id, user_id],
     )
-    row = cur.fetchone()
-    return row["text"] if row else None
+    return cur.fetchone()

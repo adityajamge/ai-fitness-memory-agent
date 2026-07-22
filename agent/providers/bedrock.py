@@ -9,7 +9,10 @@ cosine).
 Failure mapping is what gives never-lose-input its teeth (transaction-boundaries doc §2, and
 the failure-modes table's "Bedrock throttles mid-turn" row): any Bedrock/parse failure becomes
 ``ExtractionError``/``EmbeddingError``, which the ingestion pipeline turns into a note or a
-NULL-embedding row — never a lost turn.
+NULL-embedding row — never a lost turn. That includes the *silent* failure mode: a model
+returning zero events. The forced tool carries a required ``no_loggable_content`` flag so an
+empty result is an assertion the turn was contentless; without it we raise, honoring the
+empty-result contract in ``engine/model.py``.
 """
 
 from __future__ import annotations
@@ -34,8 +37,15 @@ _SYSTEM_PROMPT = (
     "Return events ONLY through the record_events tool. Infer event_time and timezone from "
     "relative expressions ('yesterday', 'this morning') using the provided current time and "
     "timezone. NEVER invent facts: if a quantity or time is uncertain, lower confidence and, "
-    "for time, leave event_time null (the system will estimate it). If the message contains no "
-    "loggable health event, return an empty events list."
+    "for time, leave event_time null (the system will estimate it).\n\n"
+    "When you return NO events you must say why, using no_loggable_content:\n"
+    "- Set no_loggable_content=true ONLY when the message genuinely has nothing to log — "
+    "small talk, a question, a greeting ('thanks', 'how much protein did I eat?').\n"
+    "- Set no_loggable_content=false when the message DOES describe something loggable but "
+    "you cannot extract it confidently (garbled, ambiguous, or unfamiliar). Do not guess and "
+    "do not silently drop it: false tells the system to save the raw text for a later retry.\n"
+    "Getting this flag right matters more than extracting perfectly — it is what guarantees a "
+    "user's input is never lost."
 )
 
 
@@ -70,9 +80,21 @@ def _tool_config() -> dict:
                                         },
                                         "required": ["type", "confidence", "summary", "payload"],
                                     },
-                                }
+                                },
+                                # The empty-result contract (engine/model.py): when `events`
+                                # is empty this flag is the difference between "nothing to
+                                # log" and "I could not parse this" — required so the model
+                                # must decide rather than default.
+                                "no_loggable_content": {
+                                    "type": "boolean",
+                                    "description": (
+                                        "True only if the message contains nothing loggable "
+                                        "(small talk, a question). False if it does describe "
+                                        "something loggable that you could not extract."
+                                    ),
+                                },
                             },
-                            "required": ["events"],
+                            "required": ["events", "no_loggable_content"],
                         }
                     },
                 }
@@ -115,7 +137,19 @@ class BedrockProvider:
         except (ClientError, BotoCoreError) as exc:  # throttling, timeouts, etc.
             raise ExtractionError(f"bedrock converse failed: {exc}") from exc
 
-        raw_events = self._tool_input(response).get("events", [])
+        tool_input = self._tool_input(response)
+        raw_events = tool_input.get("events") or []
+        if not raw_events:
+            # Empty is only a legitimate no-op when the model affirms the turn was
+            # contentless. Anything else — flag false, flag missing, flag non-boolean —
+            # is an unparsed turn, and raising is what routes it to the note fallback
+            # instead of dropping it (engine/model.py empty-result contract).
+            if tool_input.get("no_loggable_content") is True:
+                return []
+            raise ExtractionError(
+                "model returned no events without affirming the turn was contentless "
+                f"(no_loggable_content={tool_input.get('no_loggable_content')!r})"
+            )
         return [self._to_event(e, now=now, tz=tz) for e in raw_events]
 
     @staticmethod
