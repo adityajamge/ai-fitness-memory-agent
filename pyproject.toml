@@ -19,6 +19,8 @@ dependencies = [
     "uvicorn[standard]>=0.30",           # Phase 1 — ASGI server for the single container
     "pydantic>=2",                       # Phase 2 — payload type registry (T3, ADR-13.6)
     "boto3>=1.34",                       # Phase 2 — Bedrock extraction + Titan V2 embeddings
+    "tzdata>=2024.1",                    # Phase 3 — IANA db for tz slot validation (zoneinfo
+                                         # has no system db on Windows / slim images)
 ]
 
 [dependency-groups]
