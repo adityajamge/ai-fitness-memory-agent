@@ -59,3 +59,42 @@
   when it can die. The canary test asserts K-NN ordering on normalized vectors.
 - **Depends on / blocked by:** CockroachDB vector index cosine support reaching the tier we
   run on (roadmap item as of v25.x).
+
+## Write-side entity canonicalization (accepted 2026-07-23 — before Phase 4 replay)
+
+- **Status:** ACCEPTED architectural decision (not an M3 task). Extends the extraction
+  contract; do **not** implement query-time synonym/variant expansion — that was evaluated
+  and rejected (see below).
+- **What:** During ingestion, the extractor emits a **canonical entity** alongside the
+  original logged value on typed items, whenever a canonical form applies. Shape (payload
+  hot fields, `extra="allow"` — no migration):
+  - Food item: `canonical="chicken"`, `logged="Grilled Chicken"`, `preparation="grilled"`
+  - Exercise: `canonical="bench_press"`, `logged="Flat Bench Press"`
+  - Supplement/medication: `canonical="vitamin_d"`, `logged="Vitamin D3 60000 IU"`
+- **Why:** `lookup_events` uses exact JSONB containment (`@>`) over extracted items. Without
+  a canonical name, "when did I last eat chicken?" exact-matches `"Chicken"` but silently
+  misses `"Grilled Chicken"` — a *confident* wrong answer, the worst failure class for a
+  glass box. Canonical names make the structured path correct by construction; semantic
+  recall stays as the fuzzy fallback for whatever canonicalization can't anticipate.
+- **Why write-side, not read-side:** normalization runs **once per memory at ingestion**
+  instead of on every query forever. It keeps the deterministic engine boundary intact —
+  the engine never interprets language (06); canonicalization is the extractor's job (the
+  one NL layer already sanctioned on the write path). Query-time variant expansion was
+  rejected: a static synonym table rots and can't cover an open, multilingual, personal
+  food vocabulary; LLM variant generation is just worse-coverage semantic search with a new
+  hallucination surface and run-to-run nondeterminism — and putting either below the
+  tool-call boundary would break the "engine never interprets language" invariant.
+- **Timing (the reason this is logged now):** the account has no history until Phase 4
+  replay (T8). Adopting canonicalization **before** replay canonicalizes all 6–12 months of
+  reconstructed history on first ingestion, free. Adopting it after means re-extracting
+  history (the T8 extraction cache softens but doesn't eliminate the re-run). This is the
+  cheapest window.
+- **Scope of change:** extraction prompt + tool schema (`agent/providers/bedrock.py`), one
+  or two hot fields per relevant payload type (`engine/types.py`), and `lookup_events` gains
+  an optional match on `canonical` (still exact containment, still deterministic). Retrieval
+  architecture is otherwise unchanged — this is a data-quality upgrade, not a new path.
+- **Independent of this:** add case-insensitive item matching to `lookup_events` regardless
+  (mechanical string hygiene, engine-legal, ~zero cost) — a cheap partial mitigation until
+  canonicalization lands.
+- **Depends on / blocked by:** decide and land **with or just before T8** (Phase 4 replay),
+  the first pipeline that produces reconstructed memories at scale.
