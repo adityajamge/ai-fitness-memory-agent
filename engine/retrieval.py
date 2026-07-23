@@ -2,8 +2,9 @@
 
 Boundary: engine/repository.py owns row-level queries serving the write path plus
 single-row fetches; this module owns the builder families that answer questions and
-return ``(result, RetrievalStep)`` pairs for evidence assembly (ADR-12). M1 ships the
-aggregation family; recall / timeline / point-lookup follow (M2).
+return ``(result, RetrievalStep)`` pairs for evidence assembly (ADR-12). The closed set:
+**aggregate** (M1), **recall** (vector K-NN), **timeline** (ordered slice), **lookup**
+(last/first event, item containment, type counts) (M2).
 
 Security invariants (same as repository.py, ADR-13.4): every query filters on
 ``user_id``. SQL is composed only from module-constant fragments selected by validated
@@ -32,8 +33,12 @@ from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import psycopg
+from psycopg.types.json import Jsonb
 
-from engine.trace import RetrievalStep
+from engine.memory import vector_literal
+from engine.model import ModelProvider
+from engine.trace import EvidenceSnapshot, RetrievalStep
+from engine.types import MEMORY_TYPE_REGISTRY
 
 
 class RetrievalSpecError(ValueError):
@@ -106,12 +111,7 @@ class AggregateSpec:
             ZoneInfo(self.tz)
         except (ZoneInfoNotFoundError, ValueError) as exc:
             raise RetrievalSpecError(f"unknown timezone {self.tz!r}") from exc
-        if self.start.tzinfo is None or self.end.tzinfo is None:
-            raise RetrievalSpecError("date_range bounds must be timezone-aware")
-        if self.start >= self.end:
-            raise RetrievalSpecError(
-                f"empty date_range: start {self.start.isoformat()} >= end {self.end.isoformat()}"
-            )
+        _validate_range(self.start, self.end)
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,6 +235,347 @@ def _display_params(params: dict[str, object]) -> dict[str, object]:
             out[key] = str(value)
         elif isinstance(value, datetime):
             out[key] = value.isoformat()
+        elif isinstance(value, Jsonb):
+            out[key] = value.obj
         else:
             out[key] = value
     return out
+
+
+def _validate_range(start: datetime, end: datetime) -> None:
+    if start.tzinfo is None or end.tzinfo is None:
+        raise RetrievalSpecError("date_range bounds must be timezone-aware")
+    if start >= end:
+        raise RetrievalSpecError(
+            f"empty date_range: start {start.isoformat()} >= end {end.isoformat()}"
+        )
+
+
+def _validate_type(memory_type: str) -> None:
+    if memory_type not in MEMORY_TYPE_REGISTRY:
+        raise RetrievalSpecError(
+            f"unknown memory type {memory_type!r}; known: {sorted(MEMORY_TYPE_REGISTRY)}"
+        )
+
+
+# ── recall: vector K-NN over summary embeddings (06 "narrative / semantic" path) ───────
+
+_DIMS = 512  # VECTOR(512) — ADR-13.2; must match engine/schema.sql and vector_literal
+_MAX_TOP_K = 50
+# What the trace shows instead of 512 floats. The query *text* is in the params; the
+# vector is model output, huge, and meaningless to display (ADR-12 traces reference,
+# never bulk-copy).
+_QVEC_DISPLAY = f"<{_DIMS}-d unit vector of 'query'>"
+
+
+def embed_query(model: ModelProvider, text: str) -> list[float]:
+    """Embed a recall query through the same pipeline as stored summaries (normalized
+    512-dim — distances are comparable by construction). Call this OUTSIDE any
+    transaction (engine/db.py discipline: model calls never ride a connection); pass the
+    result to recall_memories. Raises EmbeddingError on failure — before any SQL runs."""
+    return model.embed([text])[0]
+
+
+@dataclass(frozen=True, slots=True)
+class RecallSpec:
+    """Validated slots for one semantic recall. ``start``/``end`` are both-or-neither;
+    ``type`` narrows to one registry type. The query text rides into the trace; the
+    engine (not the agent) turns it into a vector — decision D-4."""
+
+    query: str
+    top_k: int = 8
+    type: str | None = None
+    start: datetime | None = None
+    end: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if not self.query.strip():
+            raise RetrievalSpecError("recall query must not be empty")
+        if not 1 <= self.top_k <= _MAX_TOP_K:
+            raise RetrievalSpecError(f"top_k must be in 1..{_MAX_TOP_K}, got {self.top_k}")
+        if self.type is not None:
+            _validate_type(self.type)
+        if (self.start is None) != (self.end is None):
+            raise RetrievalSpecError("date_range needs both start and end (or neither)")
+        if self.start is not None and self.end is not None:
+            _validate_range(self.start, self.end)
+
+
+@dataclass(frozen=True, slots=True)
+class RecallHit:
+    """One K-NN hit: snapshot metadata + L2 distance (≡ cosine ranking on unit vectors)."""
+
+    id: UUID
+    type: str
+    event_time: datetime
+    confidence: float
+    provenance: str
+    summary: str | None
+    distance: float
+
+
+@dataclass(frozen=True, slots=True)
+class RecallResult:
+    spec: RecallSpec
+    hits: tuple[RecallHit, ...]
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.hits
+
+
+# The ORDER BY repeats the distance expression (not the alias) — the exact shape the T1
+# canary proved drives the C-SPANN index. NULL embeddings are excluded explicitly:
+# unembedded rows (T15 backfill pending) are invisible to recall, never errors.
+_SQL_RECALL_HEAD = """
+SELECT id, type, event_time, confidence, provenance, summary,
+       embedding <-> %(qvec)s::VECTOR(512) AS distance
+FROM memories
+WHERE user_id = %(user_id)s
+  AND status = 'active'
+  AND embedding IS NOT NULL
+"""
+_FRAG_TYPE = "  AND type = %(type)s\n"
+_FRAG_RANGE = "  AND event_time >= %(start)s\n  AND event_time < %(end)s\n"
+_SQL_RECALL_TAIL = "ORDER BY embedding <-> %(qvec)s::VECTOR(512)\nLIMIT %(top_k)s"
+
+
+def recall_memories(
+    cur: psycopg.Cursor, user_id: UUID, spec: RecallSpec, query_vec: list[float]
+) -> tuple[RecallResult, RetrievalStep]:
+    """Execute one vector K-NN over summary embeddings. ``query_vec`` comes from
+    embed_query (computed outside the transaction); the builder itself is pure SQL."""
+    if len(query_vec) != _DIMS:
+        raise RetrievalSpecError(f"query vector must be {_DIMS}-dim, got {len(query_vec)}")
+
+    sql = _SQL_RECALL_HEAD
+    params: dict[str, object] = {
+        "qvec": vector_literal(query_vec),
+        "user_id": user_id,
+        "top_k": spec.top_k,
+    }
+    if spec.type is not None:
+        sql += _FRAG_TYPE
+        params["type"] = spec.type
+    if spec.start is not None and spec.end is not None:
+        sql += _FRAG_RANGE
+        params["start"] = spec.start
+        params["end"] = spec.end
+    sql = (sql + _SQL_RECALL_TAIL).strip()
+
+    cur.execute(sql, params)
+    hits = tuple(
+        RecallHit(
+            id=row["id"],
+            type=row["type"],
+            event_time=row["event_time"],
+            confidence=row["confidence"],
+            provenance=row["provenance"],
+            summary=row["summary"],
+            distance=float(row["distance"]),
+        )
+        for row in cur.fetchall()
+    )
+
+    display = _display_params({**params, "qvec": _QVEC_DISPLAY, "query": spec.query})
+    step = RetrievalStep(family="recall", sql=sql, params=display, row_count=len(hits))
+    return RecallResult(spec=spec, hits=hits), step
+
+
+# ── timeline: ordered typed slice (06 point-lookup/timeline path, UI timeline strip) ──
+
+_MAX_TIMELINE = 1000
+
+
+@dataclass(frozen=True, slots=True)
+class TimelineSpec:
+    start: datetime
+    end: datetime
+    types: tuple[str, ...] | None = None
+    limit: int = 200
+
+    def __post_init__(self) -> None:
+        _validate_range(self.start, self.end)
+        if self.types is not None:
+            if not self.types:
+                raise RetrievalSpecError("types filter must not be empty (use None for all)")
+            for t in self.types:
+                _validate_type(t)
+        if not 1 <= self.limit <= _MAX_TIMELINE:
+            raise RetrievalSpecError(f"limit must be in 1..{_MAX_TIMELINE}, got {self.limit}")
+
+
+@dataclass(frozen=True, slots=True)
+class TimelineResult:
+    """Entries are payload-free EvidenceSnapshots — exactly what EvidenceTrace.timeline
+    carries, so assembly (M3) can pass them through unchanged."""
+
+    spec: TimelineSpec
+    entries: tuple[EvidenceSnapshot, ...]
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.entries
+
+
+_SQL_TIMELINE_HEAD = """
+SELECT id, type, event_time, confidence, provenance, summary
+FROM memories
+WHERE user_id = %(user_id)s
+  AND status = 'active'
+  AND event_time >= %(start)s
+  AND event_time < %(end)s
+"""
+_FRAG_TYPES = "  AND type = ANY(%(types)s)\n"
+_SQL_TIMELINE_TAIL = "ORDER BY event_time, id\nLIMIT %(limit)s"
+
+
+def get_timeline(
+    cur: psycopg.Cursor, user_id: UUID, spec: TimelineSpec
+) -> tuple[TimelineResult, RetrievalStep]:
+    """Ordered event slice for a date range (event_time ascending, id tiebreak)."""
+    sql = _SQL_TIMELINE_HEAD
+    params: dict[str, object] = {
+        "user_id": user_id,
+        "start": spec.start,
+        "end": spec.end,
+        "limit": spec.limit,
+    }
+    if spec.types is not None:
+        sql += _FRAG_TYPES
+        params["types"] = list(spec.types)
+    sql = (sql + _SQL_TIMELINE_TAIL).strip()
+
+    cur.execute(sql, params)
+    entries = tuple(EvidenceSnapshot.from_row(row) for row in cur.fetchall())
+
+    step = RetrievalStep(
+        family="timeline", sql=sql, params=_display_params(params), row_count=len(entries)
+    )
+    return TimelineResult(spec=spec, entries=entries), step
+
+
+# ── lookup: last/first event, item containment, type counts ───────────────────────────
+
+_MAX_LOOKUP = 20
+_DIRECTIONS = {"last": "DESC", "first": "ASC"}  # validated enum → module constant
+
+
+@dataclass(frozen=True, slots=True)
+class LookupSpec:
+    """Point lookup: the newest/oldest event(s) of a type, optionally matching an item
+    by exact containment over the extracted payload (inverted index — the structured
+    path for "when did I last eat chicken?"; vector recall is the fuzzy fallback, and
+    the trace records which ran — 06)."""
+
+    type: str
+    direction: str = "last"
+    item: str | None = None
+    n: int = 1
+
+    def __post_init__(self) -> None:
+        _validate_type(self.type)
+        if self.direction not in _DIRECTIONS:
+            raise RetrievalSpecError(
+                f"direction must be one of {sorted(_DIRECTIONS)}, got {self.direction!r}"
+            )
+        if self.item is not None and not self.item.strip():
+            raise RetrievalSpecError("item filter must not be empty (use None for no filter)")
+        if not 1 <= self.n <= _MAX_LOOKUP:
+            raise RetrievalSpecError(f"n must be in 1..{_MAX_LOOKUP}, got {self.n}")
+
+
+@dataclass(frozen=True, slots=True)
+class LookupResult:
+    spec: LookupSpec
+    entries: tuple[EvidenceSnapshot, ...]
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.entries
+
+
+_SQL_LOOKUP_HEAD = """
+SELECT id, type, event_time, confidence, provenance, summary
+FROM memories
+WHERE user_id = %(user_id)s
+  AND status = 'active'
+  AND type = %(type)s
+"""
+_FRAG_CONTAINS = "  AND payload @> %(contains)s\n"
+# {order} is filled from _DIRECTIONS only — builder-owned SQL, never runtime data.
+_SQL_LOOKUP_TAIL = "ORDER BY event_time {order}, id {order}\nLIMIT %(n)s"
+
+
+def lookup_events(
+    cur: psycopg.Cursor, user_id: UUID, spec: LookupSpec
+) -> tuple[LookupResult, RetrievalStep]:
+    """Newest/oldest event(s) of a type, optionally filtered by exact item containment."""
+    sql = _SQL_LOOKUP_HEAD
+    params: dict[str, object] = {"user_id": user_id, "type": spec.type, "n": spec.n}
+    if spec.item is not None:
+        sql += _FRAG_CONTAINS
+        params["contains"] = Jsonb({"items": [{"name": spec.item}]})
+    sql = (sql + _SQL_LOOKUP_TAIL.format(order=_DIRECTIONS[spec.direction])).strip()
+
+    cur.execute(sql, params)
+    entries = tuple(EvidenceSnapshot.from_row(row) for row in cur.fetchall())
+
+    step = RetrievalStep(
+        family="lookup", sql=sql, params=_display_params(params), row_count=len(entries)
+    )
+    return LookupResult(spec=spec, entries=entries), step
+
+
+@dataclass(frozen=True, slots=True)
+class CountSpec:
+    """Type-level event count over a range — "how many workouts in June?". Counts rows
+    of the type regardless of which metrics they carry (the aggregate family's ``count``
+    counts logged *values* of one metric; this counts *events*)."""
+
+    type: str
+    start: datetime
+    end: datetime
+
+    def __post_init__(self) -> None:
+        _validate_type(self.type)
+        _validate_range(self.start, self.end)
+
+
+@dataclass(frozen=True, slots=True)
+class CountResult:
+    spec: CountSpec
+    n: int
+    evidence_ids: tuple[UUID, ...]
+
+
+_SQL_COUNT = """
+SELECT COUNT(*) AS n,
+       array_agg(id ORDER BY event_time, id) AS evidence_ids
+FROM memories
+WHERE user_id = %(user_id)s
+  AND type = %(type)s
+  AND status = 'active'
+  AND event_time >= %(start)s
+  AND event_time < %(end)s
+"""
+
+
+def count_events(
+    cur: psycopg.Cursor, user_id: UUID, spec: CountSpec
+) -> tuple[CountResult, RetrievalStep]:
+    """Count events of a type in a range, with the contributing IDs (citable counts)."""
+    sql = _SQL_COUNT.strip()
+    params: dict[str, object] = {
+        "user_id": user_id,
+        "type": spec.type,
+        "start": spec.start,
+        "end": spec.end,
+    }
+    cur.execute(sql, params)
+    row = cur.fetchone()
+    n = int(row["n"])
+    ids = tuple(row["evidence_ids"]) if row["evidence_ids"] else ()
+
+    step = RetrievalStep(family="lookup", sql=sql, params=_display_params(params), row_count=n)
+    return CountResult(spec=spec, n=n, evidence_ids=ids), step
