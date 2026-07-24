@@ -294,6 +294,23 @@
     (Plus a round-trip test that runs a real turn through the real `CockroachDBSaver` and
     asserts the persisted checkpoint's channels contain none of the banned types — proving the
     integration, not just the guard in isolation.)
+- **L2 IS NON-NEGOTIABLE (standing instruction, 2026-07-24).** M5 does not ship without L2
+  implemented **exactly as described** — a guard on the persist path that sees the live Python
+  channel values and raises on a banned type. If a LangGraph limitation makes that impossible
+  (see trigger below), **STOP and bring it back as an architecture review** — do NOT silently
+  weaken the guarantee (e.g. downgrade to docs-only, to L1/L3a alone, or to a best-effort
+  warning). L1 and L3a are reinforcements, not substitutes; without L2 the invariant is a
+  convention, not a guarantee.
+  - **Trigger condition (what "cannot be implemented exactly" means):** the banned objects are
+    not inspectable as **live Python objects** at any point on the persist path we control —
+    i.e. LangGraph serializes channel values to bytes *before* any method we can override on
+    `CockroachDBSaver` (or before a serde we inject) sees them. Only then is L2 blocked.
+  - **Believed-viable avenues to confirm at implementation (either satisfies L2):** (a) inject
+    a guarding `SerializerProtocol` that wraps the default serde and inspects each value in
+    `dumps_typed` before delegating — every serialized value must pass through it; (b) override
+    `put()`/`put_writes()` on `CockroachDBSaver` to sweep `checkpoint["channel_values"]` (still
+    live objects at that point) before calling `super()`. If BOTH prove impossible on the
+    pinned LangGraph version, that is the stop-and-review trigger.
 - **Accepted limit (honest scope):** no Python mechanism makes this physically impossible; a
   developer could add the field (past L1), delete the guard (past L2), and update the
   allowlist (past L3a) in one diff. The design's guarantee is that the accident **cannot land
