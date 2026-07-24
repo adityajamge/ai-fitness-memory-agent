@@ -247,3 +247,62 @@
   without inventing a retrieval or crashing a turn. Same never-lose-the-turn posture as D1.
 - **Doc home when unfrozen:** 05-agent-architecture.md (answer/route contract) + the
   engine-tools table in 03-memory-engine.md.
+
+## M5-1 — Graph state durability boundary + its enforcement (Candidate 1 + L1/L2/L3a)
+
+- **Status:** ACCEPTED decision (design settled 2026-07-24); **to be implemented as part of
+  M5** (`agent/graph.py`, `agent/tools.py`, and the guard in `agent/checkpointer.py`). The
+  enforcement below is part of the decision, not a follow-up.
+- **The invariant (the thing being guaranteed):** heavyweight, turn-local runtime objects —
+  `ContextBlock`, `EvidenceTrace`, `RetrievalOutcome`, and `Receipt` — **must never enter the
+  checkpointed LangGraph state.** Rationale: ADR-13.14 (the checkpointer holds conversation/
+  execution continuity; the trace's durable home is the `evidence_traces` table in Phase 6),
+  plus the ADR-13.8 checkpointer footgun (strict msgpack, no blobs). LangGraph persists every
+  state channel after **every super-step**, so "put it in state and clear it before END" does
+  not work — a heavy object in a channel is serialized on each node transition.
+- **The design (Candidate 1 — reference-only state + turn-scoped carrier):** checkpointed
+  `GraphState` channels hold only small, serde-safe values — `messages` (add_messages reducer),
+  `user_id`, `question`, `now`/`tz`, `tool_calls` (name+dict, tiny), `answer`, `citations`
+  (UUIDs). The heavy objects live on a **per-invocation carrier** (a plain mutable object)
+  injected through `RunnableConfig["configurable"]`; nodes read `tool_calls` from state and
+  read/write `outcomes`/`context`/`trace`/`receipt` on the carrier. The API creates the
+  carrier, passes it in config, and reads `context`/`trace`/`receipt` off it after
+  `invoke()`. (Rejected: C2 full-rich-state+stream — persists the trace into the checkpoint,
+  violating ADR-13.14 and the msgpack footgun; C3 one-node "thin shell" — collapses the graph,
+  losing routing visibility and the Phase 6 SSE node-streaming path. Full comparison in the
+  2026-07-24 design discussion.)
+- **Enforcement (integral to this decision — three reinforcing layers):**
+  - **L1 — structural default:** `GraphState` simply does not declare `context`/`trace`/
+    `outcomes`/`receipt` channels. LangGraph rejects node updates that target undeclared
+    channels, so an *accidental* `return {"context": ...}` fails at runtime and in tests.
+    (Catches the slip; does not catch someone editing the schema to add the field — that is
+    what L2/L3a are for. Confirm the exact LangGraph rejection behavior at implementation.)
+  - **L2 — the architectural enforcement point (the real guarantee):** the serialization path
+    of **`CockroachDBSaver` (`agent/checkpointer.py`)** is the single chokepoint where the
+    invariant is enforced. On serialize it sweeps the checkpoint's channel values (top level
+    and one level into list/tuple/dict) and **raises `TypeError` if it encounters a
+    `ContextBlock`/`EvidenceTrace`/`RetrievalOutcome`/`Receipt`**, with a message naming this
+    invariant (M5-1 / ADR-13.14). Because every persist — in tests and in production — flows
+    through this one path, the invariant **cannot be sidestepped by editing `GraphState`**;
+    adding the field just makes the guard fire instead. This is the load-bearing rung: it
+    converts "please don't checkpoint heavy objects" into "heavy objects cannot be
+    checkpointed." It is the same invariant-by-construction posture the repo already uses for
+    the registry drift canary, the scoping security test, and ADR-12's trace-by-construction.
+  - **L3a — tripwire test:** a test asserts `set(GraphState.__annotations__)` is a subset of
+    an explicit channel allowlist, so adding **any** channel turns the test red with a message
+    pointing at M5-1 — forcing a conscious edit and reviewer attention before L2 ever fires.
+    (Plus a round-trip test that runs a real turn through the real `CockroachDBSaver` and
+    asserts the persisted checkpoint's channels contain none of the banned types — proving the
+    integration, not just the guard in isolation.)
+- **Accepted limit (honest scope):** no Python mechanism makes this physically impossible; a
+  developer could add the field (past L1), delete the guard (past L2), and update the
+  allowlist (past L3a) in one diff. The design's guarantee is that the accident **cannot land
+  silently** and the deliberate override **cannot land invisibly** — it becomes a loud,
+  self-explaining, three-part change touching a guard named after the ADR it enforces, where
+  code review is the intended backstop. (Optional future hardening: adopt pyright/mypy in CI
+  so a closed `GraphState` TypedDict makes the mistake a compile-time error — not active today;
+  CI runs ruff only.)
+- **Doc home when unfrozen:** 05-agent-architecture.md (conversation-state / checkpointer
+  section, ADR-13.14) — document the durability boundary and name the `CockroachDBSaver` guard
+  as its enforcement point; cross-reference the engineering deep dive
+  `docs/engineering/cockroachdb-postgressaver.md` (the checkpointer's canonical reference).
