@@ -60,6 +60,18 @@
 - **Depends on / blocked by:** CockroachDB vector index cosine support reaching the tier we
   run on (roadmap item as of v25.x).
 
+---
+
+# Temporary Architecture Decision Log (post-documentation-freeze)
+
+> **Read this section before starting any milestone.** It is the canonical holding pen for
+> architecture decisions **accepted after the office-hours documentation freeze** — decisions
+> the committed code already implements (or that gate upcoming work) but that are not yet in
+> the ADRs/design docs. Each entry carries a **"doc home when unfrozen"** pointer; when docs
+> unfreeze, migrate every entry into its cited ADR/design doc and **delete it here** —
+> TODOS.md is the holding pen, not their permanent home. Entries below span the M2 review
+> (write-side canonicalization) and the M3 audit (A1/A2/A3/D1/D2).
+
 ## Write-side entity canonicalization (accepted 2026-07-23 — before Phase 4 replay)
 
 - **Status:** ACCEPTED architectural decision (not an M3 task). Extends the extraction
@@ -98,15 +110,6 @@
   canonicalization lands.
 - **Depends on / blocked by:** decide and land **with or just before T8** (Phase 4 replay),
   the first pipeline that produces reconstructed memories at scale.
-
----
-
-# Phase 3 assembly — architectural decisions recorded while docs are frozen
-
-> Surfaced by the M3 (context assembly) audit, 2026-07-24. These are decisions the code
-> **already implements**; they are logged here because the office-hours docs are frozen.
-> **When docs unfreeze, migrate each into the cited ADR/design doc and delete it here** —
-> TODOS.md is the holding pen, not their permanent home.
 
 ## A3 — Citation-validation surface is `citable_ids`, not `trace.evidence` (blocks T7)
 
