@@ -21,16 +21,52 @@ import json
 import logging
 import math
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-from engine.model import EmbeddingError, ExtractedEvent, ExtractionError
+from engine.model import (
+    EmbeddingError,
+    ExtractedEvent,
+    ExtractionError,
+    NarrationError,
+    PlanningError,
+    ToolCall,
+    ToolSpec,
+)
 from engine.types import MEMORY_TYPE_REGISTRY
+
+if TYPE_CHECKING:
+    from engine.assembly import ContextBlock
 
 logger = logging.getLogger(__name__)
 
 _EXTRACT_TOOL = "record_events"
+
+_PLAN_SYSTEM = (
+    "You are the retrieval planner for a fitness memory app. Decide what to do with the "
+    "user's turn by selecting tools and filling their typed arguments — you are the only "
+    "part of the system that reads natural language.\n"
+    "- Select log_memory (when offered) to record a turn that states something loggable "
+    "(a meal, workout, weight, etc.). Select retrieval tools to answer a question. A turn "
+    "can be BOTH ('logged my run — am I improving?'): select log_memory AND the retrieval "
+    "tools.\n"
+    "- Issue several retrieval calls when a question needs them; they are merged downstream.\n"
+    "- Ground relative dates ('today', 'last 30 days') using the provided current time and "
+    "timezone; fill date ranges as concrete ISO timestamps.\n"
+    "- If the turn needs no memory operation at all (small talk, thanks, a greeting), call "
+    "NO tools. Calling nothing is a valid, deliberate answer — do not force a tool."
+)
+
+_NARRATE_SYSTEM = (
+    "You are a fitness memory companion. Answer the user's question using ONLY the evidence "
+    "provided — never invent numbers, dates, or facts. Every factual claim must carry a "
+    "citation marker in square brackets containing the exact memory id it rests on, e.g. "
+    "'you averaged 137g protein [a1b2c3d4-...]'. Cite only ids that appear in the evidence. "
+    "If the evidence is empty, say plainly that there is no logged data for that question "
+    "yet — do not guess. Be concise and factual."
+)
 
 _SYSTEM_PROMPT = (
     "You extract typed health events from a user's message for a fitness memory app. "
@@ -224,3 +260,142 @@ class BedrockProvider:
         if abs(norm - 1.0) > 0.05:  # defensive: the L2≡cosine invariant assumes unit vectors
             logger.warning("titan returned non-unit vector (norm=%.4f); check normalize flag", norm)
         return vector
+
+    # ── planning (the only NL-understanding step, 05 query-planning boundary) ────────────
+    def plan(
+        self, question: str, tools: list[ToolSpec], *, now: datetime, tz: str
+    ) -> list[ToolCall]:
+        """Select tools + fill typed slots via Converse tool-use. ``toolChoice=auto`` lets
+        the model return zero calls — the empty-plan 'no memory operation' assertion
+        (engine/model.py). Any failure or malformed output raises PlanningError."""
+        prompt = (
+            f"Current time: {now.isoformat()}\nCurrent timezone: {tz}\n\n"
+            f"User turn:\n{question}"
+        )
+        try:
+            response = self._client.converse(
+                modelId=self._extraction_model_id,
+                system=[{"text": _PLAN_SYSTEM}],
+                messages=[{"role": "user", "content": [{"text": prompt}]}],
+                toolConfig={"tools": _plan_tools(tools), "toolChoice": {"auto": {}}},
+                inferenceConfig={"maxTokens": 2048, "temperature": 0.0},
+            )
+        except (ClientError, BotoCoreError) as exc:
+            raise PlanningError(f"bedrock converse (plan) failed: {exc}") from exc
+
+        return _collect_tool_calls(response)
+
+    # ── narration (prose only, cited; 05 answer contract) ───────────────────────────────
+    def narrate(self, question: str, context: ContextBlock) -> str:
+        """Turn assembled evidence into cited prose. Renders the ContextBlock to a compact
+        evidence prompt (provider-owned, mirroring extract_events); the model produces
+        natural language only. Any failure or empty output raises NarrationError."""
+        prompt = _render_context(question, context)
+        try:
+            response = self._client.converse(
+                modelId=self._extraction_model_id,
+                system=[{"text": _NARRATE_SYSTEM}],
+                messages=[{"role": "user", "content": [{"text": prompt}]}],
+                inferenceConfig={"maxTokens": 1024, "temperature": 0.2},
+            )
+        except (ClientError, BotoCoreError) as exc:
+            raise NarrationError(f"bedrock converse (narrate) failed: {exc}") from exc
+
+        text = _text_of(response)
+        if not text.strip():
+            raise NarrationError("narration returned empty text")
+        return text
+
+
+# ── Converse plumbing for plan/narrate (module-level, provider-agnostic shapes) ─────────
+def _plan_tools(tools: list[ToolSpec]) -> list[dict]:
+    """Render provider-agnostic ToolSpecs into Converse toolConfig entries."""
+    return [
+        {
+            "toolSpec": {
+                "name": t.name,
+                "description": t.description,
+                "inputSchema": {"json": t.input_schema},
+            }
+        }
+        for t in tools
+    ]
+
+
+def _collect_tool_calls(response: dict) -> list[ToolCall]:
+    """Pull every toolUse block out of a Converse response, in order (parallel tool use →
+    several calls = mixed retrieval). No toolUse blocks → empty plan (the model chose to
+    call nothing). Text blocks are ignored — planning wants tools, not prose."""
+    try:
+        content = response["output"]["message"]["content"]
+    except (KeyError, TypeError) as exc:
+        raise PlanningError(f"unexpected converse response shape: {exc}") from exc
+    calls: list[ToolCall] = []
+    for block in content:
+        use = block.get("toolUse") if isinstance(block, dict) else None
+        if use is None:
+            continue
+        name = use.get("name")
+        if not name:
+            raise PlanningError(f"toolUse block without a name: {use!r}")
+        calls.append(ToolCall(tool=str(name), arguments=use.get("input") or {}))
+    return calls
+
+
+def _text_of(response: dict) -> str:
+    """Concatenate the text blocks of a Converse response (narration output)."""
+    try:
+        content = response["output"]["message"]["content"]
+    except (KeyError, TypeError) as exc:
+        raise NarrationError(f"unexpected converse response shape: {exc}") from exc
+    return "".join(b["text"] for b in content if isinstance(b, dict) and "text" in b)
+
+
+def _render_context(question: str, context: ContextBlock) -> str:
+    """Render an assembled ContextBlock into a compact evidence prompt (decision D-5:
+    structured context → text at the narrate boundary). Memory ids are shown inline so the
+    model can cite them; payloads are never dumped (the summaries/values carry the meaning).
+    """
+    lines: list[str] = [f"Question: {question}", ""]
+
+    if context.aggregates:
+        lines.append("Computed aggregates:")
+        for agg in context.aggregates:
+            s = agg.spec
+            header = f"- {s.agg}({s.metric})"
+            header += f" by {s.group_by}" if s.group_by != "none" else ""
+            header += f" from {s.start.date()} to {s.end.date()}:"
+            lines.append(header)
+            if not agg.buckets:
+                lines.append("    (no matching data in range)")
+            for b in agg.buckets:
+                label = b.bucket or "total"
+                cites = " ".join(f"[{i}]" for i in b.evidence_ids)
+                lines.append(f"    {label}: {b.value:g} (n={b.n}) — {cites}")
+        lines.append("")
+
+    if context.counts:
+        lines.append("Event counts:")
+        for c in context.counts:
+            cites = " ".join(f"[{i}]" for i in c.evidence_ids)
+            lines.append(
+                f"- {c.spec.type} from {c.spec.start.date()} to {c.spec.end.date()}: "
+                f"{c.n} — {cites}"
+            )
+        lines.append("")
+
+    if context.memories:
+        lines.append("Relevant memories (most relevant first):")
+        for m in context.memories:
+            lines.append(
+                f"- [{m.id}] {m.type} @ {m.event_time.isoformat()} "
+                f"(confidence {m.confidence:g}, {m.provenance}): {m.summary or ''}"
+            )
+        if context.omitted_count:
+            lines.append(f"  (+{context.omitted_count} lower-ranked memories omitted)")
+        lines.append("")
+
+    if context.is_empty:
+        lines.append("No matching memories were found for this question.")
+
+    return "\n".join(lines).rstrip()

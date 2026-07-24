@@ -16,7 +16,15 @@ import psycopg
 import pytest
 
 from engine.db import Database
-from engine.model import EmbeddingError, ExtractedEvent, ExtractionError
+from engine.model import (
+    EmbeddingError,
+    ExtractedEvent,
+    ExtractionError,
+    NarrationError,
+    PlanningError,
+    ToolCall,
+    ToolSpec,
+)
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL", "postgresql://root@127.0.0.1:26257/defaultdb?sslmode=disable"
@@ -54,13 +62,26 @@ class FakeModelProvider:
         extract_error: bool = False,
         fail_first: bool = False,
         embed_error: bool = False,
+        plan_calls: list[ToolCall] | None = None,
+        plan_error: bool = False,
+        narration: str | None = None,
+        narrate_error: bool = False,
     ) -> None:
         self.events = events or []
         self.extract_error = extract_error
         self.fail_first = fail_first
         self.embed_error = embed_error
+        # Phase 3 (M4) agent surfaces — scripted so the M5 graph tests can drive routing
+        # (which tools plan returns) and narration deterministically.
+        self.plan_calls = plan_calls if plan_calls is not None else []
+        self.plan_error = plan_error
+        self.narration = narration
+        self.narrate_error = narrate_error
         self.extract_calls = 0
         self.embed_calls = 0
+        self.plan_invocations = 0
+        self.narrate_invocations = 0
+        self.last_tools: list[ToolSpec] = []
 
     def extract_events(self, text: str, *, now, tz) -> list[ExtractedEvent]:
         self.extract_calls += 1
@@ -75,6 +96,26 @@ class FakeModelProvider:
         if self.embed_error:
             raise EmbeddingError("forced embedding failure")
         return [_unit_vector(t) for t in texts]
+
+    def plan(self, question: str, tools: list[ToolSpec], *, now, tz) -> list[ToolCall]:
+        self.plan_invocations += 1
+        self.last_tools = list(tools)
+        if self.plan_error:
+            raise PlanningError("forced planning failure")
+        return list(self.plan_calls)
+
+    def narrate(self, question: str, context) -> str:
+        self.narrate_invocations += 1
+        if self.narrate_error:
+            raise NarrationError("forced narration failure")
+        if self.narration is not None:
+            return self.narration
+        # Default: an honest, deterministic answer that cites every citable ID, so tests
+        # can assert citation pass-through without pinning exact prose.
+        ids = sorted(str(i) for i in context.citable_ids())
+        if not ids:
+            return "I have no logged data for that yet."
+        return "Based on your logged data: " + " ".join(f"[{i}]" for i in ids)
 
 
 @pytest.fixture(scope="session")

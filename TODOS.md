@@ -191,3 +191,59 @@
   (T16). This is the mechanism behind A3 and should be documented alongside it.
 - **Doc home when unfrozen:** 03-memory-engine.md §5–§6 (assembly/trace) + the T16 task spec;
   cross-reference A3.
+
+## M4-1 — ROUTE and PLAN unified into one `plan()` provider surface
+
+- **Status:** ACCEPTED **deviation** from the design-level graph, implemented in
+  `engine/model.py` (`ModelProvider.plan`) + `agent/providers/bedrock.py`.
+- **What:** 05-agent-architecture.md's graph draws two separate LLM nodes — ROUTE (classify
+  the turn: ingest / query / both) and PLAN (select retrieval tools, fill slots). M4 adds a
+  **single** provider surface, `plan(question, tools, *, now, tz) -> list[ToolCall]`, and
+  **no** separate `route()`/`classify()` method. Routing is expressed as *tool selection*:
+  with `log_memory` among the offered `tools`, the planner selecting it is an *ingest* turn,
+  selecting retrieval tools is a *query* turn, selecting both is a *both* turn. "Mixed
+  retrieval" is just several retrieval calls in the returned list.
+- **Why route() was merged into plan() (the reasoning, explicitly):**
+  1. **They are the same cognitive act.** Deciding "is this a log, a question, or both?"
+     and deciding "which tools answer it?" are one classification over the same tool
+     vocabulary. A separate ROUTE step would classify the turn, then PLAN would
+     re-read the same sentence to pick tools — the turn's language interpreted twice.
+     One `plan()` call reads it once.
+  2. **It is the native shape of tool-use LLMs.** Bedrock Converse with
+     `toolChoice: auto` already returns "which tools, with which arguments, or none" in a
+     single response. Splitting that into two calls fights the API and doubles latency and
+     token cost per turn for no decision the model wasn't already making.
+  3. **Routing-as-tool-selection removes a whole node and its failure modes.** No
+     intent-label enum to keep in sync with the tool set, no ROUTE/PLAN disagreement to
+     reconcile ("routed ingest but planned a query"), no second parse to error-handle. The
+     M5 graph becomes a **pure interpreter** of `plan()` output: `log_memory` present →
+     run ingestion (first, so new memories are queryable); retrieval calls present → run
+     retrieval → assemble → narrate.
+- **Why this preserves the intended architecture:** the load-bearing invariant of 05 is the
+  **query-planning boundary** — "exactly one place understands natural language; everything
+  below the tool-call boundary is deterministic." Merging ROUTE into PLAN keeps that
+  invariant *exactly*: there is still exactly one NL-understanding step, it still emits only
+  typed tool calls, and everything downstream stays deterministic. 05's two-node drawing was
+  labelled "design-level"; it described the *logical* stages (classify, then act), not a
+  contract that they be two model calls. Collapsing them is a faithful implementation of the
+  same boundary with one fewer moving part — less complexity, identical guarantees, and the
+  model-independence contract untouched (a different provider fills the same `plan()` slots).
+- **Doc home when unfrozen:** 05-agent-architecture.md (graph shape + query-planning
+  boundary) — redraw ROUTE+PLAN as one planner node returning tool calls (incl. log_memory);
+  note in 03-memory-engine.md's engine-tools framing that routing is tool selection.
+
+## M4-2 — Empty-plan contract: `[]` is "no memory operation needed", not a failure
+
+- **Status:** ACCEPTED decision, implemented; mirrors the extraction empty-result contract
+  (D1, `engine/model.py`).
+- **What:** `plan()` returning an empty list is a **positive assertion** that the turn needs
+  no memory operation (small talk, a greeting, a meta-question), distinct from
+  `PlanningError` (the call failed or returned malformed output). Mechanism: Converse
+  `toolChoice: auto` permits zero tool calls, so "call nothing" is a deliberate model
+  outcome, not an error. Documented in the `plan` docstring with the same three-outcome
+  table style as the extraction contract.
+- **Why:** it gives the M5 graph a clean, non-erroring path for conversational turns — the
+  planner's analogue of "nothing to log" — so a greeting is answered conversationally
+  without inventing a retrieval or crashing a turn. Same never-lose-the-turn posture as D1.
+- **Doc home when unfrozen:** 05-agent-architecture.md (answer/route contract) + the
+  engine-tools table in 03-memory-engine.md.
