@@ -41,8 +41,28 @@ class Settings:
     backfill_batch: int = 32  # opportunistic embeddings backfilled per ingest turn (T15)
 
 
+def _load_dotenv_if_present() -> None:
+    """Populate the environment from a local ``.env`` if python-dotenv is installed.
+
+    Development convenience only, and deliberately best-effort: ``python-dotenv`` is a **dev**
+    dependency, so in the deployed image this is a no-op and configuration comes from real
+    environment variables (the ECS task definition) exactly as before.
+
+    Existing variables always win over the file (``override=False``), so an explicit
+    ``DATABASE_URL=... uvicorn ...`` still beats what is written in ``.env``. Documented in
+    ``.env.example``; also called by the root ``conftest.py`` so tests that read the
+    environment directly see the same configuration the app does.
+    """
+    try:
+        from dotenv import load_dotenv
+    except ImportError:  # production image / minimal install
+        return
+    load_dotenv(override=False)
+
+
 def load_settings() -> Settings:
     """Build Settings from the environment, falling back to the defaults above."""
+    _load_dotenv_if_present()
     return Settings(
         database_url=os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL),
         aws_region=os.environ.get("AWS_REGION", "us-east-1"),

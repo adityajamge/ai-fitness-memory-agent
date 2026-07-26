@@ -61,6 +61,7 @@ re-opening anything.
 
 ```bash
 pip install -e . --group dev        # editable install + pytest/ruff (needs pip ≥ 25.1)
+cp .env.example .env                # then edit — see Configuration below
 pytest                              # canaries skip visibly without a DB; REQUIRE_DB=1 to enforce
 uvicorn api.main:app --port 8080    # run the app locally
 ```
@@ -70,6 +71,29 @@ Tests run against a real single-node CockroachDB — start one with
 `docker run -d -p 26257:26257 cockroachdb/cockroach:v26.2.4 start-single-node --insecure`
 (or a native binary; see canary docstrings). CI does the same on every push and also
 builds + smoke-tests the Docker image. Deployment: [docs/deploy.md](docs/deploy.md).
+
+## Configuration
+
+All configuration is environment variables, read in [`engine/config.py`](engine/config.py).
+Copy [`.env.example`](.env.example) to `.env` — it documents every variable, which are
+required, and what each one defaults to.
+
+In development the `.env` file is loaded automatically (by `load_settings()`, and by the root
+`conftest.py` so tests see the same configuration the app does). **Real environment variables
+always win**, so `DATABASE_URL=... pytest` still overrides the file. In the deployed image
+there is no `.env` at all — `python-dotenv` is a dev-only dependency, and ECS supplies real
+variables ([docs/deploy.md → Runtime configuration](docs/deploy.md#runtime-configuration-phase-2-onward)).
+
+Only one variable has no usable default in practice:
+
+| Variable | Required? | Default |
+|---|---|---|
+| `DATABASE_URL` | in practice yes | a local single-node CockroachDB URL |
+| everything else | no | see [`.env.example`](.env.example) |
+
+Model access is not configured by environment variables: Amazon Bedrock credentials come
+from the AWS credential chain (locally `aws configure`/SSO, in ECS the task role). Only the
+model *ids* and region are overridable.
 
 ## Hackathon compliance (evidence lands in later phases)
 

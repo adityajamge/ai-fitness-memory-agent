@@ -99,13 +99,21 @@ dependencies. **The Phase 2 write path does.** The container reads its config th
 | Variable | Purpose | Notes |
 |---|---|---|
 | `DATABASE_URL` | CockroachDB Cloud connection string | secret — set on the Express service, never baked into the image |
-| `AWS_REGION` | Bedrock region | defaults to `us-east-1` |
+| `AWS_REGION` | Bedrock region | optional; defaults to `us-east-1` |
 | `EXTRACTION_MODEL_ID` / `EMBEDDING_MODEL_ID` | model overrides | optional; defaults in `engine/config.py` |
-| `DEFAULT_TZ` | fallback timezone for events the model can't place | optional; defaults to `Asia/Kolkata` |
+| `EMBED_DIMS` | embedding dimensions | optional; defaults to `512` — **must match `VECTOR(512)`** in `engine/schema.sql` |
+| `DEFAULT_TZ` | fallback timezone for events the model can't place, and the zone aggregation buckets are computed in | optional; defaults to `Asia/Kolkata` |
+| `SESSION_TTL_SECONDS` / `BACKFILL_BATCH` | session lifetime, opportunistic backfill page size | optional; defaults in `engine/config.py` |
 
 Bedrock access comes from the task role, not from keys in env vars — the task execution /
 infrastructure roles created by the Express wizard need `bedrock:InvokeModel` added for
 ingestion to work.
+
+The full variable list, with which are required and what each defaults to, is
+[`.env.example`](../.env.example) at the repo root. That file is a **development** template:
+the deployed service has no `.env` (the `python-dotenv` loader is a dev-only dependency and is
+absent from the image), so every value above must be set as a real environment variable on the
+Express service.
 
 > **Status: not yet verified on the deployed service.** As of 2026-07-21 there is no record
 > that these were configured in ECS, and the app deliberately tolerates an unreachable

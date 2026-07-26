@@ -30,7 +30,10 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
-    "httpx>=0.27",  # Phase 2 — FastAPI TestClient (auth + scoping tests)
+    "httpx>=0.27",         # Phase 2 — FastAPI TestClient (auth + scoping tests)
+    # Lets engine/config.py read a local .env (see .env.example). Dev-only on purpose: the
+    # deployed image has no .env and reads real environment variables from the task definition.
+    "python-dotenv>=1.0",
 ]
 
 [tool.hatch.build.targets.wheel]
