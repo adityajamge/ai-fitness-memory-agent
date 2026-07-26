@@ -272,11 +272,26 @@
   losing routing visibility and the Phase 6 SSE node-streaming path. Full comparison in the
   2026-07-24 design discussion.)
 - **Enforcement (integral to this decision — three reinforcing layers):**
-  - **L1 — structural default:** `GraphState` simply does not declare `context`/`trace`/
-    `outcomes`/`receipt` channels. LangGraph rejects node updates that target undeclared
-    channels, so an *accidental* `return {"context": ...}` fails at runtime and in tests.
-    (Catches the slip; does not catch someone editing the schema to add the field — that is
-    what L2/L3a are for. Confirm the exact LangGraph rejection behavior at implementation.)
+  - **L1 — the developer-signal mechanism (amended 2026-07-24 after implementation).**
+    `GraphState` declares only the allowlisted channels; heavy objects have nowhere to go.
+    **The original assumption was wrong and is corrected here:** LangGraph (verified on
+    1.2.4) does **not** reject node updates that target undeclared channels — it **silently
+    drops** them, with no exception and no warning. Consequence: the durability boundary
+    still holds by itself (a dropped value never enters state, so it never reaches the
+    checkpoint), but an accidental `return {"context": ...}` produces *no signal at all* —
+    the developer sees data silently vanish instead of an error naming the invariant, which
+    is a worse debugging experience than the loud failure L1 was written to provide.
+    **Restored deliberately (Option B, accepted 2026-07-24):** node functions are wrapped so
+    each node's returned keys are checked against the `GraphState` allowlist **before**
+    LangGraph processes the output, raising a `RuntimeError` that names M5-1. The loud
+    failure is therefore *our* mechanism, not an upstream behavior we depend on. A pinning
+    test records LangGraph's actual silent-drop semantics, so if upstream ever changes to
+    persist unknown channels we learn immediately rather than at a boundary violation.
+    (L1 catches the slip early with a teaching error; it does not catch someone editing the
+    schema to add the field — that is what L2/L3a are for.)
+  - **Division of responsibility (explicit):** **L2 is the architectural guarantee** — the
+    invariant cannot be violated. **L1 is the developer-signal mechanism** — the accident
+    fails fast and legibly. L1 is not a guarantee and never substitutes for L2.
   - **L2 — the architectural enforcement point (the real guarantee):** the serialization path
     of **`CockroachDBSaver` (`agent/checkpointer.py`)** is the single chokepoint where the
     invariant is enforced. On serialize it sweeps the checkpoint's channel values (top level
