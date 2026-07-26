@@ -246,6 +246,26 @@ def test_invalid_tool_call_is_recorded_and_the_turn_still_answers(make_graph, us
     assert result.answer
 
 
+def test_embedding_failure_costs_one_tool_not_the_whole_turn(make_graph, user_id) -> None:
+    """Recall needs a query vector. A provider that cannot embed (the Claude API dev
+    adapter) or a transient embed outage must degrade to 'that one tool didn't run',
+    not fail the turn."""
+    provider = FakeModelProvider(
+        embed_error=True,
+        plan_calls=[
+            _call(RECALL_MEMORIES, query="running"),
+            _call(COUNT_EVENTS, type="workout", **RANGE),
+        ],
+    )
+    graph, _ = make_graph(provider)
+
+    result = _turn(graph, user_id, "what have I said about running, and how many workouts?")
+
+    assert any("recall_memories" in e for e in result.errors)
+    assert [s.family for s in result.trace.retrieval_steps] == ["lookup"]  # the rest ran
+    assert result.answer
+
+
 def test_mangled_log_memory_falls_back_to_the_users_own_words(make_graph, user_id) -> None:
     # Never-lose-input posture: a bad text slot must not drop what the user said.
     provider = FakeModelProvider(events=[_run_event()], plan_calls=[_call(LOG_MEMORY)])

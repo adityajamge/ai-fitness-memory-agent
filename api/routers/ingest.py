@@ -31,7 +31,9 @@ class IngestBody(BaseModel):
         return v
 
 
-def _receipt_json(receipt: Receipt) -> dict:
+def receipt_json(receipt: Receipt) -> dict:
+    """The wire shape of an ingestion receipt. Public because ``/api/chat`` returns the same
+    shape for the memories a turn created — one receipt contract, two entry points."""
     return {
         "parse_status": receipt.parse_status,
         "message": receipt.message,
@@ -54,13 +56,11 @@ def _receipt_json(receipt: Receipt) -> dict:
 def ingest(body: IngestBody, request: Request, user_id: UUID = Depends(get_current_user)) -> dict:
     svc: IngestionService = request.app.state.ingestion
     receipt = svc.ingest_text(user_id, body.text)
-    return _receipt_json(receipt)
+    return receipt_json(receipt)
 
 
 @router.post("/memories/{memory_id}/reprocess")
-def reprocess(
-    memory_id: UUID, request: Request, user_id: UUID = Depends(get_current_user)
-) -> dict:
+def reprocess(memory_id: UUID, request: Request, user_id: UUID = Depends(get_current_user)) -> dict:
     """Retry extraction on a note that previously fell back (supersede-on-retry).
 
     Same receipt shape as /api/ingest: on success the note flips to `superseded` and the
@@ -74,7 +74,7 @@ def reprocess(
         receipt = svc.reprocess_note(user_id, memory_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="no reprocessable note found") from exc
-    return _receipt_json(receipt)
+    return receipt_json(receipt)
 
 
 @router.get("/memories/{memory_id}")

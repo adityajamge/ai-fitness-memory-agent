@@ -1,0 +1,112 @@
+"""The chat endpoint — the agent's front door (Phase 3 "bare chat").
+
+This module is **transport only**: authenticate, map the request onto one graph turn, map
+the turn's result back onto JSON. All intelligence lives below it — the graph orchestrates
+(``agent/graph.py``), the engine retrieves and assembles, the provider narrates. Nothing
+here interprets language or touches the database directly.
+
+**Thread scoping (the security property).** The client's ``thread_id`` is opaque and
+namespaced with the caller's ``user_id`` before it ever reaches the checkpointer, so two
+users presenting the same string get two different threads. Replaying another user's
+thread_id is therefore not a way to read their conversation — it silently starts a fresh
+thread of your own, the same "indistinguishable by design" posture as
+``GET /api/memories/{id}`` (ADR-13.4).
+
+**Response shape** is designed so Phase 6 *adds* fields rather than reshaping: the trace
+rides inline today (decision D-2) and becomes a ``trace_id`` fetch once T7 persists it.
+"""
+
+from __future__ import annotations
+
+import logging
+from uuid import UUID, uuid4
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, field_validator
+
+from agent.graph import TurnResult, run_turn
+from api.deps import get_current_user
+from api.routers.ingest import receipt_json
+from engine.model import NarrationError, PlanningError
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api", tags=["chat"])
+
+# The checkpointer requires thread_id < 255 chars (ADR-13.14 footgun). We prepend a 36-char
+# UUID plus a separator, so the client's half is capped well inside that budget.
+MAX_CLIENT_THREAD_ID = 128
+
+
+class ChatBody(BaseModel):
+    message: str
+    thread_id: str | None = None
+
+    @field_validator("message")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("message must not be empty")
+        return v
+
+    @field_validator("thread_id")
+    @classmethod
+    def _sane_thread(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not v.strip():
+            raise ValueError("thread_id must not be empty")
+        if len(v) > MAX_CLIENT_THREAD_ID:
+            raise ValueError(f"thread_id must be at most {MAX_CLIENT_THREAD_ID} characters")
+        return v
+
+
+def thread_key(user_id: UUID, client_thread_id: str) -> str:
+    """Namespace a client thread id to its owner. This is what makes threads user-scoped:
+    the checkpointer never sees a bare client-supplied key."""
+    return f"{user_id}:{client_thread_id}"
+
+
+def _turn_json(client_thread_id: str, result: TurnResult) -> dict:
+    return {
+        "thread_id": client_thread_id,
+        "answer": result.answer,
+        "citations": result.citations,
+        "receipts": [receipt_json(r) for r in result.receipts],
+        # Inline for Phase 3; Phase 6 (T7) persists it and the UI fetches by trace_id.
+        "trace": result.trace.to_json() if result.trace else None,
+        # Retrieval calls the engine refused (e.g. an unknown metric). Surfaced rather than
+        # swallowed: the answer may be partial and the caller deserves to know.
+        "errors": result.errors,
+    }
+
+
+@router.post("/chat")
+def chat(body: ChatBody, request: Request, user_id: UUID = Depends(get_current_user)) -> dict:
+    """Run one conversational turn: plan → (ingest) → (retrieve) → assemble → narrate."""
+    graph = getattr(request.app.state, "graph", None)
+    if graph is None:
+        # The graph is built at startup; absence means the database was unreachable then
+        # (deploy-early tolerates that so the health check stays green).
+        raise HTTPException(status_code=503, detail="chat is temporarily unavailable")
+
+    settings = request.app.state.settings
+    client_thread_id = body.thread_id or uuid4().hex
+
+    try:
+        result = run_turn(
+            graph,
+            user_id=user_id,
+            question=body.message,
+            thread_id=thread_key(user_id, client_thread_id),
+            tz=settings.default_tz,
+        )
+    except (PlanningError, NarrationError) as exc:
+        # The model failed on this turn. Nothing was half-written: ingestion commits
+        # atomically and the checkpoint is only written at the end of a turn.
+        logger.warning("chat turn failed for user %s: %s", user_id, exc)
+        raise HTTPException(
+            status_code=502, detail="the assistant is unavailable right now; please retry"
+        ) from exc
+
+    return _turn_json(client_thread_id, result)

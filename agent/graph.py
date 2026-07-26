@@ -46,7 +46,7 @@ from agent.tools import (
 from engine.assembly import ContextBlock, RetrievalOutcome, assemble
 from engine.db import Database
 from engine.ingestion import IngestionService, Receipt
-from engine.model import ModelProvider, ToolCall
+from engine.model import EmbeddingError, ModelProvider, ToolCall
 from engine.trace import EvidenceTrace
 
 logger = logging.getLogger(__name__)
@@ -208,11 +208,14 @@ def build_graph(
                 continue
             try:
                 prepared.append(prepare_call(call, model=model, tz=tz))
-            except ToolCallError as exc:
+            except (ToolCallError, EmbeddingError) as exc:
                 # One bad call must not sink the turn: record it so the answer can be
-                # honest about what could not be retrieved, and run the rest.
-                logger.info("dropping invalid tool call %s: %s", call.tool, exc)
-                carrier.errors.append(str(exc))
+                # honest about what could not be retrieved, and run the rest. Embedding
+                # failures land here too — recall needs a query vector, and a provider
+                # that cannot embed (or a transient embed outage) should cost the user
+                # that one tool, not the whole turn.
+                logger.info("dropping tool call %s: %s", call.tool, exc)
+                carrier.errors.append(f"{call.tool}: {exc}")
 
         if prepared:
             with db.transaction() as cur:
