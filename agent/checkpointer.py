@@ -30,6 +30,9 @@ CockroachDB and the real CockroachDB Cloud cluster (2026-07-17).
 
 Full investigation, debugging timeline, and maintenance notes:
 docs/engineering/cockroachdb-postgressaver.md (canonical reference).
+
+This module is ALSO the enforcement point for the graph-state durability
+boundary (decision M5-1, ADR-13.14): see ``_GuardedSerde`` below.
 """
 
 from base64 import b64decode
@@ -37,6 +40,10 @@ from typing import Any
 
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+from engine.assembly import ContextBlock, RetrievalOutcome
+from engine.ingestion import Receipt
+from engine.trace import EvidenceTrace
 
 # Same columns as upstream base.SELECT_SQL (consumed by _load_checkpoint_tuple);
 # only the two aggregate columns are built differently. The trailing space
@@ -71,10 +78,101 @@ select
 from checkpoints """
 
 
+# ── the graph-state durability boundary (M5-1 L2 — the architectural enforcement point) ──
+#
+# Heavyweight, turn-local runtime objects must NEVER enter the checkpointed graph state:
+# the checkpointer holds conversation/execution continuity only (ADR-13.14 — the trace's
+# durable home is the `evidence_traces` table, Phase 6), and blobs in graph state are a
+# known checkpointer footgun (ADR-13.8, strict msgpack).
+#
+# LangGraph persists every state channel after EVERY super-step, so "clear it before END"
+# does not work. The guard therefore lives on the serialization path, which is the single
+# chokepoint every persist flows through — in tests and in production alike. That is what
+# makes the invariant a guarantee rather than a convention: adding a banned object to
+# `GraphState` does not sneak it past the boundary, it just makes this guard fire.
+#
+# Verified 2026-07-24 on langgraph 1.2.4 / langgraph-checkpoint 4.1.1 /
+# langgraph-checkpoint-postgres 3.1.0: values reach `dumps_typed` as LIVE Python objects
+# (containers arrive as live list/dict), and a raise here prevents the write entirely —
+# nothing is persisted. Covers `put()` and `put_writes()` in one place.
+_BANNED_STATE_TYPES: tuple[type, ...] = (
+    ContextBlock,
+    EvidenceTrace,
+    RetrievalOutcome,
+    Receipt,
+)
+
+_GUARD_MESSAGE = (
+    "{type_name} must never be checkpointed into LangGraph state (decision M5-1, "
+    "ADR-13.14): the checkpointer holds conversation continuity only. Keep heavy, "
+    "turn-local objects on the per-invocation TurnCarrier (agent/graph.py) instead of a "
+    "GraphState channel."
+)
+
+
+class _GuardedSerde:
+    """A ``SerializerProtocol`` wrapper that refuses to serialize banned runtime objects.
+
+    Delegates everything to the real serde; the only added behavior is a sweep of each
+    value before it is written — the value itself plus one level into containers, which is
+    where an accidental ``{"trace": [trace]}`` channel would hide. Deliberately raises
+    ``TypeError`` (not a warning, not a drop): a silently discarded trace would be worse
+    than a loud failure.
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    @property
+    def inner(self) -> Any:
+        """The wrapped serde (tests assert the guard is installed exactly once)."""
+        return self._inner
+
+    @staticmethod
+    def _reject(value: Any) -> None:
+        if isinstance(value, _BANNED_STATE_TYPES):
+            raise TypeError(_GUARD_MESSAGE.format(type_name=type(value).__name__))
+
+    def _sweep(self, value: Any) -> None:
+        self._reject(value)
+        if isinstance(value, (list, tuple, set, frozenset)):
+            for item in value:
+                self._reject(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                self._reject(item)
+
+    # ── SerializerProtocol ────────────────────────────────────────────────────────────
+    def dumps_typed(self, obj: Any) -> tuple[str, bytes]:
+        self._sweep(obj)
+        return self._inner.dumps_typed(obj)
+
+    def dumps(self, obj: Any) -> bytes:
+        self._sweep(obj)
+        return self._inner.dumps(obj)
+
+    def loads_typed(self, data: tuple[str, bytes]) -> Any:
+        return self._inner.loads_typed(data)
+
+    def loads(self, data: bytes) -> Any:
+        return self._inner.loads(data)
+
+
 class _CockroachReads:
-    """Mixin: CockroachDB-safe read query + jsonb/base64 loaders."""
+    """Mixin: CockroachDB-safe read query + jsonb/base64 loaders, plus the M5-1 L2 guard.
+
+    The guard is installed in ``__init__`` so it is on by construction for every saver this
+    app builds — including via ``from_conn_string``, which routes through ``cls(...)``.
+    """
 
     SELECT_SQL = SELECT_SQL
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # Idempotent: re-wrapping would still be correct, but a single layer keeps the
+        # `inner` assertion in the guard tests meaningful.
+        if not isinstance(self.serde, _GuardedSerde):
+            self.serde = _GuardedSerde(self.serde)
 
     def _load_blobs(self, blob_values: list[list[str]] | None) -> dict[str, Any]:
         if not blob_values:
