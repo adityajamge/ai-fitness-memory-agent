@@ -13,6 +13,13 @@
 > stack, hosting, embeddings, multi-user model, failure policies, analytics honesty — see
 > [ADR-12 and ADR-13](09-decisions.md#adr-12). Only OQ5 (causal story) and OQ6 (report
 > parsing depth) remain open ([10-open-questions.md](10-open-questions.md)).
+>
+> **Documentation audit 2026-07-24 (end of Phase 3):** decisions taken *during* Phase 3
+> implementation are now recorded as [ADR-14](09-decisions.md#adr-14), and docs 02/03/05/06
+> describe the architecture **as built** (routing as tool selection, the extended builder set,
+> assembly's two-view evidence split, the graph-state durability boundary). One open contract
+> item is flagged for Phase 6: [ADR-14.8](09-decisions.md#adr-14) gates T7's citation
+> validator.
 
 ## The project in three sentences
 
@@ -37,7 +44,7 @@ flagged the insight when the data arrived.
 | [06-retrieval-strategy.md](06-retrieval-strategy.md) | Hybrid SQL + vector retrieval, when each path fires, ranking | Building retrieval or debugging answers |
 | [07-glass-box-ui.md](07-glass-box-ui.md) | UI philosophy, approved wireframe v3, ranked sub-features + cut order | Building the UI |
 | [08-roadmap.md](08-roadmap.md) | Milestones 1–4, the Assignment, degradation strategy, submission checklist | Planning any week |
-| [09-decisions.md](09-decisions.md) | ADRs: decisions, trade-offs, assumptions, **rejected alternatives** (incl. ADR-12 evidence traces, ADR-13 eng-review lockdown) | Before re-opening any settled question |
+| [09-decisions.md](09-decisions.md) | ADRs: decisions, trade-offs, assumptions, **rejected alternatives** (incl. ADR-12 evidence traces, ADR-13 eng-review lockdown, **ADR-14 Phase 3 agent spine & read path**) | Before re-opening any settled question |
 | [10-open-questions.md](10-open-questions.md) | Open questions — 5 of 7 resolved 2026-07-12; OQ5/OQ6 remain | Before starting Milestone 1 |
 | [11-implementation-tasks.md](11-implementation-tasks.md) | The 18 review-derived tasks, parallelization lanes, outside-voice dispositions | Planning any build session |
 | [12-test-plan.md](12-test-plan.md) | Coverage map (33 paths), eval suites, failure-modes table, test infra | Writing any code or test |

@@ -55,16 +55,40 @@ Boundary contract:
 
 ## <a name="query-construction"></a>Query construction: closed builder families, never free-form
 
-The engine contains a **closed set of parameterized query builders** — aggregation
-(sum/avg/count over a payload field, grouped by period), last/first-event lookup, timeline
-slice, vector K-NN, insight lookup. A tool call selects a builder and fills its typed slots;
-the builder composes SQL from vetted fragments with **bound parameters only**. Dynamic in
-the narrow sense (filters/grouping assembled per request from a finite vocabulary), but:
+The engine contains a **closed set of parameterized query builders**. A tool call selects a
+builder and fills its typed slots; the builder composes SQL from vetted fragments with
+**bound parameters only**. Dynamic in the narrow sense (filters/grouping assembled per
+request from a finite vocabulary), but:
 
 - **No LLM-generated SQL, ever.** The model can only choose a builder and fill typed slots.
 - **Zero injection surface by construction** — no query string ever interpolates user content.
+  Even the JSONB path, the grouping period, and the timezone are bound parameters.
 - **The executed-SQL panel stays testable** — every builder family has fixture tests, so the
   glass box displays queries from a known, verified family.
+
+The families, as implemented ([ADR-14.4](09-decisions.md#adr-14)):
+
+| Family | Answers | Notes |
+|---|---|---|
+| **aggregate** | "how much protein this month?" | sum/avg/count/min/max over a typed payload field, optional day/week bucketing; `count` here counts *logged values of that metric* |
+| **recall** | "when did I complain about my knee?" | vector K-NN over `summary` embeddings |
+| **timeline** | "what was I doing in May?" | ordered typed slice of a date range |
+| **lookup** | "when did I last eat chicken?" | newest/oldest event of a type, optional exact item containment |
+| **count** | "how many workouts in June?" | counts *events of a type*, regardless of which metrics they carry |
+| **insight lookup** | "has this been flagged before?" | Phase 5 — structured, freshness-checked ([below](#insight-reuse)) |
+
+Two rules govern the slots themselves:
+
+- **Timezone is never a planner slot** ([ADR-14.10](09-decisions.md#adr-14)) — it belongs to
+  the user, not the question, so the engine injects it. A model-chosen timezone would make
+  day boundaries model-dependent.
+- **Slots are strict; nothing is defaulted into existence** ([ADR-14.11](09-decisions.md#adr-14)).
+  A missing date range is rejected rather than guessed — inventing a window answers a
+  question the user did not ask. Every planner mistake fails above the database.
+
+Metrics come from a **whitelist derived from the payload registry's typed hot fields**, and
+memory types from the registry itself, so the tool schemas the planner sees cannot name a
+metric or type the engine does not have — the constraint is in the schema, not in a prompt.
 
 Food/item filters (e.g. "when did I last eat chicken?") have two paths: structured
 containment over extracted payload items (inverted index) and vector search over `summary`
@@ -111,20 +135,30 @@ and the per-candidate scores are recorded in `EvidenceTrace.ranking`, so "why th
 picked these memories" is itself glass-box material. Candidate evidence (aggregates,
 timeline slices, semantic hits, insights) is scored on:
 
-1. **Relevance** to the question (vector distance for semantic candidates; filter/exact match
-   for structured ones)
+1. **Relevance** to the question (vector distance for semantic candidates; exact match for
+   structured ones — a filter match is certain by definition)
 2. **Confidence** (reconstructed low-confidence memories rank below live ones; the answer can
-   hedge: "around early May — estimated")
-3. **Recency / temporal proximity** to the question's window
+   hedge: "around early May — estimated"). Provenance is folded into this axis, and the
+   *effective* value — the number that actually drove the score — is what the trace records
+3. **Recency** — temporal proximity **within the retrieved candidate set**, newest → 1.0,
+   oldest → 0.0 ([ADR-14.5](09-decisions.md#adr-14) amends the original "to the question's
+   window": assembly deliberately never learns the question's window, because reading it
+   would mean parsing the question and breaking the determinism boundary)
 4. **Tier** — a high-confidence derived insight that already answers the question outranks
    re-deriving from raw events
 
 plus **diversity caps** (the budget must not fill with near-identical rows). Exact weights
 are implementation detail; the commitments above are architectural.
 
-Assembly preserves memory IDs end-to-end so citations survive into the UI. Context
-optimization enforces a token budget: aggregates are compact by nature; raw-event inclusion
-is capped and summarized beyond the cap.
+Assembly preserves memory IDs end-to-end so citations survive into the UI, and **the same
+memory surfaced by two tools is one candidate**, keeping the better relevance score — which
+is how a structured lookup and a semantic recall of the same question merge into one honest
+evidence set rather than double-counting.
+
+Context optimization enforces a token budget over **raw events only** — aggregates are
+compact by nature and always pass through. The budget applies to what the *narrator* sees:
+`EvidenceTrace.evidence` keeps everything retrieved, so the glass box shows more than the
+model did and `ranking` explains what was cut ([ADR-14.6](09-decisions.md#adr-14)).
 
 Every assembly also **emits a deterministic `EvidenceTrace`** — executed queries (SQL +
 vector, with parameters), the selected evidence set, participating insights with lineage,

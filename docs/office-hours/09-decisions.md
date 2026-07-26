@@ -215,6 +215,157 @@ earlier ADRs or docs.
     this iteration** (builder decision; TODOS). Accepted residual risk: unbounded Bedrock
     spend under abuse during the public-URL window.
 
+## <a name="adr-14"></a>ADR-14 — Phase 3 decisions (agent spine & read path, 2026-07-22 → 2026-07-24)
+
+Decisions taken **during** Phase 3 implementation (M1–M6) and now implemented in code. They
+were held in a "Temporary Architecture Decision Log" in `TODOS.md` while these docs were
+frozen; this ADR is their permanent home. Each refines, rather than reverses, an earlier
+decision — where one amends ADR-12 or ADR-13 that is stated explicitly.
+
+### 14.1 Routing is tool selection — one planner surface, not ROUTE + PLAN
+
+`ModelProvider` gained a single `plan(question, tools, *, now, tz) -> list[ToolCall]`
+surface. There is **no** separate `route()`/`classify()` method: with `log_memory` among the
+offered tools, the planner selecting it *is* the ingest classification, selecting retrieval
+tools is a query turn, selecting both is a "both" turn.
+
+**Why:** classifying the turn and choosing tools are one cognitive act over one vocabulary —
+a separate ROUTE step would read the same sentence twice. It is also the native shape of
+tool-use models (`toolChoice: auto` already returns "which tools, with which arguments, or
+none"), so splitting it doubles latency and token cost for a decision the model was already
+making. And it removes a class of failure: no intent enum to keep in sync with the tool set,
+no ROUTE/PLAN disagreement to reconcile.
+
+**Why this preserves the architecture:** 05's load-bearing invariant is the *query-planning
+boundary* — exactly one place understands natural language, everything below the tool-call
+boundary is deterministic. Merging keeps that exactly: still one NL step, still only typed
+tool calls out, still deterministic downstream. 05's two-node drawing was labelled
+"design-level" — it described logical stages, not a two-model-call contract.
+*(Amends the graph shape in [05](05-agent-architecture.md).)*
+
+### 14.2 The empty plan is an assertion, not a failure
+
+`plan()` returning `[]` is a **positive assertion** that the turn needs no memory operation
+(small talk, a greeting), distinct from `PlanningError` (the call failed or was malformed).
+Mirrors the extraction empty-result contract (ADR-13.5): the planner's analogue of "nothing
+to log". Gives the graph a clean, non-erroring conversational path instead of forcing a
+retrieval or crashing a turn.
+
+### 14.3 Ingest runs before retrieve within a turn
+
+On a "both" turn the graph runs ingestion **first**, so a memory logged this turn is already
+committed when the same turn's aggregation scans for it ("logged my run — am I improving?").
+Without the ordering the answer would silently omit the event the user just reported — a
+wrong answer that looks right, the worst failure class for a glass box.
+
+### 14.4 The closed builder set gains `lookup_events` and `count_events`
+
+[06](06-retrieval-strategy.md) enumerated aggregation, last/first-event lookup, timeline
+slice, vector K-NN, and insight lookup. Implementation splits the point-lookup family into
+**`lookup_events`** (newest/oldest of a type, optional exact item containment) and adds
+**`count_events`** (how many events of a type in a range). The addition exists because the
+aggregation family's `count` was scoped to rows *where the metric is present* — counting
+logged protein values is a different question from counting meals, and overloading one
+`count` would have made both ambiguous. The set remains closed and parameterized.
+
+### 14.5 Ranking recency is relative to the retrieved set
+
+06 specified "temporal proximity **to the question's window**". Assembly instead normalizes
+recency *within the candidate set* (newest retrieved → 1.0, oldest → 0.0).
+
+**Why the deviation:** using the question's window would require assembly to know that
+window — i.e. parse the question (breaking the no-language determinism boundary) or reconcile
+each tool's `date_range` into one reference window (undefined when tools disagree, absent for
+recall entirely). Within-set normalization is deterministic, language-free, and sufficient
+for ordering *within* one answer, which is all ranking is for.
+
+### 14.6 Two views of the evidence: the trace shows more than the model saw
+
+`EvidenceTrace.evidence` carries **everything retrieved** (deduped across tools, ranked);
+`ContextBlock.memories` carries only the diversity-capped, budget-limited subset handed to
+the narrator, with `EvidenceTrace.ranking` explaining what was cut and why.
+
+**Why:** 06 specifies a budgeted context block and 03 a trace of "memory IDs used", but
+neither says whether truncation applies to both. Keeping the trace complete makes "why the
+engine picked these and dropped those" inspectable, and keeps the token budget a *narration*
+concern rather than an evidence-hiding one.
+
+### 14.7 Assembly is a pure function; aggregate rows are hydrated in Phase 6
+
+`assemble()` touches no database. For an aggregate's contributing memory IDs it therefore has
+the IDs but not their snapshot metadata, and does not fetch it — hydrating those rows is
+exactly T16's batch-fetch (Phase 6). This keeps assembly fixture-testable and deterministic,
+and is the mechanism behind 14.8.
+
+### 14.8 The citable surface is `citable_ids`, not `trace.evidence` alone — **open item for T7**
+
+ADR-12/13.13 say the narrator may cite only IDs "present in the turn's EvidenceTrace". Given
+14.7, an aggregate's contributing IDs live in `ContextBlock.aggregates[].buckets[]
+.evidence_ids` (exposed as `ContextBlock.citable_ids()`) and are **not** in `trace.evidence`.
+A *valid* citation of an aggregated meal would therefore be flagged invalid by a validator
+that reads `trace.evidence` alone.
+
+**T7 must resolve this before building citation validation** — either validate against the
+full citable set (`trace.evidence` ∪ aggregate/count contributing IDs), or carry those IDs
+into the persisted trace so "the UI reads the trace" stays literally true. **Recommended: the
+latter**, keeping the trace the single source of glass-box truth. *(Refines
+[ADR-12](#adr-12); tracked on T7 in [11](11-implementation-tasks.md).)*
+
+### 14.9 Graph-state durability boundary, and where it is enforced
+
+ADR-13.14 says the checkpointer holds execution state while `turns`/`evidence_traces` are UI
+truth. Phase 3 makes that boundary **enforceable rather than conventional**: heavyweight
+turn-local objects (`ContextBlock`, `EvidenceTrace`, `RetrievalOutcome`, `Receipt`) must
+never enter checkpointed state. Checkpointed channels are small and serde-safe
+(`messages`, `user_id`, `question`, `now`, `tz`, `tool_calls`, `answer`, `citations`); the
+heavy objects ride a per-invocation carrier passed through `RunnableConfig`.
+
+Enforcement is layered, and the layers are **not** equivalent: the **guard on
+`CockroachDBSaver`'s serialization path is the architectural guarantee** — every persist in
+tests and production flows through it, so the invariant cannot be sidestepped by editing the
+state schema. A node-output wrapper supplies the developer-facing signal, and an allowlist
+tripwire test makes adding a channel a conscious act. Full investigation, including why
+LangGraph's own behavior could not be relied on:
+[../engineering/graph-state-durability.md](../engineering/graph-state-durability.md).
+*(Refines ADR-13.14.)*
+
+### 14.10 Timezone is engine-injected; it is never a planner slot
+
+No retrieval tool exposes a `tz` argument. The timezone is a property of the *user*, not of
+the question, so the tool layer injects it. Letting a model fill it would put language
+interpretation where determinism belongs and make bucket boundaries model-dependent.
+
+### 14.11 Slot validation is strict — no invented defaults
+
+A missing required slot (e.g. an aggregation with no date range) is rejected, never defaulted
+to a guessed window: inventing a range answers a question the user did not ask. Likewise an
+explicitly empty `types` filter is rejected rather than silently reinterpreted as "no
+filter". Every planner mistake dies above the database, before any SQL is composed.
+
+### 14.12 Honest degradation: a failed tool costs that tool, not the turn
+
+An invalid tool call, or an embedding failure that prevents semantic recall, is recorded and
+surfaced to the caller while the remaining retrieval still runs and the turn still answers.
+Silently dropping a requested retrieval would produce a confidently incomplete answer; failing
+the whole turn would lose work the engine could legitimately do. The same posture as
+never-lose-input (ADR-13.5), applied to the read path.
+
+### 14.13 Thread identity is namespaced by user
+
+The client's `thread_id` is opaque and is namespaced with the caller's `user_id` before it
+reaches the checkpointer, so two users presenting the same string get two different threads.
+Replaying another user's thread id is therefore not a way to read their conversation — it
+silently starts your own, the same "existence is not probeable" posture as
+`GET /api/memories/{id}` (ADR-13.4).
+
+### 14.14 The trace rides inline in Phase 3, by `trace_id` from Phase 6
+
+`POST /api/chat` returns `{thread_id, answer, citations, receipts, trace, errors}` with the
+`EvidenceTrace` **inline**. Persistence (`evidence_traces`) and `trace_id` fetch are T7; the
+response shape is designed so Phase 6 *adds* fields rather than reshaping. ADR-12's property
+("a trace exists whenever context was assembled") already holds — only its storage is
+deferred.
+
 ## Standing assumptions (verify, don't trust)
 
 1. The builder's real history contains a demo-worthy causal story (Assignment verifies; a

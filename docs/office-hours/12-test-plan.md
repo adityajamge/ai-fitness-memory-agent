@@ -8,11 +8,25 @@
 
 ## Coverage map (all paths are planned-GAPs until implemented)
 
-> **Implemented as of 2026-07-22 (Phase 2):** the `engine/ingestion` block except photo/S3
-> (Phase 5), the whole `engine/types` block, both canaries, the signup/scoping user flows,
-> the Bedrock-provider empty-result contract (D1), the CLI backfill, and the reprocess
-> endpoint (D2) — **56 Phase-2 tests + 2 canaries = 58 collected**. Everything else below
-> is still a planned gap.
+> **Implemented as of 2026-07-24 (Phases 2–3): 255 tests green** against real CockroachDB.
+>
+> - **Phase 2** — the `engine/ingestion` block except photo/S3 (Phase 5), the whole
+>   `engine/types` block, both canaries, signup/scoping user flows, the provider
+>   empty-result contract (D1), CLI backfill, the reprocess endpoint (D2).
+> - **Phase 3** — the whole `engine/retrieval` block (aggregate incl. empty-result and tz
+>   edges, recall incl. status filter and NULL-embedding exclusion, timeline slices, plus
+>   `lookup`/`count` for the two families added in [ADR-14.4](09-decisions.md#adr-14)); the
+>   `engine/trace` block **except persistence and citation validation** (T7) — the
+>   no-context-without-a-trace property holds at the assembly boundary today; the
+>   `agent graph` routing block (ingest / query / both / conversational); the provider
+>   `plan`/`narrate` contracts; the tool layer's slot validation; and the chat endpoint's
+>   transport contract incl. cross-user thread isolation.
+> - **New, beyond the original map:** the graph-state durability suite
+>   ([ADR-14.9](09-decisions.md#adr-14)) — the checkpointer guard against a real database, an
+>   allowlist tripwire, and a pinning test for LangGraph's silent-drop semantics.
+>
+> Still planned: consolidation (Phase 5), trace persistence + citation validation (T7),
+> photo/S3 ingestion, replay CLI, the 4 Playwright E2E paths, and both live-model eval lanes.
 
 ```
 CODE PATHS                                               USER FLOWS

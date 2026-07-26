@@ -19,3 +19,5 @@ Conventions:
 |---|---|
 | [cockroachdb-postgressaver.md](cockroachdb-postgressaver.md) | LangGraph checkpointing on CockroachDB: why stock `PostgresSaver` fails, the T2 canary investigation, and the `CockroachDBSaver` compatibility layer (`agent/checkpointer.py`) |
 | [ingestion-transaction-boundaries.md](ingestion-transaction-boundaries.md) | The Phase 2 write path (`engine/ingestion.py`): transaction boundaries, the never-lose-input guarantee, and how partial extraction / validation / embedding failures interact with it (ADR-13.5) |
+| [graph-state-durability.md](graph-state-durability.md) | Keeping heavyweight runtime objects out of the LangGraph checkpoint (ADR-14.9): why "clear it before END" fails, the carrier design, LangGraph's silent-drop behavior, and why the serde guard — not the state schema — is the guarantee |
+| [vector-index-and-filtered-knn.md](vector-index-and-filtered-knn.md) | How semantic recall actually executes: the T1 canary proved *unfiltered* K-NN uses the vector index, but the product's user-scoped filtered query does not — the measurement, the decision to keep correctness, and the honest scale answer T17 needs |

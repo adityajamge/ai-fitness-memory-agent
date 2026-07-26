@@ -13,8 +13,8 @@ flowchart TB
     end
 
     subgraph Agent["LangGraph Agent (model-agnostic)"]
-        ROUTER["Intent routing<br/>(ingest vs. query vs. both)"]
-        TOOLS["Engine-exposed tools<br/>log_memory · aggregate_memories ·<br/>recall_memories · get_timeline · analyze_series"]
+        ROUTER["Planner — the only NL layer<br/>(routing IS tool selection)"]
+        TOOLS["Engine-exposed tools<br/>log_memory · aggregate_memories · recall_memories ·<br/>get_timeline · lookup_events · count_events · analyze_series"]
     end
 
     subgraph ME["Memory Engine (the centerpiece — internal package)"]
@@ -77,7 +77,10 @@ queue (builder rule: no infra for completeness).
 scoping, every new account starts with empty memory ([ADR-13.4](09-decisions.md#adr-13)).
 Conversation state: LangGraph PostgresSaver checkpointer on CockroachDB for graph execution
 state; the app's `turns` + `evidence_traces` tables are the source of truth for UI rendering
-([ADR-13.14](09-decisions.md#adr-13)).
+([ADR-13.14](09-decisions.md#adr-13)). Thread ids are namespaced by user, and the checkpoint
+holds only small serde-safe channels — heavyweight turn artifacts never enter it, enforced at
+the checkpointer's serialization path ([ADR-14.9/14.13](09-decisions.md#adr-14),
+[engineering deep dive](../engineering/graph-state-durability.md)).
 
 ## CockroachDB tool usage (hackathon requirement: ≥2, we evidence 3)
 
@@ -95,9 +98,15 @@ CockroachDB → consolidation check on affected series → inline **memory recei
 engine pane update.
 
 **Query turn** (user asks the money question):
-question → agent plans retrieval → engine runs SQL aggregation + vector search (+ existing
-derived insights) → context assembly ranks evidence **and emits an `EvidenceTrace` as a
-deterministic byproduct** (executed queries, evidence set, insight lineage, ranking) →
-LLM narrates answer **with memory-ID citations validated against the trace** → engine pane
-renders the trace directly via the app API — **UI data never passes through the model**
+question → agent plans retrieval (**one planning call — selecting tools *is* the routing**)
+→ engine runs SQL aggregation + vector search (+ existing derived insights) → context
+assembly ranks evidence **and emits an `EvidenceTrace` as a deterministic byproduct**
+(executed queries, evidence set, insight lineage, ranking) → LLM narrates answer **with
+memory-ID citations validated against the trace** → engine pane renders the trace directly
+via the app API — **UI data never passes through the model**
 ([ADR-12](09-decisions.md#adr-12)).
+
+**Both at once** ("logged my run — am I improving?"): the planner selects `log_memory` *and*
+retrieval tools in the same call, and the graph runs ingestion **first**, so the event just
+reported is already committed when the same turn's aggregation scans for it
+([ADR-14.3](09-decisions.md#adr-14)).

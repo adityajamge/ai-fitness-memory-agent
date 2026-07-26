@@ -64,13 +64,21 @@
 
 # Temporary Architecture Decision Log (post-documentation-freeze)
 
-> **Read this section before starting any milestone.** It is the canonical holding pen for
-> architecture decisions **accepted after the office-hours documentation freeze** — decisions
-> the committed code already implements (or that gate upcoming work) but that are not yet in
-> the ADRs/design docs. Each entry carries a **"doc home when unfrozen"** pointer; when docs
-> unfreeze, migrate every entry into its cited ADR/design doc and **delete it here** —
-> TODOS.md is the holding pen, not their permanent home. Entries below span the M2 review
-> (write-side canonicalization) and the M3 audit (A1/A2/A3/D1/D2).
+> **Read this section before starting any milestone.** It is the holding pen for architecture
+> decisions **accepted after the office-hours documentation freeze** that are **not yet
+> implemented** — decisions that gate upcoming work but have no code to describe yet. Each
+> entry carries a **"doc home when implemented"** pointer; once the work lands, migrate the
+> entry into its cited ADR/design doc and delete it here.
+>
+> **Migrated 2026-07-24 (Phase 3 documentation audit):** every entry describing *implemented*
+> Phase 3 architecture now lives in [ADR-14](docs/office-hours/09-decisions.md#adr-14) —
+> A1/A2/D1/D2 (assembly, builder families, ranking), M4-1/M4-2 (routing as tool selection, the
+> empty-plan contract), and M5-1 (the graph-state durability boundary, whose investigation is
+> written up in
+> [docs/engineering/graph-state-durability.md](docs/engineering/graph-state-durability.md)).
+> A3 (the citable-surface contract) is documented as ADR-14.8 and now tracked as a blocking
+> decision on **T7** in
+> [11-implementation-tasks.md](docs/office-hours/11-implementation-tasks.md).
 
 ## Write-side entity canonicalization (accepted 2026-07-23 — before Phase 4 replay)
 
@@ -108,233 +116,8 @@
 - **Independent of this:** add case-insensitive item matching to `lookup_events` regardless
   (mechanical string hygiene, engine-legal, ~zero cost) — a cheap partial mitigation until
   canonicalization lands.
+- **Doc home when implemented:** a new ADR in
+  [09-decisions.md](docs/office-hours/09-decisions.md) (it changes the extraction contract),
+  plus the item-filter paths in [06-retrieval-strategy.md](docs/office-hours/06-retrieval-strategy.md).
 - **Depends on / blocked by:** decide and land **with or just before T8** (Phase 4 replay),
   the first pipeline that produces reconstructed memories at scale.
-
-## A3 — Citation-validation surface is `citable_ids`, not `trace.evidence` (blocks T7)
-
-- **Status:** ACCEPTED decision + **open contract item that T7 (Phase 6) must honor**. This
-  is the highest-priority note here: left unresolved it becomes a correctness bug in
-  citation validation.
-- **The issue:** ADR-12 / ADR-13.13 say the narrator may cite only IDs "present in the turn's
-  EvidenceTrace," and "the UI reads the trace." But `assemble()` is a pure function (see D2):
-  an aggregate's contributing memory IDs live in `ContextBlock.aggregates[].buckets[]
-  .evidence_ids` (surfaced by `ContextBlock.citable_ids()`), and are **not** in
-  `trace.evidence` — nor anywhere else in the trace (an aggregate's `RetrievalStep` records
-  SQL + params + row_count, not result IDs). So a *valid* citation of an aggregated meal
-  would be flagged **invalid** if T7 validates strictly against the persisted trace.
-- **What T7 must do (decide one, before building citation validation):**
-  1. Validate the answer's citations against the turn's full citable set — `trace.evidence`
-     IDs ∪ aggregate/count contributing IDs — not `trace.evidence` alone; **and/or**
-  2. Extend the persisted trace so aggregate/count contributing IDs are reachable *from the
-     trace itself* (e.g. carry them on the aggregate `RetrievalStep`, or hydrate contributing
-     rows into `trace.evidence` via the T16 batch-fetch). Option 2 keeps ADR-12's "the UI
-     reads the trace" literally true and is the cleaner long-term shape.
-- **Recommendation:** option 2 (put the IDs in the trace) so the persisted trace stays the
-  single source of truth for the glass box; `citable_ids()` then becomes a trace-derived
-  helper rather than a context-only one.
-- **Doc home when unfrozen:** ADR-12 (evidence traces) + ADR-13.13 (honest citation scope);
-  note the refinement in 03-memory-engine.md §6 (citation validation) and the T7 task spec
-  in 11-implementation-tasks.md.
-- **Depends on / blocked by:** must be settled **at the start of T7** (trace persistence +
-  citation validation, Phase 6, Lane E), before the UI components consume the contract.
-
-## A1 — Two-view evidence split: `trace.evidence` ⊇ `context.memories`
-
-- **Status:** ACCEPTED decision, implemented in `engine/assembly.py`.
-- **What:** `EvidenceTrace.evidence` carries **everything retrieved** (deduped across tools,
-  all candidates, ordered by score); `ContextBlock.memories` carries only the
-  diversity-capped, budget-limited subset handed to the narrator. The glass box therefore
-  shows more than the model saw, and `EvidenceTrace.ranking` explains what was cut and why.
-- **Why:** the docs specify a budgeted context block (06) and a trace of "memory IDs used"
-  (03) but never say whether budget truncation applies to both. Keeping the trace complete
-  makes "why the engine picked these and dropped those" fully inspectable — a transparency
-  win, and it keeps the budget a narration concern rather than an evidence-hiding one.
-- **Doc home when unfrozen:** 06-retrieval-strategy.md (ranking & assembly) + 03-memory-engine.md §5.
-
-## A2 — `count_events`: a builder family beyond 06's enumerated closed set
-
-- **Status:** ACCEPTED addition, implemented + tested (M2).
-- **What:** a type-level event-count family ("how many workouts in June?") — counts rows of
-  a type in a range, with contributing IDs. Distinct from the aggregation family's `count`
-  agg, which counts rows where a *specific metric* is present. The distinction exists
-  because the aggregate `count` was scoped to metric-present rows.
-- **Why:** "how many X" is a natural, common question the enumerated families didn't cover
-  cleanly; folding it into aggregation would have overloaded the `count` semantics.
-- **Doc home when unfrozen:** 06-retrieval-strategy.md (query-construction: closed builder
-  families) — add it to the enumerated set; note it in the engine-tools table in
-  03-memory-engine.md if it becomes a distinct planner tool in M5.
-
-## D1 — Recency ranks relative to the retrieved set, not "the question's window"
-
-- **Status:** ACCEPTED **deviation** from the written design, implemented in ranking.
-- **What:** 06 says "Recency / temporal proximity **to the question's window**." Assembly
-  instead normalizes recency *within the candidate set* (newest retrieved → 1.0, oldest →
-  0.0).
-- **Why justified:** using the question's window would require assembly to know that window —
-  i.e. parse the question (violates the no-language determinism boundary) or reconcile each
-  tool's `date_range` into one reference window (undefined when tools disagree, absent for
-  recall). Within-set normalization is deterministic, language-free, and sufficient for
-  ordering *within* an answer, which is all ranking needs. Revisit only if a concrete
-  ranking failure motivates a window-aware signal.
-- **Doc home when unfrozen:** 06-retrieval-strategy.md (ranking axis #3) — amend the wording
-  to "temporal proximity within the retrieved candidate set."
-
-## D2 — `assemble()` is a pure function: aggregate rows are not hydrated into the trace
-
-- **Status:** ACCEPTED **deviation** (strict reading of 03) + scoping boundary.
-- **What:** 03's trace contract implies `evidence` = used memory IDs *with snapshot metadata*.
-  For an aggregate's contributing IDs, assembly has the IDs but not the metadata and does
-  **not** fetch it — `assemble()` touches no database.
-- **Why justified:** the engineering plan scoped M3 assembly as a pure, fixture-testable
-  function; hydrating contributing rows into full snapshots is exactly Phase 6's batch-fetch
-  (T16). This is the mechanism behind A3 and should be documented alongside it.
-- **Doc home when unfrozen:** 03-memory-engine.md §5–§6 (assembly/trace) + the T16 task spec;
-  cross-reference A3.
-
-## M4-1 — ROUTE and PLAN unified into one `plan()` provider surface
-
-- **Status:** ACCEPTED **deviation** from the design-level graph, implemented in
-  `engine/model.py` (`ModelProvider.plan`) + `agent/providers/bedrock.py`.
-- **What:** 05-agent-architecture.md's graph draws two separate LLM nodes — ROUTE (classify
-  the turn: ingest / query / both) and PLAN (select retrieval tools, fill slots). M4 adds a
-  **single** provider surface, `plan(question, tools, *, now, tz) -> list[ToolCall]`, and
-  **no** separate `route()`/`classify()` method. Routing is expressed as *tool selection*:
-  with `log_memory` among the offered `tools`, the planner selecting it is an *ingest* turn,
-  selecting retrieval tools is a *query* turn, selecting both is a *both* turn. "Mixed
-  retrieval" is just several retrieval calls in the returned list.
-- **Why route() was merged into plan() (the reasoning, explicitly):**
-  1. **They are the same cognitive act.** Deciding "is this a log, a question, or both?"
-     and deciding "which tools answer it?" are one classification over the same tool
-     vocabulary. A separate ROUTE step would classify the turn, then PLAN would
-     re-read the same sentence to pick tools — the turn's language interpreted twice.
-     One `plan()` call reads it once.
-  2. **It is the native shape of tool-use LLMs.** Bedrock Converse with
-     `toolChoice: auto` already returns "which tools, with which arguments, or none" in a
-     single response. Splitting that into two calls fights the API and doubles latency and
-     token cost per turn for no decision the model wasn't already making.
-  3. **Routing-as-tool-selection removes a whole node and its failure modes.** No
-     intent-label enum to keep in sync with the tool set, no ROUTE/PLAN disagreement to
-     reconcile ("routed ingest but planned a query"), no second parse to error-handle. The
-     M5 graph becomes a **pure interpreter** of `plan()` output: `log_memory` present →
-     run ingestion (first, so new memories are queryable); retrieval calls present → run
-     retrieval → assemble → narrate.
-- **Why this preserves the intended architecture:** the load-bearing invariant of 05 is the
-  **query-planning boundary** — "exactly one place understands natural language; everything
-  below the tool-call boundary is deterministic." Merging ROUTE into PLAN keeps that
-  invariant *exactly*: there is still exactly one NL-understanding step, it still emits only
-  typed tool calls, and everything downstream stays deterministic. 05's two-node drawing was
-  labelled "design-level"; it described the *logical* stages (classify, then act), not a
-  contract that they be two model calls. Collapsing them is a faithful implementation of the
-  same boundary with one fewer moving part — less complexity, identical guarantees, and the
-  model-independence contract untouched (a different provider fills the same `plan()` slots).
-- **Doc home when unfrozen:** 05-agent-architecture.md (graph shape + query-planning
-  boundary) — redraw ROUTE+PLAN as one planner node returning tool calls (incl. log_memory);
-  note in 03-memory-engine.md's engine-tools framing that routing is tool selection.
-
-## M4-2 — Empty-plan contract: `[]` is "no memory operation needed", not a failure
-
-- **Status:** ACCEPTED decision, implemented; mirrors the extraction empty-result contract
-  (D1, `engine/model.py`).
-- **What:** `plan()` returning an empty list is a **positive assertion** that the turn needs
-  no memory operation (small talk, a greeting, a meta-question), distinct from
-  `PlanningError` (the call failed or returned malformed output). Mechanism: Converse
-  `toolChoice: auto` permits zero tool calls, so "call nothing" is a deliberate model
-  outcome, not an error. Documented in the `plan` docstring with the same three-outcome
-  table style as the extraction contract.
-- **Why:** it gives the M5 graph a clean, non-erroring path for conversational turns — the
-  planner's analogue of "nothing to log" — so a greeting is answered conversationally
-  without inventing a retrieval or crashing a turn. Same never-lose-the-turn posture as D1.
-- **Doc home when unfrozen:** 05-agent-architecture.md (answer/route contract) + the
-  engine-tools table in 03-memory-engine.md.
-
-## M5-1 — Graph state durability boundary + its enforcement (Candidate 1 + L1/L2/L3a)
-
-- **Status:** ACCEPTED decision (design settled 2026-07-24); **to be implemented as part of
-  M5** (`agent/graph.py`, `agent/tools.py`, and the guard in `agent/checkpointer.py`). The
-  enforcement below is part of the decision, not a follow-up.
-- **The invariant (the thing being guaranteed):** heavyweight, turn-local runtime objects —
-  `ContextBlock`, `EvidenceTrace`, `RetrievalOutcome`, and `Receipt` — **must never enter the
-  checkpointed LangGraph state.** Rationale: ADR-13.14 (the checkpointer holds conversation/
-  execution continuity; the trace's durable home is the `evidence_traces` table in Phase 6),
-  plus the ADR-13.8 checkpointer footgun (strict msgpack, no blobs). LangGraph persists every
-  state channel after **every super-step**, so "put it in state and clear it before END" does
-  not work — a heavy object in a channel is serialized on each node transition.
-- **The design (Candidate 1 — reference-only state + turn-scoped carrier):** checkpointed
-  `GraphState` channels hold only small, serde-safe values — `messages` (add_messages reducer),
-  `user_id`, `question`, `now`/`tz`, `tool_calls` (name+dict, tiny), `answer`, `citations`
-  (UUIDs). The heavy objects live on a **per-invocation carrier** (a plain mutable object)
-  injected through `RunnableConfig["configurable"]`; nodes read `tool_calls` from state and
-  read/write `outcomes`/`context`/`trace`/`receipt` on the carrier. The API creates the
-  carrier, passes it in config, and reads `context`/`trace`/`receipt` off it after
-  `invoke()`. (Rejected: C2 full-rich-state+stream — persists the trace into the checkpoint,
-  violating ADR-13.14 and the msgpack footgun; C3 one-node "thin shell" — collapses the graph,
-  losing routing visibility and the Phase 6 SSE node-streaming path. Full comparison in the
-  2026-07-24 design discussion.)
-- **Enforcement (integral to this decision — three reinforcing layers):**
-  - **L1 — the developer-signal mechanism (amended 2026-07-24 after implementation).**
-    `GraphState` declares only the allowlisted channels; heavy objects have nowhere to go.
-    **The original assumption was wrong and is corrected here:** LangGraph (verified on
-    1.2.4) does **not** reject node updates that target undeclared channels — it **silently
-    drops** them, with no exception and no warning. Consequence: the durability boundary
-    still holds by itself (a dropped value never enters state, so it never reaches the
-    checkpoint), but an accidental `return {"context": ...}` produces *no signal at all* —
-    the developer sees data silently vanish instead of an error naming the invariant, which
-    is a worse debugging experience than the loud failure L1 was written to provide.
-    **Restored deliberately (Option B, accepted 2026-07-24):** node functions are wrapped so
-    each node's returned keys are checked against the `GraphState` allowlist **before**
-    LangGraph processes the output, raising a `RuntimeError` that names M5-1. The loud
-    failure is therefore *our* mechanism, not an upstream behavior we depend on. A pinning
-    test records LangGraph's actual silent-drop semantics, so if upstream ever changes to
-    persist unknown channels we learn immediately rather than at a boundary violation.
-    (L1 catches the slip early with a teaching error; it does not catch someone editing the
-    schema to add the field — that is what L2/L3a are for.)
-  - **Division of responsibility (explicit):** **L2 is the architectural guarantee** — the
-    invariant cannot be violated. **L1 is the developer-signal mechanism** — the accident
-    fails fast and legibly. L1 is not a guarantee and never substitutes for L2.
-  - **L2 — the architectural enforcement point (the real guarantee):** the serialization path
-    of **`CockroachDBSaver` (`agent/checkpointer.py`)** is the single chokepoint where the
-    invariant is enforced. On serialize it sweeps the checkpoint's channel values (top level
-    and one level into list/tuple/dict) and **raises `TypeError` if it encounters a
-    `ContextBlock`/`EvidenceTrace`/`RetrievalOutcome`/`Receipt`**, with a message naming this
-    invariant (M5-1 / ADR-13.14). Because every persist — in tests and in production — flows
-    through this one path, the invariant **cannot be sidestepped by editing `GraphState`**;
-    adding the field just makes the guard fire instead. This is the load-bearing rung: it
-    converts "please don't checkpoint heavy objects" into "heavy objects cannot be
-    checkpointed." It is the same invariant-by-construction posture the repo already uses for
-    the registry drift canary, the scoping security test, and ADR-12's trace-by-construction.
-  - **L3a — tripwire test:** a test asserts `set(GraphState.__annotations__)` is a subset of
-    an explicit channel allowlist, so adding **any** channel turns the test red with a message
-    pointing at M5-1 — forcing a conscious edit and reviewer attention before L2 ever fires.
-    (Plus a round-trip test that runs a real turn through the real `CockroachDBSaver` and
-    asserts the persisted checkpoint's channels contain none of the banned types — proving the
-    integration, not just the guard in isolation.)
-- **L2 IS NON-NEGOTIABLE (standing instruction, 2026-07-24).** M5 does not ship without L2
-  implemented **exactly as described** — a guard on the persist path that sees the live Python
-  channel values and raises on a banned type. If a LangGraph limitation makes that impossible
-  (see trigger below), **STOP and bring it back as an architecture review** — do NOT silently
-  weaken the guarantee (e.g. downgrade to docs-only, to L1/L3a alone, or to a best-effort
-  warning). L1 and L3a are reinforcements, not substitutes; without L2 the invariant is a
-  convention, not a guarantee.
-  - **Trigger condition (what "cannot be implemented exactly" means):** the banned objects are
-    not inspectable as **live Python objects** at any point on the persist path we control —
-    i.e. LangGraph serializes channel values to bytes *before* any method we can override on
-    `CockroachDBSaver` (or before a serde we inject) sees them. Only then is L2 blocked.
-  - **Believed-viable avenues to confirm at implementation (either satisfies L2):** (a) inject
-    a guarding `SerializerProtocol` that wraps the default serde and inspects each value in
-    `dumps_typed` before delegating — every serialized value must pass through it; (b) override
-    `put()`/`put_writes()` on `CockroachDBSaver` to sweep `checkpoint["channel_values"]` (still
-    live objects at that point) before calling `super()`. If BOTH prove impossible on the
-    pinned LangGraph version, that is the stop-and-review trigger.
-- **Accepted limit (honest scope):** no Python mechanism makes this physically impossible; a
-  developer could add the field (past L1), delete the guard (past L2), and update the
-  allowlist (past L3a) in one diff. The design's guarantee is that the accident **cannot land
-  silently** and the deliberate override **cannot land invisibly** — it becomes a loud,
-  self-explaining, three-part change touching a guard named after the ADR it enforces, where
-  code review is the intended backstop. (Optional future hardening: adopt pyright/mypy in CI
-  so a closed `GraphState` TypedDict makes the mistake a compile-time error — not active today;
-  CI runs ruff only.)
-- **Doc home when unfrozen:** 05-agent-architecture.md (conversation-state / checkpointer
-  section, ADR-13.14) — document the durability boundary and name the `CockroachDBSaver` guard
-  as its enforcement point; cross-reference the engineering deep dive
-  `docs/engineering/cockroachdb-postgressaver.md` (the checkpointer's canonical reference).

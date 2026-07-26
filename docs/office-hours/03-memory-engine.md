@@ -98,6 +98,18 @@ structured, budgeted context block for the LLM — with memory IDs preserved so 
 can cite. Ranking considers relevance, recency, confidence, and provenance. Context
 optimization keeps the block inside the model's effective budget.
 
+Assembly is a **pure function of its inputs** — it performs no I/O
+([ADR-14.7](09-decisions.md#adr-14)). That is what makes ranking reproducible and
+fixture-testable, and it has one consequence worth stating: an aggregate's contributing
+memory IDs arrive without snapshot metadata and are not hydrated here (T16's batch-fetch does
+that in Phase 6). Assembly returns the context and its trace **as a pair** — there is no code
+path that produces one without the other.
+
+Two views of the same evidence ([ADR-14.6](09-decisions.md#adr-14)): the context block holds
+the budget-limited, diversity-capped subset the narrator sees, while the trace holds
+everything retrieved. The glass box therefore shows more than the model did, and the ranking
+scores explain what was cut.
+
 ### 6. Evidence trace builder ([ADR-12](09-decisions.md#adr-12))
 Every context assembly **deterministically emits an `EvidenceTrace` as a byproduct** — not
 an agent-callable tool, and never reconstructed after the fact. The trace is the *receipt*
@@ -117,11 +129,19 @@ the loop; the Glass-Box UI reads the trace via the app API.
 | `ranking` | Why these memories were selected (scores: relevance, confidence, recency, tier) |
 | `assembled_at` | Timestamp |
 
-**Citation validation:** the narrator may only cite memory IDs present in the trace. After
-generation, the engine mechanically validates every citation in the answer against the
-trace; invalid or unsupported citations are flagged to the UI. The honest-narrator contract
+**Citation validation:** the narrator may only cite memory IDs present in the turn's citable
+set. After generation, the engine mechanically validates every citation in the answer;
+invalid or unsupported citations are flagged to the UI. The honest-narrator contract
 ([05-agent-architecture.md](05-agent-architecture.md)) is an enforced property, not a prompt
 instruction.
+
+> **Open contract item for T7 ([ADR-14.8](09-decisions.md#adr-14)):** the citable set is
+> "budgeted memories ∪ every aggregate/count contributing ID" (`ContextBlock.citable_ids()`),
+> which is **wider** than `trace.evidence` — because assembly is pure, an aggregate's
+> contributing rows are IDs without metadata and do not appear there. Validating against
+> `trace.evidence` alone would reject valid citations of aggregated data. T7 must either
+> validate against the full citable set or carry those IDs into the persisted trace;
+> the latter is recommended, so "the UI reads the trace" stays literally true.
 
 **Ingestion receipts are the same artifact in miniature** — a trace of what was created
 rather than what was retrieved. One type, two renderings.
@@ -132,16 +152,24 @@ doing in May" queries.
 
 ## Engine-exposed tools (the agent's only DB access)
 
-| Tool | Contract (design-level) |
-|---|---|
-| `log_memory` | Ingest a user turn (text/photo/file) → typed events + receipt |
-| `aggregate_memories` | Parameterized SQL aggregation (sums, averages, group-by period, filters by type/date) |
-| `recall_memories` | Vector search over summaries/narrative, filtered by type/date/status |
-| `get_timeline` | Ordered event slice for a date range |
-| `analyze_series` | On-demand consolidation: changepoint/correlation scan → may write new derived insights |
+| Tool | Contract | Phase |
+|---|---|---|
+| `log_memory` | Ingest a user turn (text/photo/file) → typed events + receipt | 2 |
+| `aggregate_memories` | Parameterized SQL aggregation (sums, averages, group-by period, filters by type/date) | 3 |
+| `recall_memories` | Vector search over summaries/narrative, filtered by type/date/status | 3 |
+| `get_timeline` | Ordered event slice for a date range | 3 |
+| `lookup_events` | Newest/oldest event of a type, optional exact item containment | 3 |
+| `count_events` | How many events of a type in a range ([ADR-14.4](09-decisions.md#adr-14)) | 3 |
+| `analyze_series` | On-demand consolidation: changepoint/correlation scan → may write new derived insights | 5 |
 
 The LangGraph agent never issues raw SQL; the engine owns all query construction
 (parameterized — judges will poke the sandbox).
+
+**Offering `log_memory` in the same vocabulary is what makes routing tool selection**
+([ADR-14.1](09-decisions.md#adr-14)): the planner choosing it *is* the ingest classification,
+so no separate intent-routing step exists. Ingestion runs before retrieval within a turn, so
+a memory logged now is visible to the same turn's aggregation
+([ADR-14.3](09-decisions.md#adr-14)).
 
 **Deliberately NOT a tool:** `build_evidence_trace`. Evidence traces are emitted by
 assembly itself ([module 6](#6-evidence-trace-builder-adr-12), [ADR-12](09-decisions.md#adr-12));

@@ -34,6 +34,8 @@
 - [ ] **T7 (P1, ~2d / ~3h)** — engine/api — EvidenceTrace persistence (`evidence_traces` table, same transaction as the turn) + citation validation with honestly-scoped guarantee
   - Surfaced by: ADR-12 + outside voice #8/#11 (ADR-13.13/13.14)
   - Files: `engine/trace.py`, `api/turns.py` · Verify: property test — no assembled context without a persisted trace; invalid-citation fixture flagged
+  - ⚠️ **Blocking contract decision — settle before writing the validator** ([ADR-14.8](09-decisions.md#adr-14)): the citable set is `trace.evidence` **∪ aggregate/count contributing IDs** (`ContextBlock.citable_ids()`). Because assembly is pure ([ADR-14.7](09-decisions.md#adr-14)), an aggregate's contributing rows are IDs without metadata and are absent from `trace.evidence` — validating against it alone would flag *valid* citations of aggregated data as invalid. Either validate against the full citable set, or carry those IDs into the persisted trace (recommended, keeps "the UI reads the trace" literally true; pairs naturally with T16's batch-fetch hydration).
+  - Note: the trace object and its by-construction emission already exist (Phase 3, M1/M3); T7 adds **persistence + validation**, not the artifact.
 - [ ] **T8 (P1, ~2d / ~3h)** — cli — Replay CLI: extraction-output cache (re-runs never re-call Bedrock), small-batch inserts, idempotent resume
   - Surfaced by: Outside voice #7 (replay = dominant cost) + Step 0 vector-batch footgun
   - Files: `cli/replay.py` · Verify: interrupted run resumes without duplicates; second run makes zero model calls

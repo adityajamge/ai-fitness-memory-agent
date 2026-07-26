@@ -12,30 +12,42 @@
   Llama swap without touching the memory architecture (a hard constraint from the project
   brief).
 
-## Graph shape (design-level)
+## Graph shape (as implemented, Phase 3)
 
 ```mermaid
 flowchart LR
-    IN["User turn<br/>(text / photo / file)"] --> ROUTE{"Intent<br/>routing"}
-    ROUTE -->|ingest| LOG["log_memory<br/>(engine ingestion)"]
-    LOG --> RECEIPT["Memory receipt<br/>+ coaching response"]
-    ROUTE -->|query| PLAN["Retrieval planning<br/>(the ONLY NL-understanding layer —<br/>emits typed tool calls only)"]
-    PLAN --> AGG["aggregate_memories"]
-    PLAN --> REC["recall_memories"]
-    PLAN --> TL["get_timeline"]
-    PLAN --> AN["analyze_series<br/>(on-demand consolidation)"]
-    AGG & REC & TL & AN --> CTX["Engine: context assembly<br/>+ ranking (memory IDs kept)"]
-    CTX --> NARRATE["LLM narrates answer<br/>with [memory-ID] citations"]
-    CTX -->|"deterministic byproduct"| TRACE["EvidenceTrace<br/>(queries · evidence · lineage · ranking)"]
-    NARRATE --> VALIDATE["Engine: citation validation<br/>(every cited ID must be in trace)"]
+    IN["User turn<br/>(text / photo / file)"] --> PLAN["PLAN — the ONLY NL-understanding layer<br/>selects tools + fills typed slots<br/>(routing IS tool selection)"]
+    PLAN -->|"log_memory selected"| LOG["log_memory<br/>(engine ingestion)"]
+    PLAN -->|"retrieval tools selected"| RETRIEVE["aggregate_memories · recall_memories<br/>get_timeline · lookup_events · count_events<br/>(analyze_series — Phase 5)"]
+    PLAN -->|"no tools selected"| ASSEMBLE
+    LOG -->|"ingest ALWAYS precedes retrieve"| RETRIEVE
+    LOG --> RECEIPT["Memory receipt"]
+    RETRIEVE --> ASSEMBLE["Engine: context assembly<br/>+ ranking (memory IDs kept)"]
+    ASSEMBLE --> NARRATE["LLM narrates answer<br/>with [memory-ID] citations"]
+    ASSEMBLE -->|"deterministic byproduct"| TRACE["EvidenceTrace<br/>(queries · evidence · lineage · ranking)"]
+    NARRATE --> VALIDATE["Engine: citation validation<br/>(T7 — Phase 6)"]
     TRACE --> VALIDATE
-    VALIDATE --> OUT["Chat (validated answer) +<br/>engine pane (renders trace via app API)"]
-    ROUTE -->|both| LOG
-    LOG -.->|"ingest may trigger"| INSIGHT["event-driven consolidation<br/>→ new derived insight"]
+    VALIDATE --> OUT["Chat (answer + citations) +<br/>engine pane (renders trace via app API)"]
+    LOG -.->|"ingest may trigger"| INSIGHT["event-driven consolidation<br/>→ new derived insight (Phase 5)"]
 ```
 
 Notes:
-- A turn can be **both** ingest and query ("logged my run — am I improving?").
+- **Routing is tool selection, not a separate classification step** ([ADR-14.1](09-decisions.md#adr-14)).
+  There is one LLM planning call per turn: `log_memory` among its calls makes the turn an
+  ingest, retrieval calls make it a query, both make it both, and **no** calls make it
+  conversational. The graph is a *pure interpreter* of that output — it contains no natural
+  language understanding of its own.
+- **An empty plan is an assertion, not an error** ([ADR-14.2](09-decisions.md#adr-14)): a
+  greeting is answered conversationally without inventing a retrieval or failing the turn.
+- **Ingest always precedes retrieve** on a "both" turn ([ADR-14.3](09-decisions.md#adr-14)),
+  so a memory logged this turn is already committed when the same turn's aggregation scans
+  for it ("logged my run — am I improving?").
+- **Assembly runs on every turn that narrates**, so a trace always exists — honestly empty
+  (zero retrieval steps) on an ingest-only or conversational turn. That keeps ADR-12's
+  by-construction property uniform rather than special-cased.
+- **A failed tool costs that tool, not the turn** ([ADR-14.12](09-decisions.md#adr-14)): an
+  invalid slot or a failed query embedding is recorded and reported while the rest of the
+  retrieval still runs.
 - Ingestion may synchronously surface a fresh derived insight ("that's a bench PR — your 3rd
   following 7.5h+ sleep"), which is the proactive-feeling moment without any scheduler.
 - The agent **never issues raw SQL**; tools are the engine's contract
@@ -58,15 +70,32 @@ trace emission. Full contract: [06-retrieval-strategy.md → query-planning boun
 - Embeddings: Titan Text Embeddings V2, 512-dim, normalized ([ADR-13.2](09-decisions.md#adr-13)).
 - Acceptance check: switching provider must be a config change, zero memory-layer edits.
 
-## Conversation state ([ADR-13.14](09-decisions.md#adr-13))
+## Conversation state ([ADR-13.14](09-decisions.md#adr-13), refined by [ADR-14.9](09-decisions.md#adr-14))
 
 LangGraph's built-in **PostgresSaver checkpointer runs on CockroachDB** (Postgres wire
 compat) and holds graph execution state — thread checkpoints, resumability. It is verified
-by a **day-one canary** (same gate class as the vector index; fallback is a thin hand-rolled
-checkpointer). The app's own `turns` + `evidence_traces` tables, written in one transaction
-when a turn completes, are the source of truth for everything the UI renders. Known
-footguns handled at setup: `.setup()` once, `autocommit=True` + `dict_row`, thread_id < 255
-chars, strict msgpack deserialization, no blobs in graph state (S3 URLs only).
+by a **day-one canary** (same gate class as the vector index; the canary failed and the
+recorded fallback landed as a thin read-path subclass, `CockroachDBSaver` — see
+[../engineering/cockroachdb-postgressaver.md](../engineering/cockroachdb-postgressaver.md)).
+The app's own `turns` + `evidence_traces` tables, written in one transaction when a turn
+completes, are the source of truth for everything the UI renders. Known footguns handled at
+setup: `.setup()` once, `autocommit=True` + `dict_row`, thread_id < 255 chars, strict msgpack
+deserialization, no blobs in graph state.
+
+**The durability boundary is enforced, not conventional.** Heavyweight turn-local objects —
+`ContextBlock`, `EvidenceTrace`, `RetrievalOutcome`, `Receipt` — must never enter checkpointed
+state; the checkpoint holds only small serde-safe channels (`messages`, `user_id`, `question`,
+`now`, `tz`, `tool_calls`, `answer`, `citations`), and the heavy objects travel on a
+per-invocation carrier passed through `RunnableConfig`. A guard on the checkpointer's
+serialization path raises if a banned object ever reaches a persist — the single chokepoint
+every write flows through, so the invariant cannot be sidestepped by editing the state schema.
+Rationale, the LangGraph behavior that forced this design, and the layered enforcement:
+[../engineering/graph-state-durability.md](../engineering/graph-state-durability.md).
+
+**Thread identity is namespaced by user** ([ADR-14.13](09-decisions.md#adr-14)): the client's
+opaque `thread_id` is prefixed with the caller's `user_id` before it reaches the checkpointer.
+Presenting another user's thread id starts your own thread rather than reading theirs —
+existence is not probeable, matching the scoping posture of ADR-13.4.
 
 ## Answer contract (what "narrate" must produce)
 
@@ -86,3 +115,44 @@ demo honest and the judges convinced.
 **The LLM produces natural language only.** All structured UI data — evidence rows,
 lineage, queries, timeline — comes from the deterministic `EvidenceTrace`, fetched by the
 UI through the app API. Model output is never the source of glass-box data.
+
+**What "may only cite IDs in the trace" means concretely** ([ADR-14.8](09-decisions.md#adr-14)):
+the citable set is the turn's budgeted memories **plus** every aggregate/count contributing
+ID — `ContextBlock.citable_ids()`. Because assembly is a pure function
+([ADR-14.7](09-decisions.md#adr-14)), an aggregate's contributing rows are IDs without
+snapshot metadata and are not in `trace.evidence`; a validator reading `trace.evidence` alone
+would reject a *valid* citation of an aggregated meal. T7 must reconcile the two before
+citation validation ships.
+
+## Model surfaces (the provider contract)
+
+The engine depends on one `ModelProvider` Protocol and nothing else about the LLM:
+
+| Surface | Phase | Contract |
+|---|---|---|
+| `extract_events` | 2 | text → typed events; `[]` is an affirmed "nothing to log", anything unparseable **raises** so the input survives as a note (ADR-13.5) |
+| `embed` | 2 | normalized 512-dim vectors, all-or-nothing (ADR-13.2) |
+| `plan` | 3 | turn → typed tool calls; `[]` is "no memory operation needed" ([ADR-14.2](09-decisions.md#adr-14)) |
+| `narrate` | 3 | assembled context → prose with citation markers; **prose only** |
+| vision | 5 | photo → meal events |
+
+Each surface's empty result is a *positive assertion* rather than a shrug — the same posture
+in both directions, which is what keeps "never lose the user's input" and "never invent a
+retrieval" honest. Acceptance check for model independence: switching provider is a change in
+the app's composition root only, with zero edits below the boundary.
+
+## Chat API contract (Phase 3)
+
+`POST /api/chat` `{message, thread_id?}` → `{thread_id, answer, citations, receipts, trace,
+errors}`, behind the session cookie. The endpoint is transport only — authenticate, map the
+request onto one graph turn, map the result back to JSON; it interprets nothing.
+
+- `trace` rides **inline** in Phase 3 and becomes a `trace_id` fetch when T7 persists it
+  ([ADR-14.14](09-decisions.md#adr-14)); the shape is designed so Phase 6 adds fields rather
+  than reshaping.
+- `errors` surfaces retrieval the engine refused or could not run — the answer may be partial
+  and the caller is told so ([ADR-14.12](09-decisions.md#adr-14)).
+- Model failure → **502** (the turn is retriable; nothing is half-written, because ingestion
+  commits atomically and the checkpoint is written only at turn end). Database unreachable at
+  startup → the graph is absent and chat answers **503**, so the deploy-early health check
+  stays green instead of crash-looping (ADR-11).

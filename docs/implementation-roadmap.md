@@ -122,6 +122,30 @@
 
 ## Phase 3 — Memory Read Path & Agent Spine *(~3–4 days)*
 
+> **Status 2026-07-24: COMPLETE** — built in six milestones (M1–M6), all merged to `main`:
+> M1 EvidenceTrace contracts + aggregation builders · M2 recall/timeline/lookup builders ·
+> M3 context assembly + deterministic ranking · M4 `plan`/`narrate` provider surfaces ·
+> M5 typed tool layer + LangGraph spine (+ the checkpoint durability guard) · M6 chat
+> endpoint, user-scoped threads, graph lifecycle wiring. **255 tests green** against real
+> CockroachDB; version `0.3.0`.
+>
+> Phase 3 introduced no new T-tasks — it implemented the core design (03/05/06). Fourteen
+> decisions were taken *during* implementation and are now recorded as
+> [ADR-14](office-hours/09-decisions.md#adr-14): routing-as-tool-selection, the empty-plan
+> contract, ingest-before-retrieve ordering, two new builder families, the ranking-recency
+> amendment, the two-view evidence split, pure assembly, the citable-surface question that
+> **gates T7**, the graph-state durability boundary, engine-injected timezone, strict slots,
+> honest per-tool degradation, user-namespaced threads, and the inline-trace API contract.
+> Two engineering deep dives were written:
+> [graph-state-durability.md](engineering/graph-state-durability.md) and
+> [vector-index-and-filtered-knn.md](engineering/vector-index-and-filtered-knn.md).
+>
+> **Carried into Phase 6:** T7 must resolve the citable-surface contract
+> ([ADR-14.8](office-hours/09-decisions.md#adr-14)) before building citation validation.
+> **Deferred demo item:** the live-Bedrock demo checkpoint below has not been performed —
+> local validation ran against a development provider, so planner/narrator behavior on the
+> production model is still unproven.
+
 - **Objective:** the agent answers questions from memory — computed and recalled.
 - **Why this phase exists:** this is the eureka thesis made real: "protein in June" is SQL,
   "when did I complain about my knee" is vector search, and the LangGraph agent routes
