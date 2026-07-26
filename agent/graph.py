@@ -1,0 +1,346 @@
+"""The LangGraph spine — orchestration only (05: "LangGraph is the wiring").
+
+One turn flows: ``plan`` → (``ingest``) → (``retrieve``) → ``assemble`` → ``narrate``.
+Routing is **tool selection**, not a separate classification step (M4-1): ``log_memory``
+among the planner's calls makes it an ingest turn, retrieval calls make it a query turn,
+both make it both, and an empty plan (M4-2) is a conversational turn that skips straight to
+narration. The graph is therefore a *pure interpreter* of ``plan()`` output — it contains no
+natural-language understanding of its own.
+
+Ingest runs **before** retrieve on a "both" turn, so a memory logged this turn is already
+committed when the aggregate scans for it ("logged my run — am I improving?").
+
+**State durability boundary (decision M5-1, ADR-13.14).** ``GraphState`` declares only small,
+serde-safe channels; the heavyweight turn-local objects (``RetrievalOutcome``,
+``ContextBlock``, ``EvidenceTrace``, ``Receipt``) live on a per-invocation ``TurnCarrier``
+passed through ``RunnableConfig["configurable"]`` and never touch the checkpoint. The
+enforcement is not this docstring: ``agent/checkpointer.py``'s guarded serde raises if a
+banned object ever reaches the persist path (M5-1 L2), so the boundary holds even if this
+module changes.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Annotated, Any, TypedDict
+from uuid import UUID
+
+from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.runnables import RunnableConfig
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import add_messages
+
+from agent.tools import (
+    LOG_MEMORY,
+    RETRIEVAL_TOOLS,
+    ToolCallError,
+    build_tool_specs,
+    execute,
+    is_log_memory,
+    log_memory_text,
+    prepare_call,
+)
+from engine.assembly import ContextBlock, RetrievalOutcome, assemble
+from engine.db import Database
+from engine.ingestion import IngestionService, Receipt
+from engine.model import ModelProvider, ToolCall
+from engine.trace import EvidenceTrace
+
+logger = logging.getLogger(__name__)
+
+CARRIER_KEY = "turn_carrier"
+
+# Every `[<uuid>]` marker the narrator emitted. Extraction only — validating and flagging
+# citations is T7 (Phase 6); here we simply report which allowed ids were actually cited.
+_CITATION_RE = re.compile(
+    r"\[([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\]"
+)
+
+
+# ── state: the checkpointed channels, deliberately small (M5-1 L1) ─────────────────────
+class GraphState(TypedDict, total=False):
+    """The **only** channels LangGraph checkpoints for a thread.
+
+    Every field here is small and serde-safe. Heavy runtime objects belong on
+    ``TurnCarrier`` — see the module docstring and decision M5-1. Adding a channel is a
+    deliberate act: ``agent/tests/test_graph_routing.py`` asserts this set against an
+    explicit allowlist (L3a), and the checkpointer guard (L2) refuses banned types outright.
+    """
+
+    messages: Annotated[list, add_messages]  # conversation continuity (ADR-13.14)
+    user_id: str
+    question: str
+    now: str  # ISO-8601; the turn's clock, for grounding relative dates
+    tz: str
+    tool_calls: list[dict]  # [{"tool": ..., "arguments": {...}}] — plain, tiny, JSON-safe
+    answer: str
+    citations: list[str]
+
+
+@dataclass
+class TurnCarrier:
+    """Per-invocation scratch space for the objects that must never be checkpointed.
+
+    Created by the caller (the chat endpoint in M6), passed via
+    ``config["configurable"]["turn_carrier"]``, and read back after ``invoke()`` — this is
+    how the rich turn artifacts reach the API without entering graph state (M5-1).
+    """
+
+    outcomes: list[RetrievalOutcome] = field(default_factory=list)
+    receipts: list[Receipt] = field(default_factory=list)
+    context: ContextBlock | None = None
+    trace: EvidenceTrace | None = None
+    errors: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class TurnResult:
+    """What one turn produced: the prose plus everything the glass box needs."""
+
+    thread_id: str
+    answer: str
+    citations: list[str]
+    receipts: list[Receipt]
+    context: ContextBlock | None
+    trace: EvidenceTrace | None
+    errors: list[str]
+
+
+STATE_CHANNELS: frozenset[str] = frozenset(GraphState.__annotations__)
+
+
+def _checked(name: str, node):
+    """Wrap a node so its output is checked against the ``GraphState`` allowlist **before**
+    LangGraph sees it (M5-1 L1, the developer-signal mechanism).
+
+    Why this exists: LangGraph does **not** reject updates to undeclared channels — verified
+    on 1.2.4, it *silently drops* them. The durability boundary survives that (a dropped
+    value never reaches the checkpoint), but a developer who writes ``return {"context":
+    ctx}`` would otherwise get no signal at all and would debug a silent disappearance. This
+    turns that slip into a loud error naming the invariant.
+
+    This is the *signal*, not the guarantee: the guarantee is the checkpointer's serde guard
+    (M5-1 L2), which holds even if a channel is deliberately added to ``GraphState``.
+    """
+
+    def checked_node(state: GraphState, config: RunnableConfig) -> dict:
+        update = node(state, config)
+        unknown = set(update or {}) - STATE_CHANNELS
+        if unknown:
+            raise RuntimeError(
+                f"node {name!r} returned undeclared channel(s) {sorted(unknown)}. "
+                "LangGraph would silently drop them. Heavy, turn-local objects "
+                "(ContextBlock/EvidenceTrace/RetrievalOutcome/Receipt) belong on the "
+                "per-invocation TurnCarrier, not in GraphState (decision M5-1)."
+            )
+        return update
+
+    return checked_node
+
+
+def carrier_of(config: RunnableConfig) -> TurnCarrier:
+    """The invocation's carrier. Missing means the caller wired the graph wrong — a loud
+    failure is right: silently dropping the trace would defeat the glass box."""
+    carrier = (config or {}).get("configurable", {}).get(CARRIER_KEY)
+    if not isinstance(carrier, TurnCarrier):
+        raise RuntimeError(
+            f"no TurnCarrier in config['configurable'][{CARRIER_KEY!r}]; the caller must "
+            "create one per invocation (decision M5-1)"
+        )
+    return carrier
+
+
+# ── graph construction ─────────────────────────────────────────────────────────────────
+def build_graph(
+    *,
+    db: Database,
+    model: ModelProvider,
+    ingestion: IngestionService,
+    checkpointer: Any,
+    default_tz: str,
+):
+    """Compile the turn graph. Dependencies are injected (same composition-root style as
+    ``api.main.create_app``), so tests drive a real database with a fake provider."""
+    tool_specs = build_tool_specs()
+
+    def plan_node(state: GraphState, config: RunnableConfig) -> dict:
+        """The one NL-understanding step (05 query-planning boundary)."""
+        calls = model.plan(
+            state["question"],
+            tool_specs,
+            now=_now_of(state),
+            tz=state.get("tz") or default_tz,
+        )
+        return {"tool_calls": [{"tool": c.tool, "arguments": dict(c.arguments)} for c in calls]}
+
+    def ingest_node(state: GraphState, config: RunnableConfig) -> dict:
+        """Run every ``log_memory`` call through the Phase 2 ingestion pipeline."""
+        carrier = carrier_of(config)
+        user_id = UUID(state["user_id"])
+        for call in _calls_of(state):
+            if not is_log_memory(call):
+                continue
+            try:
+                text = log_memory_text(call)
+            except ToolCallError:
+                # Never lose the input (ADR-13.5 posture): if the planner mangled the text
+                # slot, log the user's own words rather than dropping the turn's content.
+                logger.info("log_memory call had no usable text; falling back to the raw turn")
+                text = state["question"]
+            carrier.receipts.append(
+                ingestion.ingest_text(user_id, text, tz=state.get("tz") or default_tz)
+            )
+        return {}
+
+    def retrieve_node(state: GraphState, config: RunnableConfig) -> dict:
+        """Prepare every retrieval call (model work off-transaction), then execute them all
+        in one transaction — engine/db.py discipline."""
+        carrier = carrier_of(config)
+        user_id = UUID(state["user_id"])
+        tz = state.get("tz") or default_tz
+
+        prepared = []
+        for call in _calls_of(state):
+            if call.tool not in RETRIEVAL_TOOLS:
+                continue
+            try:
+                prepared.append(prepare_call(call, model=model, tz=tz))
+            except ToolCallError as exc:
+                # One bad call must not sink the turn: record it so the answer can be
+                # honest about what could not be retrieved, and run the rest.
+                logger.info("dropping invalid tool call %s: %s", call.tool, exc)
+                carrier.errors.append(str(exc))
+
+        if prepared:
+            with db.transaction() as cur:
+                carrier.outcomes.extend(execute(cur, user_id, p) for p in prepared)
+        return {}
+
+    def assemble_node(state: GraphState, config: RunnableConfig) -> dict:
+        """Merge, rank, and emit the trace — always as a pair (ADR-12). Runs on every turn,
+        so a turn that narrates always has a context and a trace, even when both are empty."""
+        carrier = carrier_of(config)
+        carrier.context, carrier.trace = assemble(state["question"], carrier.outcomes)
+        return {}
+
+    def narrate_node(state: GraphState, config: RunnableConfig) -> dict:
+        """Prose only, with citation markers the engine can resolve (05 answer contract)."""
+        carrier = carrier_of(config)
+        context = carrier.context
+        answer = model.narrate(state["question"], context)
+        return {
+            "answer": answer,
+            "citations": _cited_ids(answer, context),
+            "messages": [AIMessage(content=answer)],
+        }
+
+    builder = StateGraph(GraphState)
+    # Every node goes through _checked: the L1 developer signal is on by construction, so a
+    # node cannot quietly grow a heavy channel (M5-1).
+    for name, node in (
+        ("plan", plan_node),
+        ("ingest", ingest_node),
+        ("retrieve", retrieve_node),
+        ("assemble", assemble_node),
+        ("narrate", narrate_node),
+    ):
+        builder.add_node(name, _checked(name, node))
+
+    builder.add_edge(START, "plan")
+    builder.add_conditional_edges(
+        "plan",
+        _route_after_plan,
+        {"ingest": "ingest", "retrieve": "retrieve", "assemble": "assemble"},
+    )
+    builder.add_conditional_edges(
+        "ingest", _route_after_ingest, {"retrieve": "retrieve", "assemble": "assemble"}
+    )
+    builder.add_edge("retrieve", "assemble")
+    builder.add_edge("assemble", "narrate")
+    builder.add_edge("narrate", END)
+    return builder.compile(checkpointer=checkpointer)
+
+
+# ── routing: derived entirely from which tools the planner selected (M4-1) ─────────────
+def _route_after_plan(state: GraphState) -> str:
+    names = {c["tool"] for c in state.get("tool_calls") or []}
+    if LOG_MEMORY in names:
+        return "ingest"  # ingest first, so this turn's memories are queryable
+    if names & RETRIEVAL_TOOLS:
+        return "retrieve"
+    return "assemble"  # empty plan (M4-2): conversational turn, nothing to retrieve
+
+
+def _route_after_ingest(state: GraphState) -> str:
+    names = {c["tool"] for c in state.get("tool_calls") or []}
+    return "retrieve" if names & RETRIEVAL_TOOLS else "assemble"
+
+
+# ── helpers ────────────────────────────────────────────────────────────────────────────
+def _calls_of(state: GraphState) -> list[ToolCall]:
+    return [
+        ToolCall(tool=c["tool"], arguments=c.get("arguments") or {})
+        for c in state.get("tool_calls") or []
+    ]
+
+
+def _now_of(state: GraphState) -> datetime:
+    raw = state.get("now")
+    return datetime.fromisoformat(raw) if raw else datetime.now(timezone.utc)
+
+
+def _cited_ids(answer: str, context: ContextBlock | None) -> list[str]:
+    """The ids the narrator actually cited, kept to those it was allowed to cite.
+
+    ``citable_ids`` — budgeted memories plus every aggregate/count contributing id — is the
+    correct surface per decision A3 (an aggregate's rows are citable but are not in
+    ``trace.evidence``). Mechanical validation and flagging of *invalid* citations is T7.
+    """
+    if context is None:
+        return []
+    allowed = {str(i) for i in context.citable_ids()}
+    seen: list[str] = []
+    for match in _CITATION_RE.findall(answer):
+        if match in allowed and match not in seen:
+            seen.append(match)
+    return seen
+
+
+def run_turn(
+    graph,
+    *,
+    user_id: UUID,
+    question: str,
+    thread_id: str,
+    tz: str,
+    now: datetime | None = None,
+) -> TurnResult:
+    """Run one turn end to end: create the carrier, invoke the graph, collect everything.
+
+    This is the seam the chat endpoint (M6) uses — it owns the carrier lifecycle so callers
+    never have to know that heavy objects travel out-of-band (M5-1).
+    """
+    carrier = TurnCarrier()
+    config = {"configurable": {"thread_id": thread_id, CARRIER_KEY: carrier}}
+    state = graph.invoke(
+        {
+            "messages": [HumanMessage(content=question)],
+            "user_id": str(user_id),
+            "question": question,
+            "now": (now or datetime.now(timezone.utc)).isoformat(),
+            "tz": tz,
+        },
+        config,
+    )
+    return TurnResult(
+        thread_id=thread_id,
+        answer=state.get("answer", ""),
+        citations=list(state.get("citations") or []),
+        receipts=list(carrier.receipts),
+        context=carrier.context,
+        trace=carrier.trace,
+        errors=list(carrier.errors),
+    )
