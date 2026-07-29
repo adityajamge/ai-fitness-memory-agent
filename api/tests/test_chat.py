@@ -11,6 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import psycopg
 import pytest
 
 from agent.tools import AGGREGATE_MEMORIES, COUNT_EVENTS, LOG_MEMORY
@@ -166,6 +167,24 @@ def test_model_failure_maps_to_502(client, app_provider, failure) -> None:
 
     response = _chat(client, "how much protein?")
     assert response.status_code == 502
+    assert "unavailable" in response.json()["detail"]
+
+
+def test_database_connection_loss_maps_to_503(client, app_provider, monkeypatch) -> None:
+    """The checkpointer holds one long-lived connection for the app's lifetime
+    (api/main.py) — live validation found that a dropped connection (idle timeout, cluster
+    restart) crashed every subsequent turn with an unhandled 500 instead of degrading like
+    an absent graph. A lost connection isn't recoverable mid-request, only by restarting
+    the app, so it gets the same 503 posture."""
+    _signup(client)
+
+    def _boom(*args, **kwargs):
+        raise psycopg.OperationalError("server closed the connection unexpectedly")
+
+    monkeypatch.setattr("api.routers.chat.run_turn", _boom)
+
+    response = _chat(client, "hello")
+    assert response.status_code == 503
     assert "unavailable" in response.json()["detail"]
 
 

@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 from uuid import UUID, uuid4
 
+import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
@@ -107,6 +108,15 @@ def chat(body: ChatBody, request: Request, user_id: UUID = Depends(get_current_u
         logger.warning("chat turn failed for user %s: %s", user_id, exc)
         raise HTTPException(
             status_code=502, detail="the assistant is unavailable right now; please retry"
+        ) from exc
+    except psycopg.OperationalError as exc:
+        # The checkpointer holds one long-lived connection for the app's lifetime
+        # (api/main.py) — if the cluster ever drops it (idle timeout, restart), every turn
+        # would otherwise crash with an unhandled 500. Same 503 posture as an absent graph:
+        # a dropped connection isn't recoverable mid-request, only by restarting the app.
+        logger.warning("chat turn failed for user %s: database connection lost: %s", user_id, exc)
+        raise HTTPException(
+            status_code=503, detail="chat is temporarily unavailable"
         ) from exc
 
     return _turn_json(client_thread_id, result)
