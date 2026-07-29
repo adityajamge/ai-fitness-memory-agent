@@ -44,6 +44,53 @@
   code that can produce a reconstructed note, and the first place a sensible confidence value
   is actually known.
 
+## Planner tool pairing for ambiguous item follow-ups (surfaced 2026-07-29 manual validation)
+
+- **What:** Improve planner tool-selection guidance so an ambiguously-worded item
+  follow-up (e.g. "how many eggs did I have?" after logging "2 boiled eggs") pairs
+  `lookup_events` with `recall_memories`, rather than selecting `recall_memories` alone.
+- **Why:** `lookup_events`'s own description already recommends issuing both together when
+  wording could differ ("grilled chicken" vs. "chicken"), but the planner didn't follow
+  that for this phrasing. `lookup_events` needs no query embedding; `recall_memories` does
+  — so on a provider that can't embed (the Claude API dev adapter), calling only the latter
+  means an answerable question degrades to "nothing logged" when the former would have
+  succeeded outright.
+- **Pros:** Reduces unnecessary dependence on embeddings for questions the exact-match path
+  could already answer; likely a small, scoped prompt-guidance change (`agent/tools.py`
+  tool descriptions and/or `PLAN_SYSTEM` in `agent/providers/_prompts.py`).
+- **Cons:** Needs live-model validation to confirm the tightened guidance actually changes
+  tool selection rather than just reading better; risk of over-pairing (issuing both tools
+  on every item question, adding latency/cost) if done too bluntly.
+- **Context:** Found during the 2026-07-29 manual validation
+  ([12-test-plan.md](docs/office-hours/12-test-plan.md#manual-end-to-end-validation-record--2026-07-29)),
+  logging a meal with "2 boiled eggs" and asking "how many eggs did I have for breakfast?"
+  immediately after. Not a bug — the degradation path it hit instead behaved correctly
+  (honest 200, reported error, no hallucination).
+- **Depends on / blocked by:** none; can be picked up any time.
+
+## Clean up the shared CockroachDB Cloud dev cluster (surfaced 2026-07-29 manual validation)
+
+- **What:** Remove accumulated historical test users, threads, and checkpoint rows
+  (`users`, `sessions`, `memories`, `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`)
+  from the shared CockroachDB Cloud development cluster that don't belong to current,
+  active validation/demo data.
+- **Why:** The cluster has accumulated ~300+ leftover threads/users across the project's
+  history (test runs, manual validation sessions). This caused one flaky, non-reproducing
+  failure in a full-suite run — `cli/tests/test_backfill.py::test_main_all_sweeps_users_with_gaps`
+  sweeps *every* user in the cluster with a NULL-embedding gap, which took over 2 minutes
+  and very likely hit a transient connection hiccup given the volume, rather than a code
+  defect (it passed cleanly on an isolated rerun).
+- **Pros:** Faster, more stable test runs against the real cluster; removes a source of
+  noise when interpreting ad-hoc diagnostic queries during future manual validation (stray
+  rows from unrelated historical sessions can otherwise look like current-code anomalies).
+- **Cons:** Needs care not to delete anything still wanted for demo/portfolio purposes;
+  a one-time manual cleanup, not automatable without deciding a retention policy first.
+- **Context:** Found during the 2026-07-29 manual validation
+  ([12-test-plan.md](docs/office-hours/12-test-plan.md#manual-end-to-end-validation-record--2026-07-29))
+  while investigating a `checkpoint_blobs` channel scan that initially looked like it might
+  indicate an M5-1 durability guard violation, before being traced to old data.
+- **Depends on / blocked by:** none; can be picked up any time.
+
 ## Drop embedding normalization when CockroachDB ships cosine distance
 
 - **What:** When CockroachDB vector indexes support cosine (or inner-product) distance,
