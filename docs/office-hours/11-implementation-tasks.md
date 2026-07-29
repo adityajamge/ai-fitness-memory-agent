@@ -38,7 +38,11 @@
   - Note: the trace object and its by-construction emission already exist (Phase 3, M1/M3); T7 adds **persistence + validation**, not the artifact.
 - [ ] **T8 (P1, ~2d / ~3h)** — cli — Replay CLI: extraction-output cache (re-runs never re-call Bedrock), small-batch inserts, idempotent resume
   - Surfaced by: Outside voice #7 (replay = dominant cost) + Step 0 vector-batch footgun
-  - Files: `cli/replay.py` · Verify: interrupted run resumes without duplicates; second run makes zero model calls
+  - Design review (2026-07-29, pre-implementation): [../engineering/replay-architecture.md](../engineering/replay-architecture.md) — full decision record (extraction cache, resume-ledger design, confidence threading, canonicalization timing), risk analysis, and open questions to resolve before starting
+  - Files: `cli/replay.py`, `cli/replay_cache.py`, `cli/replay_ledger.py`, `engine/ingestion.py`
+    (optional per-record confidence override, TODOS.md) · Verify: interrupted run resumes
+    without duplicates (forced double-run produces zero duplicate memory rows — the review's
+    top-severity risk); second run makes zero model calls; ledger rebuildable from DB state
 - [x] **T9 (P1, ~2d / ~3h)** — api — Simple email+password auth + sessions; per-user scoping enforced and tested as a security boundary ✅ 2026-07-20: scrypt hashing, opaque HttpOnly session cookie, scoping enforced in every `engine/repository.py` query
   - Surfaced by: D14 builder decision (ADR-13.15) + test gap "user A cannot read user B"
   - Files: `api/auth.py` (primitives), `api/routers/auth.py` (routes), `api/deps.py` (`get_current_user` boundary), `api/tests/test_scoping.py`

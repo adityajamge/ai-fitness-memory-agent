@@ -43,6 +43,10 @@
 - **Depends on / blocked by:** decide **with** T8 (replay CLI, Phase 4) — that is the first
   code that can produce a reconstructed note, and the first place a sensible confidence value
   is actually known.
+- **Design review:** full alternatives/trade-offs in
+  [docs/engineering/replay-architecture.md §4.6](engineering/replay-architecture.md#46-confidence-note-fallback-during-replay--needs-closing-tracked-in-todosmd)
+  — recommends threading a per-record confidence hint through `ingest_text` rather than a flat
+  reconstructed-note value.
 
 ## Planner tool pairing for ambiguous item follow-ups (surfaced 2026-07-29 manual validation)
 
@@ -168,3 +172,9 @@
   plus the item-filter paths in [06-retrieval-strategy.md](docs/office-hours/06-retrieval-strategy.md).
 - **Depends on / blocked by:** decide and land **with or just before T8** (Phase 4 replay),
   the first pipeline that produces reconstructed memories at scale.
+- **Design review:** flagged as a scope gap against the roadmap/backlog (this decision is
+  absent from Phase 4's deliverables and T8's estimate) in
+  [docs/engineering/replay-architecture.md §5](engineering/replay-architecture.md#5-risk-analysis)
+  and tracked as open question 3 in
+  [§8](engineering/replay-architecture.md#8-open-questions) — needs an explicit
+  in-scope-for-Phase-4 vs. deliberately-deferred call before T8 implementation starts.

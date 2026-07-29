@@ -170,6 +170,12 @@
 
 ## Phase 4 — History Bootstrap (Replay) *(~3–5 days, includes human reconstruction time)*
 
+> **Before starting:** [docs/engineering/replay-architecture.md](engineering/replay-architecture.md)
+> is the full pre-implementation design review for this phase — architecture map, the ten
+> design decisions (extraction cache, idempotent resume, confidence, canonicalization timing,
+> etc.), risk analysis, milestone breakdown, testing strategy, and the open questions that need
+> answers before implementation starts. Read it before writing `cli/replay.py`.
+
 - **Objective:** your account becomes the mature account — months of real history in the
   production pipeline; the money question becomes answerable.
 - **Why this phase exists:** the time-travel demo needs depth, and the review made replay the
