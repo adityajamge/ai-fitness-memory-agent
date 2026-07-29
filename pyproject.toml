@@ -34,6 +34,10 @@ dev = [
     # Lets engine/config.py read a local .env (see .env.example). Dev-only on purpose: the
     # deployed image has no .env and reads real environment variables from the task definition.
     "python-dotenv>=1.0",
+    # Development-only: the Claude API provider adapter (MODEL_PROVIDER=claude_api) for
+    # running the app without Bedrock access. Bedrock remains the production default
+    # (ADR-13), so the deployed image does not need this. See agent/providers/claude_api.py.
+    "anthropic>=0.69",
 ]
 
 [tool.hatch.build.targets.wheel]

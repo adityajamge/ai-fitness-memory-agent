@@ -103,6 +103,7 @@ dependencies. **The Phase 2 write path does.** The container reads its config th
 | `EXTRACTION_MODEL_ID` / `EMBEDDING_MODEL_ID` | model overrides | optional; defaults in `engine/config.py` |
 | `EMBED_DIMS` | embedding dimensions | optional; defaults to `512` — **must match `VECTOR(512)`** in `engine/schema.sql` |
 | `DEFAULT_TZ` | fallback timezone for events the model can't place, and the zone aggregation buckets are computed in | optional; defaults to `Asia/Kolkata` |
+| `MODEL_PROVIDER` | which `ModelProvider` to build | optional; defaults to `bedrock` — **leave unset in production**; `claude_api` is a development-only adapter that cannot embed |
 | `SESSION_TTL_SECONDS` / `BACKFILL_BATCH` | session lifetime, opportunistic backfill page size | optional; defaults in `engine/config.py` |
 
 Bedrock access comes from the task role, not from keys in env vars — the task execution /

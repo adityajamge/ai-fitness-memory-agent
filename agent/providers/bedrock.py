@@ -20,12 +20,29 @@ from __future__ import annotations
 import json
 import logging
 import math
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
+from agent.providers._prompts import (
+    EXTRACT_TOOL as _EXTRACT_TOOL,
+)
+from agent.providers._prompts import (
+    NARRATE_SYSTEM as _NARRATE_SYSTEM,
+)
+from agent.providers._prompts import (
+    PLAN_SYSTEM as _PLAN_SYSTEM,
+)
+from agent.providers._prompts import (
+    SYSTEM_PROMPT as _SYSTEM_PROMPT,
+)
+from agent.providers._prompts import (
+    extract_tool_schema,
+    parse_extracted_events,
+    render_context,
+)
 from engine.model import (
     EmbeddingError,
     ExtractedEvent,
@@ -35,109 +52,24 @@ from engine.model import (
     ToolCall,
     ToolSpec,
 )
-from engine.types import MEMORY_TYPE_REGISTRY
 
 if TYPE_CHECKING:
     from engine.assembly import ContextBlock
 
 logger = logging.getLogger(__name__)
 
-_EXTRACT_TOOL = "record_events"
-
-_PLAN_SYSTEM = (
-    "You are the retrieval planner for a fitness memory app. Decide what to do with the "
-    "user's turn by selecting tools and filling their typed arguments — you are the only "
-    "part of the system that reads natural language.\n"
-    "- Select log_memory (when offered) to record a turn that states something loggable "
-    "(a meal, workout, weight, etc.). Select retrieval tools to answer a question. A turn "
-    "can be BOTH ('logged my run — am I improving?'): select log_memory AND the retrieval "
-    "tools.\n"
-    "- Issue several retrieval calls when a question needs them; they are merged downstream.\n"
-    "- Ground relative dates ('today', 'last 30 days') using the provided current time and "
-    "timezone; fill date ranges as concrete ISO timestamps.\n"
-    "- If the turn needs no memory operation at all (small talk, thanks, a greeting), call "
-    "NO tools. Calling nothing is a valid, deliberate answer — do not force a tool."
-)
-
-_NARRATE_SYSTEM = (
-    "You are a fitness memory companion. Answer the user's question using ONLY the evidence "
-    "provided — never invent numbers, dates, or facts. Every factual claim must carry a "
-    "citation marker in square brackets containing the exact memory id it rests on, e.g. "
-    "'you averaged 137g protein [a1b2c3d4-...]'. Cite only ids that appear in the evidence.\n"
-    "- If the turn ASKS ABOUT THEIR DATA and the evidence is empty, say plainly that there "
-    "is nothing logged for that yet — do not guess.\n"
-    "- If the turn is small talk, a greeting, or thanks rather than a question about their "
-    "data, just reply naturally and briefly. Do NOT mention evidence, memories, or missing "
-    "data — there was nothing to look up, and saying so would be confusing.\n"
-    "- If the turn only reported something to log, acknowledge what was recorded.\n"
-    "Be concise and factual."
-)
-
-_SYSTEM_PROMPT = (
-    "You extract typed health events from a user's message for a fitness memory app. "
-    "Return events ONLY through the record_events tool. Infer event_time and timezone from "
-    "relative expressions ('yesterday', 'this morning') using the provided current time and "
-    "timezone. NEVER invent facts: if a quantity or time is uncertain, lower confidence and, "
-    "for time, leave event_time null (the system will estimate it).\n\n"
-    "When you return NO events you must say why, using no_loggable_content:\n"
-    "- Set no_loggable_content=true ONLY when the message genuinely has nothing to log — "
-    "small talk, a question, a greeting ('thanks', 'how much protein did I eat?').\n"
-    "- Set no_loggable_content=false when the message DOES describe something loggable but "
-    "you cannot extract it confidently (garbled, ambiguous, or unfamiliar). Do not guess and "
-    "do not silently drop it: false tells the system to save the raw text for a later retry.\n"
-    "Getting this flag right matters more than extracting perfectly — it is what guarantees a "
-    "user's input is never lost."
-)
-
 
 def _tool_config() -> dict:
+    """The shared extraction tool, in Bedrock Converse's nesting (``toolSpec`` +
+    ``inputSchema.json``). The schema itself is provider-agnostic — see _prompts.py."""
+    tool = extract_tool_schema()
     return {
         "tools": [
             {
                 "toolSpec": {
-                    "name": _EXTRACT_TOOL,
-                    "description": "Record the typed health events extracted from the message.",
-                    "inputSchema": {
-                        "json": {
-                            "type": "object",
-                            "properties": {
-                                "events": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "properties": {
-                                            "type": {
-                                                "type": "string",
-                                                "enum": sorted(MEMORY_TYPE_REGISTRY.keys()),
-                                            },
-                                            # ISO-8601 timestamp; null if not inferable.
-                                            "event_time": {"type": ["string", "null"]},
-                                            "tz": {"type": ["string", "null"]},
-                                            "confidence": {"type": "number"},
-                                            # Short NL rendering, embedded for semantic recall.
-                                            "summary": {"type": "string"},
-                                            # Per-type fields (e.g. meal: items, nutrition).
-                                            "payload": {"type": "object"},
-                                        },
-                                        "required": ["type", "confidence", "summary", "payload"],
-                                    },
-                                },
-                                # The empty-result contract (engine/model.py): when `events`
-                                # is empty this flag is the difference between "nothing to
-                                # log" and "I could not parse this" — required so the model
-                                # must decide rather than default.
-                                "no_loggable_content": {
-                                    "type": "boolean",
-                                    "description": (
-                                        "True only if the message contains nothing loggable "
-                                        "(small talk, a question). False if it does describe "
-                                        "something loggable that you could not extract."
-                                    ),
-                                },
-                            },
-                            "required": ["events", "no_loggable_content"],
-                        }
-                    },
+                    "name": tool["name"],
+                    "description": tool["description"],
+                    "inputSchema": {"json": tool["input_schema"]},
                 }
             }
         ],
@@ -163,10 +95,7 @@ class BedrockProvider:
 
     # ── extraction ────────────────────────────────────────────────────────────────────
     def extract_events(self, text: str, *, now: datetime, tz: str) -> list[ExtractedEvent]:
-        prompt = (
-            f"Current time: {now.isoformat()}\nCurrent timezone: {tz}\n\n"
-            f"User message:\n{text}"
-        )
+        prompt = f"Current time: {now.isoformat()}\nCurrent timezone: {tz}\n\nUser message:\n{text}"
         try:
             response = self._client.converse(
                 modelId=self._extraction_model_id,
@@ -178,20 +107,10 @@ class BedrockProvider:
         except (ClientError, BotoCoreError) as exc:  # throttling, timeouts, etc.
             raise ExtractionError(f"bedrock converse failed: {exc}") from exc
 
-        tool_input = self._tool_input(response)
-        raw_events = tool_input.get("events") or []
-        if not raw_events:
-            # Empty is only a legitimate no-op when the model affirms the turn was
-            # contentless. Anything else — flag false, flag missing, flag non-boolean —
-            # is an unparsed turn, and raising is what routes it to the note fallback
-            # instead of dropping it (engine/model.py empty-result contract).
-            if tool_input.get("no_loggable_content") is True:
-                return []
-            raise ExtractionError(
-                "model returned no events without affirming the turn was contentless "
-                f"(no_loggable_content={tool_input.get('no_loggable_content')!r})"
-            )
-        return [self._to_event(e, now=now, tz=tz) for e in raw_events]
+        # Empty-result contract enforcement is shared with every other provider (D1).
+        return parse_extracted_events(
+            self._tool_input(response), now=now, tz=tz, default_tz=self._default_tz
+        )
 
     @staticmethod
     def _tool_input(response: dict) -> dict:
@@ -205,36 +124,6 @@ class BedrockProvider:
                 return block["toolUse"].get("input", {})
         # Model answered without calling the forced tool — treat as an unparseable turn.
         raise ExtractionError("model did not return a record_events tool call")
-
-    def _to_event(self, e: dict, *, now: datetime, tz: str) -> ExtractedEvent:
-        event_time, resolved_tz, confidence = self._resolve_time(
-            e.get("event_time"), e.get("tz"), float(e.get("confidence", 0.5)), now=now, tz=tz
-        )
-        return ExtractedEvent(
-            type=str(e["type"]),
-            event_time=event_time,
-            tz=resolved_tz,
-            confidence=confidence,
-            summary=str(e.get("summary", "")),
-            payload=e.get("payload") or {},
-        )
-
-    def _resolve_time(
-        self, raw_time, raw_tz, confidence: float, *, now: datetime, tz: str
-    ) -> tuple[datetime, str, float]:
-        """Parse the model's event_time/tz; fall back to now/default tz with lowered
-        confidence when the model couldn't infer them (bi-temporal design, 04)."""
-        resolved_tz = raw_tz or tz or self._default_tz
-        if not raw_time:
-            return now, resolved_tz, min(confidence, 0.5)
-        try:
-            parsed = datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            return parsed, resolved_tz, confidence
-        except ValueError:
-            logger.info("unparseable event_time %r; estimating as now", raw_time)
-            return now, resolved_tz, min(confidence, 0.5)
 
     # ── embeddings ────────────────────────────────────────────────────────────────────
     def embed(self, texts: list[str]) -> list[list[float]]:
@@ -274,8 +163,7 @@ class BedrockProvider:
         the model return zero calls — the empty-plan 'no memory operation' assertion
         (engine/model.py). Any failure or malformed output raises PlanningError."""
         prompt = (
-            f"Current time: {now.isoformat()}\nCurrent timezone: {tz}\n\n"
-            f"User turn:\n{question}"
+            f"Current time: {now.isoformat()}\nCurrent timezone: {tz}\n\nUser turn:\n{question}"
         )
         try:
             response = self._client.converse(
@@ -295,7 +183,7 @@ class BedrockProvider:
         """Turn assembled evidence into cited prose. Renders the ContextBlock to a compact
         evidence prompt (provider-owned, mirroring extract_events); the model produces
         natural language only. Any failure or empty output raises NarrationError."""
-        prompt = _render_context(question, context)
+        prompt = render_context(question, context)
         try:
             response = self._client.converse(
                 modelId=self._extraction_model_id,
@@ -354,53 +242,3 @@ def _text_of(response: dict) -> str:
     except (KeyError, TypeError) as exc:
         raise NarrationError(f"unexpected converse response shape: {exc}") from exc
     return "".join(b["text"] for b in content if isinstance(b, dict) and "text" in b)
-
-
-def _render_context(question: str, context: ContextBlock) -> str:
-    """Render an assembled ContextBlock into a compact evidence prompt (decision D-5:
-    structured context → text at the narrate boundary). Memory ids are shown inline so the
-    model can cite them; payloads are never dumped (the summaries/values carry the meaning).
-    """
-    lines: list[str] = [f"Question: {question}", ""]
-
-    if context.aggregates:
-        lines.append("Computed aggregates:")
-        for agg in context.aggregates:
-            s = agg.spec
-            header = f"- {s.agg}({s.metric})"
-            header += f" by {s.group_by}" if s.group_by != "none" else ""
-            header += f" from {s.start.date()} to {s.end.date()}:"
-            lines.append(header)
-            if not agg.buckets:
-                lines.append("    (no matching data in range)")
-            for b in agg.buckets:
-                label = b.bucket or "total"
-                cites = " ".join(f"[{i}]" for i in b.evidence_ids)
-                lines.append(f"    {label}: {b.value:g} (n={b.n}) — {cites}")
-        lines.append("")
-
-    if context.counts:
-        lines.append("Event counts:")
-        for c in context.counts:
-            cites = " ".join(f"[{i}]" for i in c.evidence_ids)
-            lines.append(
-                f"- {c.spec.type} from {c.spec.start.date()} to {c.spec.end.date()}: "
-                f"{c.n} — {cites}"
-            )
-        lines.append("")
-
-    if context.memories:
-        lines.append("Relevant memories (most relevant first):")
-        for m in context.memories:
-            lines.append(
-                f"- [{m.id}] {m.type} @ {m.event_time.isoformat()} "
-                f"(confidence {m.confidence:g}, {m.provenance}): {m.summary or ''}"
-            )
-        if context.omitted_count:
-            lines.append(f"  (+{context.omitted_count} lower-ranked memories omitted)")
-        lines.append("")
-
-    if context.is_empty:
-        lines.append("No matching memories were found for this question.")
-
-    return "\n".join(lines).rstrip()

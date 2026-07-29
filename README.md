@@ -95,6 +95,49 @@ Model access is not configured by environment variables: Amazon Bedrock credenti
 from the AWS credential chain (locally `aws configure`/SSO, in ECS the task role). Only the
 model *ids* and region are overridable.
 
+### Running with the Claude API (development)
+
+The architecture's model provider is **Amazon Bedrock** ([ADR-13](docs/office-hours/09-decisions.md#adr-13)):
+Converse for extraction/planning/narration, Titan V2 for embeddings. When Bedrock access
+isn't available, a **development adapter** runs the same app on a
+[platform.claude.com](https://platform.claude.com) API key — same engine, same graph, same
+API, selected purely by configuration:
+
+```bash
+pip install -e . --group dev     # includes the `anthropic` SDK
+```
+
+```ini
+# .env
+DATABASE_URL=postgresql://...            # your CockroachDB
+MODEL_PROVIDER=claude_api
+ANTHROPIC_API_KEY=sk-ant-...             # read by the SDK, not by engine/config.py
+# CLAUDE_API_MODEL_ID=claude-opus-5      # optional, this is the default
+# CLAUDE_API_EFFORT=low                  # optional; low|medium|high|xhigh|max
+```
+
+```bash
+uvicorn api.main:app --port 8080
+```
+
+Switching back is one line (`MODEL_PROVIDER=bedrock`, or delete it) — no code change. That
+round trip is the acceptance check for the model-independence contract
+([ADR-1](docs/office-hours/09-decisions.md#adr-1)): swapping providers touches the app's
+composition root only, never the Memory Engine.
+
+**One capability is deliberately missing.** The Claude API has no embeddings endpoint, and
+Titan V2 is a Bedrock model. Rather than fabricating vectors, the adapter's `embed()` raises,
+which the Phase 2 write path already handles: memories are stored with **NULL embeddings**
+and stay eligible for `python -m cli.backfill` once Bedrock is configured. Fabricated vectors
+would look embedded, never qualify for backfill, and silently degrade recall forever.
+Consequences while running on this provider:
+
+- Every ingest logs `embedding failed; N rows -> NULL, backfill pending` — expected, not a bug.
+- `recall_memories` (semantic search) cannot run; the turn degrades honestly, reporting the
+  failure in the response's `errors` and answering with whatever else it retrieved
+  ([ADR-14.12](docs/office-hours/09-decisions.md#adr-14)).
+- Every other tool — aggregation, timeline, lookup, counts — works normally.
+
 ## Hackathon compliance (evidence lands in later phases)
 
 - **CockroachDB tools:** Distributed Vector Indexing (runtime), Managed MCP Server

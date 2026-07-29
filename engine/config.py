@@ -24,6 +24,16 @@ EMBED_DIMS = 512
 # (model-independence contract, ADR-13 / 05-agent-architecture.md).
 DEFAULT_EXTRACTION_MODEL_ID = "us.anthropic.claude-sonnet-4-20250514-v1:0"
 
+# Which ModelProvider implementation to build. 'bedrock' is the architecture's default
+# (ADR-13); 'claude_api' is a **development adapter** for working without Bedrock access —
+# it cannot embed, so memories are stored with NULL embeddings and backfilled later (T15).
+# See agent/providers/claude_api.py.
+DEFAULT_MODEL_PROVIDER = "bedrock"
+DEFAULT_CLAUDE_API_MODEL_ID = "claude-opus-5"
+# Extraction and planning are structured slot-filling; narration is short prose. Low effort
+# keeps dev turns fast and cheap without touching the deterministic layer below.
+DEFAULT_CLAUDE_API_EFFORT = "low"
+
 # When the model cannot infer a timezone for an event, fall back to this and record
 # lowered confidence (builder decision, Phase 2 planning).
 DEFAULT_TZ = "Asia/Kolkata"
@@ -39,6 +49,9 @@ class Settings:
     default_tz: str = DEFAULT_TZ
     session_ttl_seconds: int = 60 * 60 * 24 * 14  # 14 days
     backfill_batch: int = 32  # opportunistic embeddings backfilled per ingest turn (T15)
+    model_provider: str = DEFAULT_MODEL_PROVIDER  # 'bedrock' | 'claude_api' (dev only)
+    claude_api_model_id: str = DEFAULT_CLAUDE_API_MODEL_ID
+    claude_api_effort: str = DEFAULT_CLAUDE_API_EFFORT
 
 
 def _load_dotenv_if_present() -> None:
@@ -72,4 +85,7 @@ def load_settings() -> Settings:
         default_tz=os.environ.get("DEFAULT_TZ", DEFAULT_TZ),
         session_ttl_seconds=int(os.environ.get("SESSION_TTL_SECONDS", 60 * 60 * 24 * 14)),
         backfill_batch=int(os.environ.get("BACKFILL_BATCH", 32)),
+        model_provider=os.environ.get("MODEL_PROVIDER", DEFAULT_MODEL_PROVIDER),
+        claude_api_model_id=os.environ.get("CLAUDE_API_MODEL_ID", DEFAULT_CLAUDE_API_MODEL_ID),
+        claude_api_effort=os.environ.get("CLAUDE_API_EFFORT", DEFAULT_CLAUDE_API_EFFORT),
     )
