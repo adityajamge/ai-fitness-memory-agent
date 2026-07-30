@@ -171,30 +171,39 @@
 ## Phase 4 — History Bootstrap (Replay) *(~3–5 days, includes human reconstruction time)*
 
 > **Before starting:** [docs/engineering/replay-architecture.md](engineering/replay-architecture.md)
-> is the full pre-implementation design review for this phase — architecture map, the ten
-> design decisions (extraction cache, idempotent resume, confidence, canonicalization timing,
-> etc.), risk analysis, milestone breakdown, testing strategy, and the open questions that need
-> answers before implementation starts. Read it before writing `cli/replay.py`.
+> is the **locked** architecture for this phase — 13 design decisions, risk analysis, the M1–M5
+> milestone breakdown, and the testing strategy. Read it before writing any Phase 4 code.
+> **Amended 2026-07-30:** structuring the reconstruction moved to dev-time tooling (ADR-10's
+> dev-time/runtime split), so **replay makes zero runtime extraction calls** — every record takes
+> the direct-ingest path. The extraction cache is removed (re-add trigger recorded in its §8) and
+> note-confidence threading left Phase 4 scope.
 
 - **Objective:** your account becomes the mature account — months of real history in the
   production pipeline; the money question becomes answerable.
-- **Why this phase exists:** the time-travel demo needs depth, and the review made replay the
-  schedule + cost bottleneck (outside voice #7) — extraction caching is what makes iteration
-  affordable while prompts churn.
-- **Related tasks:** **T8** (replay CLI: extraction cache, small batches, idempotent resume).
+- **Why this phase exists:** the time-travel demo needs depth. The review originally made replay
+  the schedule + cost bottleneck (outside voice #7); the zero-extraction amendment removes that
+  bottleneck — the remaining risk is **idempotency**, not cost (duplicate rows would silently
+  inflate the aggregates the demo's causal story rests on).
+- **Related tasks:** **T8** (replay CLI: converter, idempotent resume, direct-ingest;
+  extraction cache removed by the 2026-07-30 amendment).
 - **Deliverables:**
-  - Replay CLI feeding reconstructed events through the production ingestion pipeline
-    (LLM-assisted reconstruction, confidence-tagged, provenance=`reconstructed`)
-  - First ~3 months bootstrapped into your account; then the full 6–12 months
+  - One-time converter: reconstruction markdown + reviewed composition table → JSONL + manifest
+  - Replay CLI feeding those records through the production ingestion pipeline via
+    `ingest_events` (confidence-tagged, provenance=`reconstructed`, `expanded_from` on synthetic
+    period rows)
+  - Idempotent resume ledger + supersession-based correction workflow
+  - The full pre-cutover history (~430 records) bootstrapped into your account
   - **OQ5 verified in the database**: the causal story's numbers exist post-ingestion
-- **Dependencies:** Phase 2 (ingestion), Phase 0 (reconstruction inputs + story).
-- **Definition of Done:** second replay run makes zero Bedrock calls (cache proof);
-  interrupted run resumes without duplicates; the money question's underlying aggregates
-  return the story's real numbers; bare chat answers it with dated citations.
-- **Demo checkpoint:** ask the deployed bare chat "what changed before my body fat started
-  dropping?" — dated, real-history answer (event-time framing per ADR-13.10). **This is the
-  submittable spine: Milestone 1 complete.**
-- **Suggested commit milestone:** `feat(cli): replay with extraction cache — history bootstrapped, money question live`
+- **Dependencies:** Phase 2 (ingestion), Phase 0 (reconstruction + composition table),
+  **Bedrock access** (embeddings are the one remaining model dependency — ADR-13.2).
+- **Definition of Done:** a full run makes **zero extraction calls** (property test); an
+  interrupted run resumes without duplicates and a forced double-run produces none; the money
+  question's underlying aggregates return the story's real numbers; bare chat answers it with
+  dated citations.
+- **Demo checkpoint:** ask the deployed bare chat "what changed before my Vitamin D recovered?"
+  — dated, real-history answer (event-time framing per ADR-13.10). **This is the submittable
+  spine: Milestone 1 complete.**
+- **Suggested commit milestone:** `feat(cli): replay — history bootstrapped, money question live`
 
 ---
 

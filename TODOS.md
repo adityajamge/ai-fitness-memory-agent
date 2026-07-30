@@ -40,13 +40,13 @@
 - **Context:** surfaced by the 2026-07-21 Phase-2 audit while fixing D3; deliberately left out
   of that change to keep it scoped to provenance. Not user-visible today because `chat` is the
   only ingestion source in production.
-- **Depends on / blocked by:** decide **with** T8 (replay CLI, Phase 4) — that is the first
-  code that can produce a reconstructed note, and the first place a sensible confidence value
-  is actually known.
-- **Design review:** full alternatives/trade-offs in
-  [docs/engineering/replay-architecture.md §4.6](engineering/replay-architecture.md#46-confidence-note-fallback-during-replay--needs-closing-tracked-in-todosmd)
-  — recommends threading a per-record confidence hint through `ingest_text` rather than a flat
-  reconstructed-note value.
+- **Depends on / blocked by:** ~~T8~~ **nothing — unblocked, and no longer a Phase 4 item**
+  (updated 2026-07-30). The replay CLI now uses the direct-ingest path exclusively, where a
+  validation failure is fatal rather than a note fallback, so **replay can no longer produce a
+  reconstructed note** and `_NOTE_CONFIDENCE` is never reached. The issue is real but currently
+  unreachable; it resurfaces if Phase 5 photo ingestion — or any future import path — routes
+  reconstructed content through `ingest_text`. Rationale:
+  [docs/engineering/replay-architecture.md §4.6](engineering/replay-architecture.md).
 
 ## Planner tool pairing for ambiguous item follow-ups (surfaced 2026-07-29 manual validation)
 

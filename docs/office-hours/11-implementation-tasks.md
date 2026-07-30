@@ -36,13 +36,27 @@
   - Files: `engine/trace.py`, `api/turns.py` · Verify: property test — no assembled context without a persisted trace; invalid-citation fixture flagged
   - ⚠️ **Blocking contract decision — settle before writing the validator** ([ADR-14.8](09-decisions.md#adr-14)): the citable set is `trace.evidence` **∪ aggregate/count contributing IDs** (`ContextBlock.citable_ids()`). Because assembly is pure ([ADR-14.7](09-decisions.md#adr-14)), an aggregate's contributing rows are IDs without metadata and are absent from `trace.evidence` — validating against it alone would flag *valid* citations of aggregated data as invalid. Either validate against the full citable set, or carry those IDs into the persisted trace (recommended, keeps "the UI reads the trace" literally true; pairs naturally with T16's batch-fetch hydration).
   - Note: the trace object and its by-construction emission already exist (Phase 3, M1/M3); T7 adds **persistence + validation**, not the artifact.
-- [ ] **T8 (P1, ~2d / ~3h)** — cli — Replay CLI: extraction-output cache (re-runs never re-call Bedrock), small-batch inserts, idempotent resume
+- [ ] **T8 (P1, ~2.5d / ~4h)** — cli — Replay CLI: markdown→JSONL converter, direct-ingest, idempotent resume, supersession-based corrections
   - Surfaced by: Outside voice #7 (replay = dominant cost) + Step 0 vector-batch footgun
-  - Design review (2026-07-29, pre-implementation): [../engineering/replay-architecture.md](../engineering/replay-architecture.md) — full decision record (extraction cache, resume-ledger design, confidence threading, canonicalization timing), risk analysis, and open questions to resolve before starting
-  - Files: `cli/replay.py`, `cli/replay_cache.py`, `cli/replay_ledger.py`, `engine/ingestion.py`
-    (optional per-record confidence override, TODOS.md) · Verify: interrupted run resumes
-    without duplicates (forced double-run produces zero duplicate memory rows — the review's
-    top-severity risk); second run makes zero model calls; ledger rebuildable from DB state
+  - Architecture (LOCKED 2026-07-30): [../engineering/replay-architecture.md](../engineering/replay-architecture.md) — 13 decisions, risk analysis, M1–M5 plan, test strategy
+  - ⚠️ **Contract amended 2026-07-30 — the extraction cache is removed.** This entry originally
+    specified "extraction-output cache (re-runs never re-call Bedrock)". Structuring the
+    reconstruction moved to **dev-time** tooling ([ADR-10](09-decisions.md#adr-10)'s already-locked
+    dev-time/runtime split), so every record takes the direct-ingest path and replay makes **zero
+    extraction calls** — leaving nothing to cache. The guarantee the cache provided is now supplied
+    *by construction* (re-runs are free unconditionally, enforced by an `extract_calls == 0`
+    property test) rather than by mechanism. Keeping it would mean maintaining an unexercised path
+    — the "no infrastructure built solely for completeness" rule. The trigger that would bring it
+    back (a record-schema field requiring inference from free text) and the full re-add recipe are
+    recorded in that doc's §8. **Not a trigger:** future users importing history — ADR-13.4 rules
+    that out. Note-confidence threading also left scope (unreachable via replay); its TODOS.md
+    entry stays open for Phase 5.
+  - Files: `cli/convert.py`, `cli/replay_dataset.py`, `cli/replay.py`, `cli/replay_ledger.py`,
+    `docs/evidence/compositions.json`, `engine/ingestion.py` (`ingest_events` + shared tail),
+    `engine/retrieval.py` (`normalize_item` stop-gap)
+  - Verify: full run makes **zero extraction calls** (property test); interrupted run resumes
+    without duplicates and a forced double-run produces none (the review's top-severity risk);
+    ledger rebuildable from DB state; converter is byte-deterministic
 - [x] **T9 (P1, ~2d / ~3h)** — api — Simple email+password auth + sessions; per-user scoping enforced and tested as a security boundary ✅ 2026-07-20: scrypt hashing, opaque HttpOnly session cookie, scoping enforced in every `engine/repository.py` query
   - Surfaced by: D14 builder decision (ADR-13.15) + test gap "user A cannot read user B"
   - Files: `api/auth.py` (primitives), `api/routers/auth.py` (routes), `api/deps.py` (`get_current_user` boundary), `api/tests/test_scoping.py`
