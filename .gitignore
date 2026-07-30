@@ -49,6 +49,12 @@ Thumbs.db
 playwright-report/
 test-results/
 
-# --- Phase 0 reconstruction: unsanitized personal health data (ADR-7) ---
-# Only a sanitized derivative ever ships in the public repo.
+# --- Phase 0/4 reconstruction: unsanitized personal health data (ADR-7) ---
+# Only a sanitized derivative ever ships in the public repo. The payload table carries the
+# same class of data as the reconstruction itself (lab values, doses, clinic names), so it
+# stays local for the same reason -- see docs/engineering/replay-architecture.md 4.1.
 docs/evidence/timeline-entries.md
+docs/evidence/replay_payloads.json
+
+# Generated replay datasets (derived from the two files above; regenerable via cli.convert)
+data/replay/
