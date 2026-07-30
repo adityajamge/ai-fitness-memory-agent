@@ -67,7 +67,8 @@ cited evidence instead of "nothing logged."
 **Architecture impact.** Phase 4 adds:
 
 - `cli/convert.py` — one-time markdown → JSONL converter (pure; no DB, no model)
-- `docs/evidence/compositions.json` — reviewed macro table the converter reads (§4.1)
+- `docs/evidence/replay_payloads.json` — reviewed payload table the converter reads (§4.1);
+  local-only, gitignored under ADR-7
 - `cli/replay.py` + `replay_ledger.py` + `replay_dataset.py`
 - one new `IngestionService` entry point (`ingest_events`) sharing the whole Phase 2 tail (§4.11)
 - one query-time normalization stop-gap in `engine/retrieval.py` (§4.13)
@@ -171,7 +172,7 @@ Every record is already typed — there is no free-text variant.
     "period_end":   "2026-04-24",
     "cadence":      "daily",
     "assertion":    "4 eggs + 200g dahi daily",
-    "composition":  "4-eggs-200g-dahi"       // key into the composition table
+    "composition":  "meal-pattern.2026-03-26.2026-04-24"   // key into the payload table
   },
   "source_ref": "§3 Diet phases / 2026-03-26 → 2026-04-24"
 }
@@ -186,8 +187,8 @@ Every record is already typed — there is no free-text variant.
   "converter_version": "1.0.0",
   "source_document": "docs/evidence/timeline-entries.md",
   "source_document_sha256": "…",       // staleness detection vs the markdown
-  "composition_table": "docs/evidence/compositions.json",
-  "composition_table_sha256": "…",     // same, for the macro table
+  "payload_table": "docs/evidence/replay_payloads.json",
+  "payload_table_sha256": "…",         // same, for the payload table
   "generated_at": "2026-07-30T…Z",
   "replay_cutover_date": "2026-07-01",
   "default_tz": "Asia/Kolkata"
@@ -205,33 +206,76 @@ generic for every future dataset.
 
 **The manifest hashes converter *inputs*, never the JSONL.** Hashing the JSONL would fight the
 hand-edit workflow (§4.12) — every legitimate correction would read as corruption. Hashing the
-markdown and the composition table gives the check that matters: *have my inputs changed since
+markdown and the payload table gives the check that matters: *have my inputs changed since
 this was generated?*
 
-#### The composition table
+#### The payload table
 
-Every field of a `MealPayload` is derivable from the reconstruction **except the macros** —
-`protein_g` / `carbs_g` / `fat_g` / `kcal` require food-composition knowledge the converter does
-not have. They live in a small reviewed table the converter reads:
+*(Broadened during M1 — originally scoped to meal macros as `compositions.json`. Implementing
+the converter showed the same problem applies to every non-`note` type: blood-report markers,
+body-scan metrics, and supplement doses are all precise values embedded in prose. Regex-mining
+them would put a silent transcription risk on exactly the Vitamin D `6.20 → 38.4` pair M5
+verifies, so they take the same route the macros already did.)*
+
+Precise values that cannot be derived from the reconstruction's prose live in one reviewed
+table, joined by a converter-derived key:
 
 ```jsonc
-// docs/evidence/compositions.json
+// docs/evidence/replay_payloads.json   — LOCAL-ONLY, gitignored (ADR-7): it carries the same
+// lab values, doses, and clinic names as the reconstruction itself.
 {
-  "4-eggs-200g-dahi": {
-    "items": [{"name": "egg", "qty": 4}, {"name": "dahi", "qty_g": 200}],
-    "nutrition": {"protein_g": 31, "carbs_g": 12, "fat_g": 22, "kcal": 390, "estimated": true},
-    "macros_source": "estimated by Claude Code 2026-07-30, reviewed by builder"
+  "meal-pattern.2026-03-26.2026-04-24": {
+    "cadence": "daily",                       // ← this is what Rule 1 and Rule 2 read
+    "summary": "4 eggs and 200g dahi",
+    "payload": {
+      "items": [{"name": "egg", "qty": 4}, {"name": "dahi", "qty_g": 200}],
+      "nutrition": {"protein_g": 31, "carbs_g": 11, "fat_g": 28, "kcal": 400, "estimated": true},
+      "macros_source": "estimated by Claude Code 2026-07-30; reviewed by builder"
+    }
   }
 }
 ```
 
-Four compositions cover the whole pre-cutover diet history. Keeping macros here rather than
-hand-typed into the JSONL is load-bearing for three properties: **regeneration stays stable**
-(hand-edits to generated JSONL are undone by design, §4.12), the converter's **byte-determinism**
-guarantee holds (same markdown + same table → identical JSONL), and **review is 4 rows instead of
-~98 records**.
+Keys are derived from the entry's **coordinates**, never its prose — `<rtype>.<date>` for point
+events, `<rtype>.<start>.<end|ongoing>` for periods — so rewording a description changes no key
+and re-ingests nothing (§4.3). **`note` records need no entry**: preserving the raw text *is* the
+payload, so they default and the table stays at ~14 reviewed entries covering all ~424 records.
 
-`macros_source` keeps the provenance honest alongside the payload's `nutrition.estimated: true`.
+Two entry features earn their place:
+
+- **`cadence` makes Rules 1 and 2 data-driven rather than inferred.** An entry with no cadence is
+  a background state or a qualitative phase and yields one record; an entry with a cadence expands
+  at *that* cadence. Nothing reads the prose to decide.
+- **`segments`** handle a period whose composition changes partway through — the reconstruction's
+  *"100–150g chicken added from 2026-06-23"* inside the 06-15 → 07-05 diet phase. Each segment
+  applies from its own date, so the pre- and post-change days stay honest instead of being averaged.
+
+Keeping values here rather than hand-typed into the JSONL is load-bearing for three properties:
+**regeneration stays stable** (hand-edits to generated JSONL are undone by design, §4.12), the
+converter's **byte-determinism** guarantee holds, and **review is ~14 entries instead of ~424
+records**. `macros_source` and per-entry `note` fields keep provenance honest alongside the
+payload's `nutrition.estimated: true`.
+
+#### Two narrowings that stop non-events being counted as events *(added in M1)*
+
+Both were found by converting the real reconstruction, and both prevent silent over-counting:
+
+**1. Change markers become `note`s.** The reconstruction states an ongoing behavior *twice*: once
+in §2 as the dated moment it changed (*"started 4 eggs/day + 200g packet dahi … — see §3 diet
+phases"*) and once in §3 as the period fact. Converting both quantitatively writes a meal **and**
+the period's day-one expansion row on the same date — a silent double-count, the P0 class of bug
+this phase exists to prevent. The test is deterministic and reads no prose: **a §2 point event is a
+marker when a §3 period of the same reconstruction type covers its date.** Containment rather than
+start-matching is what also catches mid-period markers. Markers convert to dated `note`s rather
+than being dropped — they are exactly the narrative Story A's causal chain cites, and a note
+carries no quantity, so nothing double-counts.
+
+**2. A `*-pattern` that does not expand becomes a `note`.** `meal-pattern` means *"this is what
+eating looked like"*, which is a `meal` only when it is a recurring **quantified** assertion. The
+lifelong-vegetarian period and the junk-food phase are background states; writing them as `meal`
+rows would put two non-meals into `count_events(meal)` and into every meal aggregate. Whether an
+entry expands is exactly whether the reviewed table gave it a cadence, so this needs no inference
+either.
 
 **`meal_type` stays `None`.** The reconstruction never records breakfast/lunch/dinner. Leaving it
 null is the honest outcome; a model asked to fill the payload would *guess* one, and a guessed
@@ -278,7 +322,7 @@ Without that marker, expansion would violate ADR-4. With it, the row is honest a
 one.** Every expanded record of a period shares identical source text; estimating its macros
 independently per day would produce ~30 slightly different values for the same stated food,
 injecting **spurious day-to-day variance** into exactly the aggregate series Story A's context
-depends on. One reviewed value per composition yields a flat, honest series. The composition table
+depends on. One reviewed value per composition yields a flat, honest series. The payload table
 is the mechanism.
 
 **Why `expanded_from` is specific rather than a generalized `reconstruction_origin`** (evaluated
@@ -530,13 +574,13 @@ records** (the earlier extraction-path caveat no longer applies).
 
 #### Which artifact do you edit? (authoritative)
 
-**The markdown is canonical for facts, permanently. The composition table is canonical for macros.
-The JSONL is canonical for what was replayed.**
+**The markdown is canonical for facts, permanently. The payload table is canonical for precise
+values. The JSONL is canonical for what was replayed.**
 
 | Error kind | Fix where | Why |
 |---|---|---|
 | **Factual** — the fact is wrong | **the markdown**, then regenerate | it carries `[S]` markers, `E01`/`E02` evidence refs, the certainty vocabulary (`exact`/`~week`/`~month`), and the causal reasoning — none of which the JSONL can hold. A JSONL-only fix loses *why*, which is where ADR-4's honesty posture lives |
-| **Macros** — a nutrition value is wrong | **`compositions.json`**, then regenerate | one edit fixes every record of that composition |
+| **A precise value** is wrong (macro, lab marker, dose) | **`replay_payloads.json`**, then regenerate | one edit fixes every record that uses it |
 | **Conversion** — inputs right, translation wrong | **the converter**, then regenerate | otherwise regeneration reintroduces the bug |
 | **One-off conversion oddity** not worth a converter change | hand-edit the JSONL | documented escape hatch; logged as debt, since regeneration undoes it |
 
@@ -548,12 +592,12 @@ The converter is **deterministic** (same inputs → byte-identical output) and *
 an existing JSONL without `--force`**, so hand-edits are never lost silently.
 
 ```
-Reconstruction markdown  (canonical for FACTS)   compositions.json  (canonical for MACROS)
+Reconstruction markdown  (canonical for FACTS)   replay_payloads.json  (canonical for VALUES)
         └───────────────────┬───────────────────────────────┘
                             │  cli.convert  — deterministic, --force to overwrite
                             ▼
                    JSONL + manifest  ──►  HUMAN REVIEW / EDIT  ◄── conversion errors only
-                            │                                     (facts → markdown, macros → table)
+                            │                                     (facts → markdown, values → table)
                             │  cli.replay   — separate command, never auto-chained
                             ▼
                    ingest_events  →  committed memories
@@ -725,17 +769,19 @@ Five milestones, each independently reviewable and testable.
 | M5 | Production run + OQ5 verification | M1, M4 |
 
 **M1 — Dataset contract + converter + composition table** *(pure: no DB, no model)*
-- Objective: record + manifest models; `compositions.json`; markdown → JSONL converter implementing
-  Rules 1–3, the type mapping, `expanded_from`, macro lookup, and deterministic `record_id`.
-- Files: `cli/replay_dataset.py`, `cli/convert.py`, `docs/evidence/compositions.json`,
-  `cli/tests/test_convert.py`
+- Objective: record + manifest models; `replay_payloads.json`; markdown → JSONL converter
+  implementing Rules 1–3, the type mapping, the two narrowings, `expanded_from`, payload lookup,
+  and deterministic `record_id`.
+- Files: `cli/replay_dataset.py`, `cli/convert.py`, `docs/evidence/replay_payloads.json`
+  (local-only), `cli/tests/test_convert.py`
 - Tests: **byte-determinism** (same inputs → identical output, twice); Rule 1 (quantified expands,
   qualitative and background do not); Rule 2 (weekly cadence yields weekly records — the
   fabricated-dose guard); Rule 3 (`ongoing` clamps at `replay_cutover_date`); `record_id` stability
   across markdown rewording; `expanded_from` present on synthetic rows, absent on point events;
-  **every record of a composition carries identical macros**; **a missing composition key is an
-  explicit error, never a null-nutrition record**; `meal_type` stays null; type mapping incl.
-  `medication → supplement/category=prescription`; `--force` required to overwrite; malformed
+  **every record of a composition carries identical macros**; **a missing payload key is an
+  explicit error, never a null-value record**; `meal_type` stays null; type mapping incl.
+  `medication → supplement/category=prescription`; **change markers and non-expanding
+  `*-pattern`s become notes** (the two narrowings); `--force` required to overwrite; malformed
   markdown → explicit error, never a silent skip
 - Risks: expansion-rule edge cases; determinism regressions
 - Verification: `pytest cli/tests/test_convert.py`; eyeball the ~430-record output
@@ -813,8 +859,12 @@ Replaces [12-test-plan.md](../office-hours/12-test-plan.md)'s three-line `cli/re
   ├── record_id stable across markdown rewording
   ├── expanded_from present on synthetic rows, absent on point events
   ├── every record of a composition carries IDENTICAL macros
-  ├── missing composition key → explicit error, never a null-nutrition record
+  ├── missing payload key → explicit error, never a null-value record
+  ├── segments switch payload partway through a period
+  ├── change marker covered by a §3 period → note (double-count guard)
+  ├── non-expanding *-pattern → note (background states are not meals)
   ├── meal_type stays null (never inferred)
+  ├── emitted payloads validate against engine/types.py
   ├── type mapping incl. medication → supplement/category=prescription
   ├── refuses to overwrite without --force
   └── malformed markdown → explicit error, never a silent skip
@@ -959,7 +1009,7 @@ confidently-incomplete answer. Handoff 2 is what fixes it.
 | `cli/backfill.py` | The sibling CLI pattern replay's composition root mirrors; §5's end-of-run mitigation |
 | `cli/tests/conftest.py`, `engine/tests/conftest.py` | `FakeModelProvider` call counters — the zero-extraction invariant's fixture |
 | `docs/evidence/timeline-entries.md` | The Phase 0 reconstruction — canonical for **facts** (§4.12). **Local-only, gitignored** (ADR-7) |
-| `docs/evidence/compositions.json` | Canonical for **macros** (§4.1); reviewed dev-time artifact |
+| `docs/evidence/replay_payloads.json` | Canonical for **precise values** (§4.1); reviewed dev-time artifact. **Local-only, gitignored** (ADR-7) |
 | [ingestion-transaction-boundaries.md](ingestion-transaction-boundaries.md) | The transaction-boundary and never-lose-input spec this document extends into batch territory |
 | [graph-state-durability.md](graph-state-durability.md) | Precedent for §4.3's "the guard, not the convention, is the guarantee" posture |
 | [TODOS.md](../../TODOS.md) | Note confidence (§4.6, deferred) and entity canonicalization (§8, Phase 5) |
