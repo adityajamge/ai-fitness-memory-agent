@@ -48,3 +48,7 @@ Thumbs.db
 # --- Test / E2E artifacts ---
 playwright-report/
 test-results/
+
+# --- Phase 0 reconstruction: unsanitized personal health data (ADR-7) ---
+# Only a sanitized derivative ever ships in the public repo.
+docs/evidence/timeline-entries.md

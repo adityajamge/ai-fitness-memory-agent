@@ -13,9 +13,14 @@
 >
 > Companion docs:
 > [ingestion-transaction-boundaries.md](ingestion-transaction-boundaries.md) (the write-path
-> spec every replay call obeys). Data source:
-> [../evidence/timeline-entries.md](../evidence/timeline-entries.md) (the Phase 0
-> reconstruction). Related: [TODOS.md](../../TODOS.md).
+> spec every replay call obeys). Related: [TODOS.md](../../TODOS.md).
+>
+> **Data source — `docs/evidence/timeline-entries.md`, deliberately NOT in this repo.** The Phase 0
+> reconstruction holds unsanitized personal health data (lab values, clinic names, DOB, medication
+> doses), so it is gitignored under [ADR-7](../office-hours/09-decisions.md#adr-7) — raw
+> reconstruction inputs stay local; only a sanitized derivative ever ships publicly. References to
+> it below describe a **local-only file**; a clone will not contain it, and M1's converter must be
+> pointed at a local copy.
 >
 > **When M1–M6 land**, promote §4 into a new ADR in
 > [09-decisions.md](../office-hours/09-decisions.md) — mirroring how ADR-14 absorbed Phase 3's
@@ -38,7 +43,7 @@ the aggregate numbers the demo's causal story rests on — a wrong answer that l
 ## 2. Objective and scope
 
 **Objective:** push the builder's reconstructed health history
-([../evidence/timeline-entries.md](../evidence/timeline-entries.md)) through the production
+(`docs/evidence/timeline-entries.md` — local-only, see header) through the production
 ingestion pipeline, so the account stops being empty and Story A's numbers become verifiable in
 the database (OQ5, [10-open-questions.md](../office-hours/10-open-questions.md)).
 
@@ -902,7 +907,7 @@ exists to prevent. Handoff 2 is what fixes it.
 | `engine/types.py` | Stage-(B) validation both entry points share; unchanged by Phase 4 |
 | `cli/backfill.py` | The sibling CLI pattern replay's composition root mirrors; §5's end-of-run mitigation |
 | `cli/tests/conftest.py`, `engine/tests/conftest.py` | `FakeModelProvider` call counters used throughout §7 |
-| [../evidence/timeline-entries.md](../evidence/timeline-entries.md) | The Phase 0 reconstruction — canonical for **facts** (§4.12) |
+| `docs/evidence/timeline-entries.md` | The Phase 0 reconstruction — canonical for **facts** (§4.12). **Local-only, gitignored** (ADR-7); not present in a clone |
 | [ingestion-transaction-boundaries.md](ingestion-transaction-boundaries.md) | The transaction-boundary and never-lose-input spec this document extends into batch territory |
 | [graph-state-durability.md](graph-state-durability.md) | Precedent for §4.3's "the guard, not the convention, is the guarantee" posture |
 | [TODOS.md](../../TODOS.md) | Note confidence (§4.6, now decided) and entity canonicalization (§8, deferred to Phase 5) |
