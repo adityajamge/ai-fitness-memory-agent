@@ -79,6 +79,9 @@ _SECTIONS_WITH_ENTRIES = {"2", "3"}
 #: Matches a trailing annotation too — the reconstruction's last bucket is
 #: `### 2026-07 (current — live logging takes over from here)`, still a month bucket.
 _MONTH_BUCKET_RE = re.compile(r"^\d{4}-\d{2}\b")
+#: Separates the section from the date in `source_ref`. Deliberately not `/`: §3's subsection
+#: titles contain slashes, which would make the field ambiguous to split (see `_Entry.source_ref`).
+_REF_SEP = "::"
 
 
 @dataclass(frozen=True)
@@ -113,6 +116,15 @@ class _Entry:
 
     @property
     def source_ref(self) -> str:
+        """Human-facing provenance: where in the reconstruction this record came from.
+
+        Shape: ``<section> :: <date-or-range>``. The delimiter is `` :: `` rather than `` / ``
+        because §3's own subsection titles *contain* slashes ("Supplement / medication stacks",
+        "Injuries / illnesses / life events…") — a slash separator makes the string ambiguous to
+        split, which is a trap for anyone auditing a dataset or a failure artifact. Nothing
+        parses this field today; the unambiguous delimiter keeps it that way by choice rather
+        than by luck.
+        """
         # §3's subsections are semantic ("Diet phases", "Training blocks") and belong in the
         # provenance string; §2's are month buckets ("### 2026-03") that add nothing the date
         # in the ref doesn't already say, so they're dropped.
@@ -120,9 +132,9 @@ class _Entry:
         if self.subsection and not _MONTH_BUCKET_RE.match(self.subsection):
             where = f"§{self.section} {self.subsection}"
         if not self.is_period:
-            return f"{where} / {self.start.isoformat()}"
+            return f"{where} {_REF_SEP} {self.start.isoformat()}"
         end = "ongoing" if self.end_is_ongoing else self.end.isoformat()  # type: ignore[union-attr]
-        return f"{where} / {self.start.isoformat()} → {end}"
+        return f"{where} {_REF_SEP} {self.start.isoformat()} → {end}"
 
 
 # ── parsing ───────────────────────────────────────────────────────────────────────────────

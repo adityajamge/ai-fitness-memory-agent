@@ -174,7 +174,7 @@ Every record is already typed — there is no free-text variant.
     "assertion":    "4 eggs + 200g dahi daily",
     "composition":  "meal-pattern.2026-03-26.2026-04-24"   // key into the payload table
   },
-  "source_ref": "§3 Diet phases / 2026-03-26 → 2026-04-24"
+  "source_ref": "§3 Diet phases :: 2026-03-26 → 2026-04-24"   // `::`, not `/`: §3 titles contain slashes
 }
 ```
 

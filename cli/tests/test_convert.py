@@ -373,10 +373,10 @@ def test_non_entry_sections_are_not_parsed(table):
 
 def test_source_ref_records_section_provenance(table):
     records = _by_id(_convert(tbl=table))
-    assert records["blood-report.2026-03-25"].source_ref == "§2 Timeline / 2026-03-25"
+    assert records["blood-report.2026-03-25"].source_ref == "§2 Timeline :: 2026-03-25"
     assert (
         records["meal-pattern.2026-03-26.2026-03-30#2026-03-27"].source_ref
-        == "§3 Diet phases / 2026-03-26 → 2026-03-30"
+        == "§3 Diet phases :: 2026-03-26 → 2026-03-30"
     )
 
 
@@ -437,7 +437,7 @@ def test_month_buckets_never_leak_into_source_ref(table):
     md = TIMELINE.replace(
         "### 2026-03", "### 2026-03 (current — live logging takes over from here)"
     )
-    refs = {r.source_ref.rsplit(" / ", 1)[0] for r in _convert(md, tbl=table) if r.type != "meal"}
+    refs = {r.source_ref.split(" :: ")[0] for r in _convert(md, tbl=table) if r.type != "meal"}
     assert refs == {"§2 Timeline", "§3 Diet phases", "§3 Supplement stacks"}
 
 
@@ -446,4 +446,4 @@ def test_subsection_sensitivity_marker_is_stripped(table):
     md = TIMELINE.replace("### Supplement stacks", "### Supplement stacks  [S]")
     refs = {r.source_ref for r in _convert(md, tbl=table)}
     assert not any("[S]" in ref for ref in refs)
-    assert any(ref.startswith("§3 Supplement stacks / ") for ref in refs)
+    assert any(ref.startswith("§3 Supplement stacks :: ") for ref in refs)
