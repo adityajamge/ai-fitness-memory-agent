@@ -93,6 +93,11 @@
   ([12-test-plan.md](docs/office-hours/12-test-plan.md#manual-end-to-end-validation-record--2026-07-29))
   while investigating a `checkpoint_blobs` channel scan that initially looked like it might
   indicate an M5-1 durability guard violation, before being traced to old data.
+- **Partially addressed 2026-07-31 (T8 M2):** the M2 rebuild-perf test seeded 2000
+  NULL-embedding rows per run and left them behind; seven runs' worth (14,000 rows) were
+  deleted and the test now cleans up in a `finally` block. That cut the NULL-embedding gap
+  population `--all` sweeps from ~9,650 rows to ~1,260. The rest of the entry still stands:
+  ~550 users with gaps, plus the accumulated threads and checkpoint rows.
 - **Depends on / blocked by:** none; can be picked up any time.
 
 ## Drop embedding normalization when CockroachDB ships cosine distance
