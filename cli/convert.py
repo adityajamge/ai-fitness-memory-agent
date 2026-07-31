@@ -76,7 +76,9 @@ _BULLET_RE = re.compile(r"^- \*\*")
 _SECTIONS_WITH_ENTRIES = {"2", "3"}
 #: `### 2026-03` in §2 groups entries by month; it carries no provenance the entry's own date
 #: doesn't already carry, unlike §3's semantic subsections ("Diet phases", "Training blocks").
-_MONTH_BUCKET_RE = re.compile(r"^\d{4}-\d{2}$")
+#: Matches a trailing annotation too — the reconstruction's last bucket is
+#: `### 2026-07 (current — live logging takes over from here)`, still a month bucket.
+_MONTH_BUCKET_RE = re.compile(r"^\d{4}-\d{2}\b")
 
 
 @dataclass(frozen=True)
@@ -157,7 +159,9 @@ def _parse(markdown: str) -> list[_Entry]:
             continue
         if m := _SUBSECTION_RE.match(raw):
             flush()
-            subsection = m["title"].strip()
+            # `[S]` is a sensitivity marker on the heading, not part of its name — strip it here
+            # for the same reason _clean strips it from descriptions.
+            subsection = _clean(m["title"])
             continue
         if section not in _SECTIONS_WITH_ENTRIES:
             continue

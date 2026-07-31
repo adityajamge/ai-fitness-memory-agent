@@ -428,3 +428,22 @@ def test_manifest_hashes_track_input_changes(tmp_path: Path):
 
     assert before.source_document_sha256 != after.source_document_sha256
     assert before.payload_table_sha256 == after.payload_table_sha256
+
+
+def test_month_buckets_never_leak_into_source_ref(table):
+    """§2's month headings are date buckets, including the annotated final one
+    (`### 2026-07 (current — live logging takes over from here)`). Every §2 entry must carry
+    the same provenance prefix regardless of which bucket it sits under."""
+    md = TIMELINE.replace(
+        "### 2026-03", "### 2026-03 (current — live logging takes over from here)"
+    )
+    refs = {r.source_ref.rsplit(" / ", 1)[0] for r in _convert(md, tbl=table) if r.type != "meal"}
+    assert refs == {"§2 Timeline", "§3 Diet phases", "§3 Supplement stacks"}
+
+
+def test_subsection_sensitivity_marker_is_stripped(table):
+    """`[S]` marks a heading as sensitive; it is metadata, not part of the section's name."""
+    md = TIMELINE.replace("### Supplement stacks", "### Supplement stacks  [S]")
+    refs = {r.source_ref for r in _convert(md, tbl=table)}
+    assert not any("[S]" in ref for ref in refs)
+    assert any(ref.startswith("§3 Supplement stacks / ") for ref in refs)
