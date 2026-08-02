@@ -420,3 +420,90 @@ def test_ingest_events_and_ingest_text_produce_identical_row_shape(db, user_id):
         "type", "source", "provenance", "confidence", "payload", "status", "has_embedding",
     ]
     assert {k: text_row[k] for k in shape_keys} == {k: events_row[k] for k in shape_keys}
+
+
+# ── ingest_events_superseding (T8 M4): correction workflow, one transaction ────────────
+
+
+def test_superseding_inserts_replacement_and_retires_original(db, user_id) -> None:
+    provider = FakeModelProvider()
+    svc = _service(db, provider)
+    original = svc.ingest_events(user_id, [_meal_event()])
+    old_id = original.created[0].id
+
+    corrected = _meal_event()
+    corrected.payload["items"][0]["qty_g"] = 300  # 250 -> 300
+    receipt = svc.ingest_events_superseding(user_id, [corrected], [old_id])
+
+    assert provider.extract_calls == 0
+    assert receipt.parse_status == "ok"
+    assert receipt.superseded_ids == [old_id]
+    new_id = receipt.created[0].id
+    assert new_id != old_id
+
+    new_row = _fetch(db, user_id, new_id)
+    assert new_row["status"] == "active"
+    assert new_row["payload"]["items"][0]["qty_g"] == 300
+
+    old_row = _fetch(db, user_id, old_id)
+    assert old_row["status"] == "superseded"
+    assert old_row["superseded_by"] == new_id
+
+
+def test_superseding_retires_every_id_given(db, user_id) -> None:
+    """A record with more than one prior committed row (e.g. after a rebuild oddity) has all
+    of them retired, all pointing at the single replacement."""
+    svc = _service(db, FakeModelProvider())
+    first = svc.ingest_events(user_id, [_meal_event()]).created[0].id
+    second = svc.ingest_events(user_id, [_meal_event()]).created[0].id
+
+    receipt = svc.ingest_events_superseding(user_id, [_meal_event()], [first, second])
+    new_id = receipt.created[0].id
+
+    assert _fetch(db, user_id, first)["superseded_by"] == new_id
+    assert _fetch(db, user_id, second)["superseded_by"] == new_id
+
+
+def test_superseding_validation_failure_is_fatal_and_leaves_original_untouched(
+    db, user_id
+) -> None:
+    svc = _service(db, FakeModelProvider())
+    old_id = svc.ingest_events(user_id, [_meal_event()]).created[0].id
+
+    bad = ExtractedEvent(
+        type="body_scan",
+        event_time=datetime(2026, 7, 20, 7, 0, tzinfo=timezone.utc),
+        tz="Asia/Kolkata",
+        confidence=0.8,
+        summary="body scan",
+        payload={"body_fat_pct": "not-a-number"},
+    )
+    with pytest.raises(ValidationError):
+        svc.ingest_events_superseding(user_id, [bad], [old_id])
+
+    assert _fetch(db, user_id, old_id)["status"] == "active"  # never touched
+
+
+def test_superseding_empty_events_raises(db, user_id) -> None:
+    svc = _service(db, FakeModelProvider())
+    old_id = svc.ingest_events(user_id, [_meal_event()]).created[0].id
+    with pytest.raises(ValueError):
+        svc.ingest_events_superseding(user_id, [], [old_id])
+
+
+def test_superseding_empty_superseded_ids_raises(db, user_id) -> None:
+    svc = _service(db, FakeModelProvider())
+    with pytest.raises(ValueError):
+        svc.ingest_events_superseding(user_id, [_meal_event()], [])
+
+
+def test_superseding_embedding_failure_still_supersedes(db, user_id) -> None:
+    svc = _service(db, FakeModelProvider())
+    old_id = svc.ingest_events(user_id, [_meal_event()]).created[0].id
+
+    failing = _service(db, FakeModelProvider(embed_error=True))
+    receipt = failing.ingest_events_superseding(user_id, [_meal_event()], [old_id])
+
+    assert receipt.created[0].embedding_pending is True
+    assert _fetch(db, user_id, old_id)["status"] == "superseded"
+    assert _fetch(db, user_id, receipt.created[0].id)["has_embedding"] is False

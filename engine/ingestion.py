@@ -52,6 +52,7 @@ class Receipt:
     parse_status: Literal["ok", "incomplete"] = "ok"
     message: str = _MSG_OK
     superseded_note_id: UUID | None = None
+    superseded_ids: list[UUID] = field(default_factory=list)
 
 
 class IngestionService:
@@ -127,6 +128,61 @@ class IngestionService:
         memories = self._build_memories(user_id, events, source, provenance)
 
         return self._persist_validated(user_id, memories)
+
+    def ingest_events_superseding(
+        self,
+        user_id: UUID,
+        events: list[ExtractedEvent],
+        superseded_ids: list[UUID],
+        *,
+        source: str = "replay",
+        provenance: str = "reconstructed",
+    ) -> Receipt:
+        """Direct-ingest + supersession, in one transaction (§4.14) — the correction-workflow
+        counterpart to ``ingest_events``. Every corrected replay record inserts its
+        replacement and retires the ledger's previously-committed rows atomically, so no
+        intermediate state (new row active AND old row still active, or vice versa) is ever
+        observable.
+
+        This mirrors ``reprocess_note``'s shape (insert the replacement, retire the original,
+        one transaction) rather than sharing ``_persist_validated``'s (C)-(F) tail, for the
+        same reason ``reprocess_note`` already can't: the transaction body here also
+        supersedes, so it isn't that tail's shape. Two transaction shapes exist in this
+        module — the shared tail, and insert+supersede — not four independent ones; every
+        entry point still funnels through exactly one of them (§4.14).
+
+        Like ``ingest_events``, validation failure is fatal: there is no note fallback on the
+        direct-ingest path (§4.11) — a bad payload here means the caller (replay) emitted bad
+        data, and nothing is written.
+        """
+        if not events:
+            raise ValueError("ingest_events_superseding requires at least one event")
+        if not superseded_ids:
+            raise ValueError("ingest_events_superseding requires at least one superseded id")
+
+        # (B) validation — raises on failure; caller's responsibility, not a note case
+        memories = self._build_memories(user_id, events, source, provenance)
+
+        # (C) embeddings — nullable, off-transaction
+        self._attach_embeddings(memories)
+
+        # (D) insert the replacement(s) + retire the originals, one transaction
+        with self.db.transaction() as cur:
+            ids = insert_memories(cur, memories)
+            for old_id in superseded_ids:
+                mark_superseded(cur, user_id, old_id, superseded_by=ids[0])
+        for m, mid in zip(memories, ids, strict=True):
+            m.id = mid
+
+        # (E) receipt from committed rows, then (F) opportunistic backfill
+        receipt = Receipt(
+            created=self._refs(memories),
+            parse_status="ok",
+            message=_MSG_OK,
+            superseded_ids=list(superseded_ids),
+        )
+        self._opportunistic_backfill(user_id)
+        return receipt
 
     def reprocess_note(self, user_id: UUID, note_id: UUID) -> Receipt:
         """Upgrade an existing note into typed events; on success supersede the note in one
