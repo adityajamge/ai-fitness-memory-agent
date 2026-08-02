@@ -151,6 +151,49 @@ def test_as_extracted_event_extra_payload_merges_without_mutating_original() -> 
     assert "replay_record_id" not in record.payload  # the original is untouched
 
 
+def test_as_extracted_event_carries_expanded_from_into_the_payload() -> None:
+    """§4.1's honesty mechanism is TWO signals — lowered confidence *and* this marker.
+
+    `expanded_from` is a sibling of `payload` on the record, has no database column, and has
+    no ExtractedEvent field, so it must ride inline in the payload or it vanishes silently.
+    It did vanish, for all 399 expanded rows of the first production replay: the rows were
+    factually correct but overstated what was observed, because nothing distinguished a
+    materialized day of an asserted pattern from a logged event.
+    """
+    marker = {
+        "period_start": "2026-03-26",
+        "period_end": "2026-04-24",
+        "cadence": "daily",
+        "assertion": "4 eggs + 200g dahi daily",
+        "composition": "meal-pattern.2026-03-26.2026-04-24",
+    }
+    record = _record(record_id="meal-pattern.2026-03-26.2026-04-24#2026-04-03",
+                     expanded_from=marker)
+    event = record.as_extracted_event()
+
+    assert event.payload["expanded_from"] == marker
+    assert event.payload["items"] == record.payload["items"]  # facts untouched
+    assert "expanded_from" not in record.payload  # the record itself is not mutated
+
+
+def test_as_extracted_event_omits_expanded_from_for_point_events() -> None:
+    """A point event is a real observation — it must NOT be marked as pattern-derived."""
+    event = _record().as_extracted_event()
+    assert "expanded_from" not in event.payload
+
+
+def test_expanded_from_coexists_with_the_replay_record_id_stamp() -> None:
+    """Both markers ride in the same payload; neither may clobber the other."""
+    marker = {"cadence": "daily", "composition": "meal-pattern.2026-03-26.2026-04-24"}
+    record = _record(record_id="meal-pattern.2026-03-26.2026-04-24#2026-04-03",
+                     expanded_from=marker)
+    event = record.as_extracted_event(
+        extra_payload={"replay_record_id": record.record_id}
+    )
+    assert event.payload["expanded_from"] == marker
+    assert event.payload["replay_record_id"] == record.record_id
+
+
 def test_as_extracted_event_payload_is_never_the_same_object() -> None:
     """Even with no extra_payload, the returned dict must not alias self.payload -- a caller
     mutating the event's payload (e.g. to stamp a key in later) must never corrupt the record

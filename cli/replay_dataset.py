@@ -186,13 +186,27 @@ class ReplayRecord:
         """
         if self.summary is None:
             raise DatasetError(f"record {self.record_id!r} has no summary; cannot ingest")
+
+        # `expanded_from` is a sibling of `payload` on the record but has no column and no
+        # ``ExtractedEvent`` field, so it rides **inline in the payload** — the only place it
+        # can live (ADR-13.6's extra="allow" makes that migration-free). Carrying it is not
+        # optional: §4.1's honesty mechanism is *two* signals, lowered confidence AND this
+        # marker, and "without that marker, expansion would violate ADR-4". It is what lets a
+        # citation chip say "one day of an asserted pattern spanning 2026-03-26 → 2026-04-24"
+        # instead of "you logged this meal". Omitting it silently (as this adapter first did)
+        # produces rows that are factually right but overstate what was actually observed.
+        payload: dict[str, Any] = {**self.payload}
+        if self.expanded_from is not None:
+            payload["expanded_from"] = self.expanded_from
+        payload.update(extra_payload or {})
+
         return ExtractedEvent(
             type=self.type,
             event_time=datetime.fromisoformat(self.event_time),
             tz=self.tz,
             confidence=self.confidence,
             summary=self.summary,
-            payload={**self.payload, **(extra_payload or {})},
+            payload=payload,
         )
 
 

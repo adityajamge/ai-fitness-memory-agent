@@ -115,6 +115,37 @@ def test_new_records_are_ingested_and_marked_done(db, user_id, tmp_path: Path) -
         assert row["payload"][REPLAY_RECORD_ID_KEY] == record.record_id
 
 
+def test_expanded_record_lands_with_its_expanded_from_marker(db, user_id, tmp_path: Path) -> None:
+    """The regression the first production replay shipped: all 399 expanded rows committed
+    without `expanded_from`, so nothing in the database distinguished a materialized day of an
+    asserted pattern from an observed event (§4.1 — "without that marker, expansion would
+    violate ADR-4"). Asserted against the committed ROW, not the adapter, because that is
+    where it was missing."""
+    marker = {
+        "period_start": "2026-03-26",
+        "period_end": "2026-04-24",
+        "cadence": "daily",
+        "assertion": "4 eggs + 200g dahi daily",
+        "composition": "meal-pattern.2026-03-26.2026-04-24",
+    }
+    expanded = _record(
+        "2026-04-03",
+        record_id="meal-pattern.2026-03-26.2026-04-24#2026-04-03",
+        expanded_from=marker,
+    )
+    point = _record("2026-03-25")
+
+    ledger = ReplayLedger(tmp_path / "replay.ledger.jsonl")
+    _run(_service(db, FakeModelProvider()), ledger, [expanded, point], user_id, tmp_path)
+
+    exp_row = _fetch(db, user_id, UUID(ledger.entry(expanded.record_id).memory_ids[0]))
+    assert exp_row["payload"]["expanded_from"] == marker
+    assert exp_row["payload"][REPLAY_RECORD_ID_KEY] == expanded.record_id  # both coexist
+
+    pt_row = _fetch(db, user_id, UUID(ledger.entry(point.record_id).memory_ids[0]))
+    assert "expanded_from" not in pt_row["payload"]  # observations stay unmarked
+
+
 def test_second_run_skips_everything_and_writes_no_new_rows(db, user_id, tmp_path: Path) -> None:
     ledger_path = tmp_path / "replay.ledger.jsonl"
     records = [_record("2026-03-25"), _record("2026-03-26")]

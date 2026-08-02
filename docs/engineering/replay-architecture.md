@@ -340,6 +340,22 @@ not 30 observations. Every expanded record therefore carries, beyond
 
 Without that marker, expansion would violate ADR-4. With it, the row is honest about what it is.
 
+**Where it is stored, and the bug that made this explicit (2026-08-02).** `expanded_from` is a
+*sibling* of `payload` on the JSONL record, but `memories` has no such column and
+`ExtractedEvent` has no such field — so it rides **inline in the payload**, which
+[ADR-13.6](../office-hours/09-decisions.md#adr-13)'s `extra="allow"` makes migration-free. M4's
+adapter (`ReplayRecord.as_extracted_event`) originally copied only `payload` and dropped it
+silently: nothing errored, because no layer required it. The first production replay therefore
+committed all 399 expanded rows **factually correct but honesty-incomplete** — lowered
+confidence present, marker absent — and it was caught only by the post-run verification sweep,
+not by any test. Fixed in the adapter, backfilled onto the committed rows (metadata only: a
+`payload || jsonb_build_object(...)` keyed on `replay_record_id`, leaving facts, summaries and
+embeddings bit-identical, and idempotency intact because the ledger's `content_hash` is computed
+from the JSONL record — which always carried the marker — never from the database row). Guarded
+now by tests at both levels: the adapter carries it, and a **committed row** is asserted to have
+it (`cli/tests/test_replay.py`), because the adapter-level check alone would not have caught the
+original defect's blast radius.
+
 **One extraction result per composition, not per record — a correctness property, not just a cost
 one.** Every expanded record of a period shares identical source text; estimating its macros
 independently per day would produce ~30 slightly different values for the same stated food,
@@ -441,6 +457,28 @@ produced** — a checked invariant, not a README note (the same posture as `_Gua
 [graph-state-durability.md](graph-state-durability.md), where the guard rather than the convention
 is the guarantee). A record you want to add by hand is unsupported: add it to the markdown and
 regenerate.
+
+**Three legitimate id shapes** *(the third added 2026-08-02 — see below)*:
+
+| Shape | Grammar | `expanded_from` |
+|---|---|---|
+| point event | `<type>.<date>` | absent |
+| **collapsed period** | `<type>.<start>.<end\|ongoing>` | absent |
+| expanded occurrence | `<type>.<start>.<end\|ongoing>#<date>` | present |
+
+A **collapsed period** is a period fact the converter chose *not* to expand — §4.1's two
+narrowings, where a change marker covered by a §3 period, or a `*-pattern` with no cadence,
+becomes a single dated `note`. It keeps the period-shaped id because those bounds are what make
+the record self-describing, but carries no `expanded_from` because nothing was materialized.
+The guard originally knew only the first and third shapes and rejected all six collapsed periods
+in the real dataset — **caught by the M5 smoke test**, which is precisely what the smoke step
+exists for. The six were the lifelong-vegetarian baseline, the junk-food phase, the typhoid
+illness, the strength-training confounder before the 2026-07-03 blood draw, and two 2026-07-06
+notes — i.e. the narrative Story A's causal chain cites. Being scattered, they would never have
+tripped the §4.10 halt: a full run would have reported *"418 new, 6 failed"* and returned a
+quietly incomplete history. The amendment **does not weaken the guard**: a collapsed period is
+held to the same strictness as a point event (its *start* must equal the record's `event_time`),
+plus a new check neither original grammar had — a concrete `end` must not precede the start.
 
 **The invariant this decision lives or dies on:** a ledger entry is written **strictly after** the
 ingest call returns — never before, never batched. Same "receipt only after commit" rule as
@@ -931,8 +969,20 @@ Five milestones, each independently reviewable and testable.
   several smaller commits per the milestone's implementation-order plan; this is the doc-level
   milestone name, not a single literal commit)
 
-**M5 — Production run + OQ5**
-- Objective: convert and replay the real reconstruction; verify Story A's numbers in the DB
+**M5 — Production run + OQ5** — ✅ **COMPLETE 2026-08-02. OQ5 resolved: GO.**
+- **Result:** 424 records replayed into the real account in **427.8s** (~1.01 s/record);
+  424 committed, **0 failed, 0 NULL embeddings**, 424 distinct `replay_record_id`, ledger and
+  database in exact agreement. Idempotent rerun: **0 new / 424 skipped in 2.7s** (147× faster —
+  re-runs are free, as §4.2's removal predicted). **Zero extraction calls.**
+- **OQ5 evidence, via the production retrieval path:** `lookup_events(blood_report)` returns
+  Vitamin D **6.20 (2026-03-25) → 38.4 (2026-07-03)**; semantic recall on *"what changed before
+  my vitamin D recovered"* returns the supplement start, the dose reduction, and the baseline
+  report; weekly protein aggregates trace the intervention **124 → 217 → 227 → 252 g**.
+- **Two defects the milestone caught** (both fixed, both now test-guarded): the §4.3 guard
+  rejecting collapsed-period ids (caught by the smoke step), and the adapter dropping
+  `expanded_from` (caught by post-run verification — see §4.1). The smoke test paid for itself.
+- **§5 risks that did not materialize:** opportunistic-backfill compounding was negligible, and
+  no CockroachDB serialization failure occurred across 424 sequential transactions.
 - Files: none (operational) — optionally `docs/replay-run-log.md`
 - Prerequisite: **Bedrock access confirmed** (embeddings — §5)
 - Measurements (feeding T12 and §5): bulk wall-clock; opportunistic-backfill call count; recall
