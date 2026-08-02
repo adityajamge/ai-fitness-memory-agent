@@ -26,6 +26,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from engine.model import ExtractedEvent
+
 __all__ = [
     "TYPE_MAP",
     "CERTAINTY_CONFIDENCE",
@@ -38,6 +40,8 @@ __all__ = [
     "ReplayRecord",
     "DatasetError",
     "load_payload_table",
+    "load_manifest",
+    "read_dataset",
     "write_dataset",
     "dumps_canonical",
 ]
@@ -168,6 +172,29 @@ class ReplayRecord:
             out["expanded_from"] = self.expanded_from
         return out
 
+    def as_extracted_event(self, *, extra_payload: dict[str, Any] | None = None) -> ExtractedEvent:
+        """Convert to the shape ``IngestionService.ingest_events``/``ingest_events_superseding``
+        accept (T8 M4, docs/engineering/replay-architecture.md §3's per-record contract).
+
+        This module stays ledger-agnostic on purpose: stamping
+        ``cli.replay_ledger.REPLAY_RECORD_ID_KEY`` into the payload is the caller's job (pass it
+        via ``extra_payload``), not this method's — importing ``cli.replay_ledger`` here would
+        cycle back, since that module already imports from this one. ``extra_payload`` is merged
+        into a **copy** of ``self.payload``, so the returned event never aliases (and a caller
+        mutating it can never corrupt) this record's own payload — which matters because the
+        ledger later hashes and snapshots ``self`` unchanged.
+        """
+        if self.summary is None:
+            raise DatasetError(f"record {self.record_id!r} has no summary; cannot ingest")
+        return ExtractedEvent(
+            type=self.type,
+            event_time=datetime.fromisoformat(self.event_time),
+            tz=self.tz,
+            confidence=self.confidence,
+            summary=self.summary,
+            payload={**self.payload, **(extra_payload or {})},
+        )
+
 
 @dataclass(frozen=True)
 class PayloadEntry:
@@ -295,6 +322,73 @@ def write_dataset(records: list[ReplayRecord], manifest: Manifest, jsonl_path: P
         newline="\n",
     )
     return manifest_path
+
+
+def load_manifest(jsonl_path: Path) -> Manifest:
+    """Load the sidecar manifest for ``jsonl_path`` (§4.1's `<dataset>.manifest.json`
+    convention — the counterpart to ``write_dataset``'s own naming)."""
+    manifest_path = jsonl_path.with_suffix(".manifest.json")
+    try:
+        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise DatasetError(f"manifest not found: {manifest_path}") from exc
+    except json.JSONDecodeError as exc:
+        raise DatasetError(f"manifest is not valid JSON ({manifest_path}): {exc}") from exc
+
+    try:
+        return Manifest(
+            dataset_version=raw["dataset_version"],
+            converter_version=raw["converter_version"],
+            source_document=raw["source_document"],
+            source_document_sha256=raw["source_document_sha256"],
+            payload_table=raw["payload_table"],
+            payload_table_sha256=raw["payload_table_sha256"],
+            generated_at=raw["generated_at"],
+            replay_cutover_date=raw["replay_cutover_date"],
+            default_tz=raw["default_tz"],
+        )
+    except KeyError as exc:
+        raise DatasetError(f"{manifest_path} missing required field {exc}") from exc
+
+
+def read_dataset(jsonl_path: Path) -> list[ReplayRecord]:
+    """Read a JSONL dataset written by ``write_dataset`` (T8 M4). Strict on purpose — a
+    malformed line here means bad data reaching hundreds of records downstream (§4.10), so it
+    is never a silent skip.
+
+    The file is homogeneous (§4.1: "every line a record, no header"), so this is just parse +
+    validate per line; no manifest-line special case to worry about.
+    """
+    try:
+        text = jsonl_path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise DatasetError(f"dataset not found: {jsonl_path}") from exc
+
+    records: list[ReplayRecord] = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            raw = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise DatasetError(f"{jsonl_path}:{lineno} is not valid JSON: {exc}") from exc
+        try:
+            records.append(
+                ReplayRecord(
+                    record_id=raw["record_id"],
+                    type=raw["type"],
+                    event_time=raw["event_time"],
+                    tz=raw["tz"],
+                    confidence=raw["confidence"],
+                    payload=raw["payload"],
+                    source_ref=raw["source_ref"],
+                    expanded_from=raw.get("expanded_from"),
+                    summary=raw.get("summary"),
+                )
+            )
+        except KeyError as exc:
+            raise DatasetError(f"{jsonl_path}:{lineno} missing required field {exc}") from exc
+    return records
 
 
 def event_time_for(on: date, tz: str, hhmm: str | None) -> str:

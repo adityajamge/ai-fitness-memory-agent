@@ -20,6 +20,14 @@
 > retained rather than renumbered so existing cross-references and commit messages stay valid
 > (same convention as `ingestion-transaction-boundaries.md` §13).
 >
+> **Amendment 2026-08-02 — M4 locked: correction workflow gets a dedicated engine entry point,
+> plus the CLI contract.** §4.12 originally left open *how* the correction workflow's one-transaction
+> requirement gets satisfied. Resolved: a new `IngestionService.ingest_events_superseding()` (§4.14)
+> — engine-owned, mirroring `reprocess_note`'s precedent — rather than `cli/replay.py` composing
+> writes itself. This reopens `engine/ingestion.py` after M3's close; recorded here rather than left
+> implicit. Also locked: the halt-counter reset semantics, the exit-code table, and the freshness
+> check's advisory-only posture (all §4.15, CLI contract). M1–M3 are unaffected.
+>
 > Companion docs:
 > [ingestion-transaction-boundaries.md](ingestion-transaction-boundaries.md) (the write-path
 > spec every replay call obeys). Related: [TODOS.md](../../TODOS.md).
@@ -95,7 +103,9 @@ unaffected** — `POST /api/chat` → `ingest_text` → Bedrock extraction is un
   batch-insert footgun.
 - **`mark_superseded()`** (`engine/repository.py`) and the `reprocess_note` transaction pattern
   (insert replacements + retire the original, atomically) are exactly what §4.12's correction
-  workflow needs. No new persistence primitive.
+  workflow needs. No new *repository*-layer primitive — `insert_memories`/`mark_superseded` are
+  reused as-is. §4.14 adds one new *service*-layer orchestration method (`ingest_events_superseding`)
+  that composes them, the same relationship `reprocess_note` already has to those two primitives.
 - `FakeModelProvider` with `extract_calls`/`embed_calls` counters (`engine/tests/conftest.py`) —
   the fixture that makes the zero-extraction invariant assertable (§4.11).
 - The `cli/` composition-root pattern (`migrate.py`, `backfill.py`):
@@ -144,6 +154,8 @@ One call per record, every record, no exceptions. There is no second path.
 | 4.11 | Direct-ingest path | The only path; zero runtime model calls |
 | 4.12 | Correction workflow | Supersession under `--apply-corrections` |
 | 4.13 | Item-matching stop-gap | Query-time normalization only |
+| 4.14 | Correction-workflow transaction | New `ingest_events_superseding()` entry point (engine-owned) |
+| 4.15 | M4 CLI contract | Halt-counter reset rules, exit codes, advisory-only freshness check |
 
 ### 4.1 Dataset format, the converter, and period expansion
 
@@ -549,7 +561,7 @@ Three cases per record instead of two:
 Applying a correction inserts the new rows **and** `mark_superseded`s the ledger's recorded
 `memory_ids` **in one transaction** — precisely the `reprocess_note` pattern, and ADR-9's posture
 ("retraction never deletes; the engine's history of being wrong is itself memory") applied to
-reconstruction corrections.
+reconstruction corrections. **Mechanism: §4.14.**
 
 **Why the flag, rather than automatic:** if the converter ever drifts subtly (float formatting,
 whitespace), automatic behavior would mass-supersede the entire dataset in one run. Detection is
@@ -706,6 +718,74 @@ consistent with how [vector-index-and-filtered-knn.md](vector-index-and-filtered
 index non-use) and buys the property that matters: **it is deletable in one commit** when Phase 5
 lands.
 
+### 4.14 Correction-workflow transaction — `ingest_events_superseding`
+
+**Decision (locked 2026-08-02): a new `IngestionService.ingest_events_superseding()` entry point.
+All write orchestration for corrections stays inside the engine; `cli/replay.py` never writes to
+the database directly and never duplicates ingestion logic.**
+
+```python
+def ingest_events_superseding(
+    self,
+    user_id: UUID,
+    events: list[ExtractedEvent],
+    superseded_ids: list[UUID],
+    *,
+    source: str = "replay",
+    provenance: str = "reconstructed",
+) -> Receipt: ...
+```
+
+Validates (stage B, shared with `ingest_text`/`ingest_events`), embeds off-transaction (stage C,
+shared), then in **one transaction**: inserts the new row(s) and `mark_superseded`s every id in
+`superseded_ids` against the new row. Receipt + opportunistic backfill follow, same as every other
+entry point.
+
+**Why a fourth entry point rather than extending `ingest_events` or reusing `_persist_validated`:**
+its transaction body is not the shared (C)–(F) tail's — it also supersedes — which is exactly why
+`reprocess_note` already couldn't share that tail either (M3, §4.11's honesty note: "the shared
+tail unifies `ingest_text` and `ingest_events`, not all three"). `ingest_events_superseding` is a
+sibling to `reprocess_note`, not a modification of `ingest_events`: same shape (insert + supersede,
+one transaction), different trigger (a replay content diff, not a note upgrade) and different
+origin (`ExtractedEvent`s the CLI already has, not a re-extraction of stored text).
+
+**What this means for M3's "one pipeline" framing.** The engine now has two transaction shapes: the
+shared (C)–(F) tail (`ingest_text`, `ingest_events`) and the insert+supersede shape
+(`reprocess_note`, `ingest_events_superseding`). Two shapes, not four independent ones — every
+entry point still funnels through exactly one of these two, and stage (B) validation is shared by
+all four. If a third transaction shape is ever needed, that is the point to stop and ask whether
+the abstraction should change; two is a pattern, a third un-reviewed one would be scope creep.
+
+**Rejected: `cli/replay.py` composing the transaction itself** (calling
+`engine.repository.insert_memories`/`mark_superseded` directly). Rejected because it forces a
+choice between reaching into `IngestionService`'s private `_build_memories`/`_attach_embeddings`
+(a layering violation) or reimplementing validation/embedding in the CLI (duplicating logic that
+already exists) — either way, `engine/` stops being the single owner of persistence.
+
+### 4.15 M4 CLI contract — halt semantics, exit codes, freshness check
+
+**Halt-counter reset (locked 2026-08-02):** any non-failure per-record outcome — a `NEW` success, a
+`DONE` skip, or an unapplied `CORRECTED` report — resets the consecutive-failure counter to 0. Only
+an actual failed ingest attempt increments it. A run of all skips must not spuriously approach the
+halt threshold, and a `CORRECTED` report is a no-op from the database's perspective, not a failure.
+
+**Exit codes (locked 2026-08-02):**
+
+| Code | Meaning |
+|---|---|
+| 0 | Completed; zero record-level failures |
+| 1 | Completed; 1+ non-halting failures occurred (including a `--force` run past the threshold) |
+| 2 | Halted at 5 consecutive failures without `--force` |
+| 3 | Fatal setup error — nothing was processed |
+
+**Freshness check (locked 2026-08-02): advisory only, never blocking.** At startup, if the local
+source markdown and payload table are both present, their SHA256 is compared against the manifest's
+recorded hashes and a mismatch prints a warning. If either local file is absent — the common case,
+since both are gitignored (ADR-7) and a shipped JSONL may travel without them — the check is skipped
+silently. It never halts a run: hashing the *inputs* only answers "have my sources changed since
+this was generated," not "is this JSONL wrong," and a legitimate hand-edited JSONL (§4.12's
+documented escape hatch) is expected to diverge from its sources without being an error.
+
 ## 5. Risk analysis
 
 **[P0 — correctness] Duplicate memories.** The write path has no dedup by design, so any resume or
@@ -815,19 +895,31 @@ Five milestones, each independently reviewable and testable.
 - Commit: `feat(engine): direct-ingest entry point + item normalization (T8 M3)`
 
 **M4 — Replay main loop**
-- Objective: iterate records, skip/ingest/report-corrected per §4.12, mark ledger post-commit,
-  §4.10 halt + failure artifact, `--apply-corrections`, `--rebuild-ledger`
-- Files: `cli/replay.py`, `cli/tests/test_replay.py`
+- Objective: `read_dataset`/`as_extracted_event()` adapter (§6 handoff from M1); the new
+  `ingest_events_superseding` engine entry point (§4.14); the CLI loop — iterate records,
+  skip/ingest/report-corrected per §4.12, mark ledger post-commit, §4.10 halt + failure artifact
+  (halt-counter reset rules + exit codes, §4.15), `--apply-corrections`, `--rebuild-ledger`,
+  advisory-only freshness check (§4.15)
+- Files: `cli/replay.py`, `cli/replay_dataset.py` (adds `read_dataset`, `load_manifest`,
+  `ReplayRecord.as_extracted_event()`), `engine/ingestion.py` (adds
+  `ingest_events_superseding`), `cli/tests/test_replay.py`
 - Tests: small fixture end-to-end against `FakeModelProvider` + real DB; **PROPERTY:
   `extract_calls == 0` after a full run — the zero-extraction invariant (§4.11)**; **interrupt after
   record N, resume — records 1..N are not reprocessed**; second full run → 0 new rows; **forced
-  double-run produces no duplicate rows (the P0 guard)**; corrected record → reported with a diff
-  and *not* applied without the flag; with the flag → new rows active, old `status='superseded'`
-  with `superseded_by` set, one transaction; halt at 5 consecutive, resumable; failure artifact
-  contains every §4.10 field; provenance is `replay`/`reconstructed` on every row
-- Risks: highest-integration milestone — §4.3, §4.10, §4.11, §4.12 all meet here
-- Verification: `pytest cli/tests/test_replay.py`; manual dry run on a 10-record slice
-- Commit: `feat(cli): replay main loop — idempotent resume + corrections (T8 M4)`
+  double-run produces no duplicate rows (the P0 guard)**; a crash-window simulation between commit
+  and ledger write costs at most one re-processed record, never more (§4.3's accepted bound, not
+  eliminated); corrected record → reported with a diff (always, flag or not) and *not* applied
+  without the flag; with the flag → new rows active, old `status='superseded'` with
+  `superseded_by` set, one transaction via `ingest_events_superseding`; halt at 5 consecutive
+  failures with the §4.15 reset rules, resumable, `--force` overrides; every §5-defined exit code
+  reachable; failure artifact contains every §4.10 field; provenance is `replay`/`reconstructed`
+  on every row
+- Risks: highest-integration milestone — §4.3, §4.10, §4.11, §4.12, §4.14 all meet here
+- Verification: `pytest cli/tests/test_replay.py`; manual dry run on a small fixture dataset
+  (§9 of the M4 implementation spec)
+- Commit: `feat(cli): replay main loop — idempotent resume + corrections (T8 M4)` (landed as
+  several smaller commits per the milestone's implementation-order plan; this is the doc-level
+  milestone name, not a single literal commit)
 
 **M5 — Production run + OQ5**
 - Objective: convert and replay the real reconstruction; verify Story A's numbers in the DB
@@ -1001,7 +1093,7 @@ confidently-incomplete answer. Handoff 2 is what fixes it.
 
 | File | Relationship |
 |---|---|
-| `engine/ingestion.py` | The write path; M3 adds `ingest_events` and lifts the shared (B)–(F) tail |
+| `engine/ingestion.py` | The write path; M3 adds `ingest_events` and lifts the shared (B)–(F) tail; M4 adds `ingest_events_superseding` (§4.14) |
 | `engine/repository.py` | Row-at-a-time insert guarantee; `mark_superseded` is §4.12's correction primitive |
 | `engine/retrieval.py` | Home of §4.13's query-time normalization stop-gap |
 | `engine/types.py` | Stage-(B) validation both entry points share; unchanged by Phase 4 |
