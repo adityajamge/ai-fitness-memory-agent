@@ -26,22 +26,21 @@ from engine.model import (
     ToolSpec,
 )
 
-#: Test-suite database URL, resolved in strict precedence order:
+#: Test-suite database URL.
 #:
-#:   1. ``DATABASE_URL_TEST_ONLY`` — the disposable cluster the suite is allowed to pollute
-#:   2. ``DATABASE_URL``          — CI sets only this (local Docker CockroachDB, never cloud)
-#:   3. the local single-node default
+#: ``DATABASE_URL`` has already been redirected to ``DATABASE_URL_TEST_ONLY`` (when set) by the
+#: **root conftest**, for the whole session — see its docstring for why that redirect must
+#: happen there rather than here. Reading the redirected variable keeps this module's behavior
+#: identical to before while guaranteeing every consumer, including the FastAPI app that
+#: ``api/tests`` builds through ``load_settings()``, resolves the same test cluster.
 #:
 #: **The suite must never run against the cluster holding the real replayed history.** The
 #: fixtures below mint a fresh ``user_id`` per test and never clean up, and ``memories`` has no
-#: foreign key to ``users``, so one full-suite run permanently adds ~228 memories and ~30 orphan
+#: foreign key to ``users``, so one full-suite run permanently adds ~230 memories and ~30 orphan
 #: users. A prior cluster reached ~9k memories / ~4.7k users and stopped passing the suite
-#: entirely (persistent SerializationFailure, a different random test each run). Hence the
-#: dedicated test cluster — and hence (1) winning over (2).
-DATABASE_URL = (
-    os.environ.get("DATABASE_URL_TEST_ONLY")
-    or os.environ.get("DATABASE_URL")
-    or "postgresql://root@127.0.0.1:26257/defaultdb?sslmode=disable"
+#: entirely (persistent SerializationFailure, a different random test each run).
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL", "postgresql://root@127.0.0.1:26257/defaultdb?sslmode=disable"
 )
 _DB_REQUIRED = bool(os.environ.get("CI") or os.environ.get("REQUIRE_DB"))
 _DIMS = 512
