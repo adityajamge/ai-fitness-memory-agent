@@ -101,19 +101,7 @@ class IngestionService:
             logger.info("validation failed for user %s (%s); note fallback", user_id, exc)
             return self._persist_note(user_id, text, source, provenance, now, tz)
 
-        # (C) embeddings — nullable, off-transaction
-        self._attach_embeddings(memories)
-
-        # (D) single write transaction
-        with self.db.transaction() as cur:
-            ids = insert_memories(cur, memories)
-        for m, mid in zip(memories, ids, strict=True):
-            m.id = mid
-
-        # (E) receipt from committed rows, then (F) opportunistic backfill
-        receipt = Receipt(created=self._refs(memories), parse_status="ok", message=_MSG_OK)
-        self._opportunistic_backfill(user_id)
-        return receipt
+        return self._persist_validated(user_id, memories)
 
     def reprocess_note(self, user_id: UUID, note_id: UUID) -> Receipt:
         """Upgrade an existing note into typed events; on success supersede the note in one
@@ -212,6 +200,24 @@ class IngestionService:
                 )
             )
         return memories
+
+    def _persist_validated(self, user_id: UUID, memories: list[Memory]) -> Receipt:
+        """Shared (C)-(F) tail: embed, commit in one transaction, build the receipt from
+        committed rows, then opportunistic backfill. ``memories`` must already be validated
+        (stage B) — this stage never rejects input, only persists it."""
+        # (C) embeddings — nullable, off-transaction
+        self._attach_embeddings(memories)
+
+        # (D) single write transaction
+        with self.db.transaction() as cur:
+            ids = insert_memories(cur, memories)
+        for m, mid in zip(memories, ids, strict=True):
+            m.id = mid
+
+        # (E) receipt from committed rows, then (F) opportunistic backfill
+        receipt = Receipt(created=self._refs(memories), parse_status="ok", message=_MSG_OK)
+        self._opportunistic_backfill(user_id)
+        return receipt
 
     def _attach_embeddings(self, memories: list[Memory]) -> None:
         indexed = [(i, m) for i, m in enumerate(memories) if m.summary]
