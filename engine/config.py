@@ -24,10 +24,16 @@ EMBED_DIMS = 512
 # (model-independence contract, ADR-13 / 05-agent-architecture.md).
 DEFAULT_EXTRACTION_MODEL_ID = "us.anthropic.claude-sonnet-4-20250514-v1:0"
 
-# Which ModelProvider implementation to build. 'bedrock' is the architecture's default
-# (ADR-13); 'claude_api' is a **development adapter** for working without Bedrock access —
-# it cannot embed, so memories are stored with NULL embeddings and backfilled later (T15).
-# See agent/providers/claude_api.py.
+# Which provider implementation backs each role. 'bedrock' is the architecture's default
+# (ADR-13). Provider selection is **per role** — see Settings.resolved_llm_provider /
+# resolved_embedding_provider below — because the two concerns vary independently:
+#
+#   LLM (extract_events/plan/narrate)  cost, quality, vendor availability — freely swappable
+#   embeddings (embed)                 pinned by VECTOR(512); NOT freely swappable once data
+#                                      exists, since vectors from different models are not
+#                                      comparable (changing it means re-embedding every row)
+#
+# `MODEL_PROVIDER` remains supported as the shorthand for "same provider for both roles".
 DEFAULT_MODEL_PROVIDER = "bedrock"
 DEFAULT_CLAUDE_API_MODEL_ID = "claude-opus-5"
 # Extraction and planning are structured slot-filling; narration is short prose. Low effort
@@ -37,6 +43,21 @@ DEFAULT_CLAUDE_API_EFFORT = "low"
 # When the model cannot infer a timezone for an event, fall back to this and record
 # lowered confidence (builder decision, Phase 2 planning).
 DEFAULT_TZ = "Asia/Kolkata"
+
+
+def _first_configured(*candidates: str | None) -> str:
+    """First non-blank candidate, canonicalized; the default when all are blank.
+
+    Blank (``""`` / whitespace) counts as *unset*, not invalid — otherwise a stray
+    ``LLM_PROVIDER=`` line in a ``.env`` would hard-fail a run that ``MODEL_PROVIDER`` could
+    have answered. Checking blankness before falling through matters because a whitespace-only
+    string is truthy in Python and would otherwise shadow the next candidate.
+    """
+    for candidate in candidates:
+        cleaned = (candidate or "").strip().lower()
+        if cleaned:
+            return cleaned
+    return DEFAULT_MODEL_PROVIDER
 
 
 @dataclass(frozen=True)
@@ -49,9 +70,35 @@ class Settings:
     default_tz: str = DEFAULT_TZ
     session_ttl_seconds: int = 60 * 60 * 24 * 14  # 14 days
     backfill_batch: int = 32  # opportunistic embeddings backfilled per ingest turn (T15)
-    model_provider: str = DEFAULT_MODEL_PROVIDER  # 'bedrock' | 'claude_api' (dev only)
+    model_provider: str = DEFAULT_MODEL_PROVIDER  # shorthand: both roles, when unset below
+    #: Per-role overrides. ``None`` means "not configured" and defers to ``model_provider``,
+    #: which is what keeps every pre-existing config (and ``Settings(model_provider=...)`` in
+    #: tests) behaving exactly as before.
+    llm_provider: str | None = None
+    embedding_provider: str | None = None
     claude_api_model_id: str = DEFAULT_CLAUDE_API_MODEL_ID
     claude_api_effort: str = DEFAULT_CLAUDE_API_EFFORT
+
+    @property
+    def resolved_llm_provider(self) -> str:
+        """Provider backing ``extract_events``/``plan``/``narrate``.
+
+        Precedence: ``LLM_PROVIDER`` → ``MODEL_PROVIDER`` → the default. Resolved here rather
+        than in ``load_settings`` so a directly-constructed ``Settings`` (tests, embedding
+        callers) obeys the same rules as one built from the environment.
+        """
+        return _first_configured(self.llm_provider, self.model_provider)
+
+    @property
+    def resolved_embedding_provider(self) -> str:
+        """Provider backing ``embed``. Precedence: ``EMBEDDING_PROVIDER`` → ``MODEL_PROVIDER``
+        → the default.
+
+        ⚠️ Effectively a one-way door once memories exist: embeddings from different models
+        occupy different vector spaces, so changing this after data is written requires
+        re-embedding every row (null the column, then ``python -m cli.backfill``).
+        """
+        return _first_configured(self.embedding_provider, self.model_provider)
 
 
 def _load_dotenv_if_present() -> None:
@@ -86,6 +133,10 @@ def load_settings() -> Settings:
         session_ttl_seconds=int(os.environ.get("SESSION_TTL_SECONDS", 60 * 60 * 24 * 14)),
         backfill_batch=int(os.environ.get("BACKFILL_BATCH", 32)),
         model_provider=os.environ.get("MODEL_PROVIDER", DEFAULT_MODEL_PROVIDER),
+        # Absent (None) rather than defaulted, so the per-role properties can tell
+        # "not configured" from "explicitly set", and defer to MODEL_PROVIDER.
+        llm_provider=os.environ.get("LLM_PROVIDER"),
+        embedding_provider=os.environ.get("EMBEDDING_PROVIDER"),
         claude_api_model_id=os.environ.get("CLAUDE_API_MODEL_ID", DEFAULT_CLAUDE_API_MODEL_ID),
         claude_api_effort=os.environ.get("CLAUDE_API_EFFORT", DEFAULT_CLAUDE_API_EFFORT),
     )
