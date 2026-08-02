@@ -98,7 +98,44 @@
   deleted and the test now cleans up in a `finally` block. That cut the NULL-embedding gap
   population `--all` sweeps from ~9,650 rows to ~1,260. The rest of the entry still stands:
   ~550 users with gaps, plus the accumulated threads and checkpoint rows.
+- **RESOLVED 2026-08-02 by cluster replacement — but the root cause is NOT fixed.** The old
+  cluster reached 8,996 memories across **4,690 users** and began failing full-suite runs
+  consistently (~26 attempts, never clean; always `SerializationFailure`/`RETRY_SERIALIZABLE`,
+  never an assertion). It was replaced with a fresh cluster; the identical code then passed
+  **445/445 on the first run**, which proved the failures tracked cluster state, not code.
+  Two findings worth keeping:
+  - **`schema_locked` blocks `TRUNCATE`.** CockroachDB v25+ sets `schema_locked = true` on
+    tables by default (a changefeed optimization). `TRUNCATE` is a schema change and is
+    refused; the psycopg client *hangs and drops the connection* rather than surfacing the
+    clean error the web SQL console shows immediately. To clear tables: issue
+    `ALTER TABLE <t> SET (schema_locked = false)` **one statement per implicit transaction**
+    (batched statements are rejected), truncate, then re-lock. `DELETE` is DML and is not
+    blocked, so it is the no-unlock fallback.
+  - **The accumulation has a specific cause (see the next entry).** Without fixing it, the new
+    cluster drifts back to the same state and M5's `[→PERF]` numbers stop being repeatable.
 - **Depends on / blocked by:** none; can be picked up any time.
+
+## DB test fixtures never clean up, so every run permanently grows the cluster (surfaced 2026-08-02)
+
+- **What:** `engine/tests/conftest.py`'s `user_id` fixture mints a fresh UUID per test and
+  nothing ever deletes the rows written under it. `memories` has **no foreign key to `users`**,
+  so orphan rows are not even cascade-deletable. Every full-suite run therefore adds hundreds
+  of permanent rows and hundreds of permanent user IDs to the shared dev cluster.
+- **Why:** this is the root cause of the entry above. It is what took the previous cluster to
+  4,690 users / 8,996 memories and made `cli/tests/test_backfill.py::test_main_all_sweeps_users_with_gaps`
+  — which sweeps *every* user with a NULL-embedding gap — progressively slower and more
+  contention-prone until the full suite stopped passing at all. It also makes ad-hoc diagnostic
+  queries untrustworthy, since stray rows from old runs look like current-code anomalies.
+- **Pros:** makes full-suite runs stable and repeatable indefinitely; keeps M5's performance
+  measurements meaningful on re-run; removes a recurring source of false-alarm debugging.
+- **Cons:** needs a design decision, not just a patch. Options: a session-scoped cleanup
+  fixture deleting rows for UUIDs minted during the run; a dedicated per-run schema/database;
+  or a `TRUNCATE`-based reset in `conftest` (which must handle `schema_locked`, above).
+  Per-test teardown adds runtime to a suite that already takes ~4 minutes.
+- **Context:** Phase 4 made this materially worse — the suite grew from 359 to 445 tests, ~30
+  of which write rows — but the gap is pre-existing, dating to the Phase 2 fixtures.
+- **Depends on / blocked by:** none. Worth doing **before** the cluster accumulates again;
+  it is currently clean (0 rows, fresh cluster, 2026-08-02).
 
 ## Drop embedding normalization when CockroachDB ships cosine distance
 

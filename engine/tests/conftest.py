@@ -26,8 +26,22 @@ from engine.model import (
     ToolSpec,
 )
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL", "postgresql://root@127.0.0.1:26257/defaultdb?sslmode=disable"
+#: Test-suite database URL, resolved in strict precedence order:
+#:
+#:   1. ``DATABASE_URL_TEST_ONLY`` — the disposable cluster the suite is allowed to pollute
+#:   2. ``DATABASE_URL``          — CI sets only this (local Docker CockroachDB, never cloud)
+#:   3. the local single-node default
+#:
+#: **The suite must never run against the cluster holding the real replayed history.** The
+#: fixtures below mint a fresh ``user_id`` per test and never clean up, and ``memories`` has no
+#: foreign key to ``users``, so one full-suite run permanently adds ~228 memories and ~30 orphan
+#: users. A prior cluster reached ~9k memories / ~4.7k users and stopped passing the suite
+#: entirely (persistent SerializationFailure, a different random test each run). Hence the
+#: dedicated test cluster — and hence (1) winning over (2).
+DATABASE_URL = (
+    os.environ.get("DATABASE_URL_TEST_ONLY")
+    or os.environ.get("DATABASE_URL")
+    or "postgresql://root@127.0.0.1:26257/defaultdb?sslmode=disable"
 )
 _DB_REQUIRED = bool(os.environ.get("CI") or os.environ.get("REQUIRE_DB"))
 _DIMS = 512
