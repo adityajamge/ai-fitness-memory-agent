@@ -13,6 +13,7 @@ from engine.ingestion import IngestionService
 from engine.model import ExtractedEvent
 from engine.repository import get_memory
 from engine.tests.conftest import FakeModelProvider
+from engine.types import ValidationError
 
 
 def _meal_event() -> ExtractedEvent:
@@ -41,6 +42,15 @@ def _service(db, provider, **kw) -> IngestionService:
 def _fetch(db, user_id, memory_id):
     with db.transaction() as cur:
         return get_memory(cur, user_id, memory_id)
+
+
+def _row_count(db, user_id):
+    with db.transaction() as cur:
+        cur.execute(
+            "SELECT COUNT(*) AS n FROM memories WHERE user_id = %(user_id)s",
+            {"user_id": user_id},
+        )
+        return cur.fetchone()["n"]
 
 
 def test_meal_routes_to_typed_event(db, user_id):
@@ -285,3 +295,128 @@ def test_cross_user_get_returns_none(db, user_id):
     receipt = _service(db, FakeModelProvider([_meal_event()])).ingest_text(user_id, "lunch")
     other_user = uuid.uuid4()
     assert _fetch(db, other_user, receipt.created[0].id) is None
+
+
+# ── ingest_events (T8 M3): direct-ingest path, zero extraction ────────────────────────
+
+
+def test_ingest_events_writes_typed_event_with_zero_extraction(db, user_id):
+    """Direct path skips stage A entirely: extract_calls stays 0, embed still runs."""
+    provider = FakeModelProvider()  # events arg unused on this path; must never be called
+    svc = _service(db, provider)
+    receipt = svc.ingest_events(user_id, [_meal_event()])
+
+    assert provider.extract_calls == 0
+    assert provider.embed_calls == 1
+    assert receipt.parse_status == "ok"
+    assert receipt.message == "saved"
+    assert len(receipt.created) == 1
+    ref = receipt.created[0]
+    assert ref.type == "meal"
+    assert ref.embedding_pending is False
+
+    row = _fetch(db, user_id, ref.id)
+    assert row["type"] == "meal"
+    assert row["source"] == "replay"
+    assert row["provenance"] == "reconstructed"
+    assert row["confidence"] == pytest.approx(0.9)
+    assert row["has_embedding"] is True
+
+
+def test_ingest_events_honors_explicit_source_and_provenance(db, user_id):
+    svc = _service(db, FakeModelProvider())
+    receipt = svc.ingest_events(
+        user_id, [_meal_event()], source="import", provenance="reconstructed"
+    )
+    row = _fetch(db, user_id, receipt.created[0].id)
+    assert row["source"] == "import"
+    assert row["provenance"] == "reconstructed"
+
+
+def test_ingest_events_multiple_events_in_one_transaction(db, user_id):
+    """Rule 2: a multi-event call still commits as one turn."""
+    second = ExtractedEvent(
+        type="note",
+        event_time=datetime(2026, 7, 21, 9, 0, tzinfo=timezone.utc),
+        tz="Asia/Kolkata",
+        confidence=1.0,
+        summary="knee felt sore",
+        payload={"text": "knee felt sore"},
+    )
+    receipt = _service(db, FakeModelProvider()).ingest_events(
+        user_id, [_meal_event(), second]
+    )
+    assert len(receipt.created) == 2
+    assert {r.type for r in receipt.created} == {"meal", "note"}
+
+
+def test_ingest_events_validation_failure_is_fatal_not_a_note(db, user_id):
+    """Direct-path validation failure raises — never falls back to a note (§4.11)."""
+    bad = ExtractedEvent(
+        type="body_scan",
+        event_time=datetime(2026, 7, 20, 7, 0, tzinfo=timezone.utc),
+        tz="Asia/Kolkata",
+        confidence=0.8,
+        summary="body scan",
+        payload={"body_fat_pct": "not-a-number"},
+    )
+    svc = _service(db, FakeModelProvider())
+    with pytest.raises(ValidationError):  # not caught here — propagates, no note written
+        svc.ingest_events(user_id, [bad])
+
+
+def test_ingest_events_partial_failure_writes_nothing(db, user_id):
+    """One bad event in a multi-event call: all-or-nothing, nothing committed."""
+    bad = ExtractedEvent(
+        type="body_scan",
+        event_time=datetime(2026, 7, 20, 7, 0, tzinfo=timezone.utc),
+        tz="Asia/Kolkata",
+        confidence=0.8,
+        summary="body scan",
+        payload={"body_fat_pct": "not-a-number"},
+    )
+    svc = _service(db, FakeModelProvider())
+    before = _row_count(db, user_id)
+    with pytest.raises(ValidationError):
+        svc.ingest_events(user_id, [_meal_event(), bad])
+    assert _row_count(db, user_id) == before
+
+
+def test_ingest_events_empty_list_raises(db, user_id):
+    svc = _service(db, FakeModelProvider())
+    with pytest.raises(ValueError):
+        svc.ingest_events(user_id, [])
+
+
+def test_ingest_events_embedding_failure_writes_null_then_backfill(db, user_id):
+    """Same nullable-embedding contract as ingest_text: a failed embed never fails the turn."""
+    failing = FakeModelProvider(embed_error=True)
+    receipt = _service(db, failing).ingest_events(user_id, [_meal_event()])
+
+    assert receipt.parse_status == "ok"
+    ref = receipt.created[0]
+    assert ref.embedding_pending is True
+    assert _fetch(db, user_id, ref.id)["has_embedding"] is False
+
+    embedded = _service(db, FakeModelProvider()).backfill_embeddings(user_id)
+    assert embedded == 1
+    assert _fetch(db, user_id, ref.id)["has_embedding"] is True
+
+
+def test_ingest_events_and_ingest_text_produce_identical_row_shape(db, user_id):
+    """Property: both entry points write the same shape for equivalent input — the 'one
+    ingestion pipeline' claim, made mechanical."""
+    text_receipt = _service(db, FakeModelProvider([_meal_event()])).ingest_text(
+        user_id, "250g curd, 3 eggs, 200g chicken", source="chat", provenance="live"
+    )
+    events_receipt = _service(db, FakeModelProvider()).ingest_events(
+        user_id, [_meal_event()], source="chat", provenance="live"
+    )
+
+    text_row = _fetch(db, user_id, text_receipt.created[0].id)
+    events_row = _fetch(db, user_id, events_receipt.created[0].id)
+
+    shape_keys = [
+        "type", "source", "provenance", "confidence", "payload", "status", "has_embedding",
+    ]
+    assert {k: text_row[k] for k in shape_keys} == {k: events_row[k] for k in shape_keys}

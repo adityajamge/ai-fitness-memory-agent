@@ -103,6 +103,31 @@ class IngestionService:
 
         return self._persist_validated(user_id, memories)
 
+    def ingest_events(
+        self,
+        user_id: UUID,
+        events: list[ExtractedEvent],
+        *,
+        source: str = "replay",
+        provenance: str = "reconstructed",
+    ) -> Receipt:
+        """Direct-ingest entry point (§4.11): skips extraction (stage A) entirely and shares
+        stage B onward with ``ingest_text``. ``events`` are already typed — produced by a
+        dev-time tool, not inferred by a model at request time.
+
+        Unlike ``ingest_text``, validation failure here is **fatal**: it raises instead of
+        falling back to a note. A bad payload on this path means the caller emitted invalid
+        data, not that a user's phrasing was ambiguous — there is no user turn to preserve
+        as a note fallback for.
+        """
+        if not events:
+            raise ValueError("ingest_events requires at least one event")
+
+        # (B) validation — raises on failure; caller's responsibility, not a note case
+        memories = self._build_memories(user_id, events, source, provenance)
+
+        return self._persist_validated(user_id, memories)
+
     def reprocess_note(self, user_id: UUID, note_id: UUID) -> Receipt:
         """Upgrade an existing note into typed events; on success supersede the note in one
         transaction (transaction-boundaries doc §8). On any failure the note is left
