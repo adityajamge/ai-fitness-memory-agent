@@ -27,6 +27,8 @@ Correctness notes:
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -502,28 +504,115 @@ WHERE user_id = %(user_id)s
   AND status = 'active'
   AND type = %(type)s
 """
-_FRAG_CONTAINS = "  AND payload @> %(contains)s\n"
+# The item variant additionally selects payload: the match runs in Python (see
+# normalize_item below), so the compared value must travel with the row.
+_SQL_LOOKUP_HEAD_ITEM = """
+SELECT id, type, event_time, confidence, provenance, summary, payload
+FROM memories
+WHERE user_id = %(user_id)s
+  AND status = 'active'
+  AND type = %(type)s
+"""
 # {order} is filled from _DIRECTIONS only — builder-owned SQL, never runtime data.
 _SQL_LOOKUP_TAIL = "ORDER BY event_time {order}, id {order}\nLIMIT %(n)s"
+# No LIMIT here: it would apply before the item match runs, discarding the wrong rows.
+# The comment is part of the executed statement (legal SQL), so `sql` on the trace step
+# stays literally true to what ran — the item filter and LIMIT both apply in-engine,
+# post-fetch, via normalize_item() (§4.13 — this is a query-time stop-gap, not permanent
+# engine behavior; superseded by Phase 5 canonicalization).
+_SQL_LOOKUP_TAIL_ITEM = (
+    "-- item filter + LIMIT applied in-engine via normalize_item() (§4.13)\n"
+    "ORDER BY event_time {order}, id {order}"
+)
+
+_ITEM_STRIP_CATEGORY = "P"  # Unicode general category prefix for punctuation
+_WHITESPACE_RUN_RE = re.compile(r"\s+")
+
+
+def _is_item_edge_char(ch: str) -> bool:
+    return ch.isspace() or unicodedata.category(ch).startswith(_ITEM_STRIP_CATEGORY)
+
+
+def normalize_item(s: str) -> str:
+    """Query-time item-name normalization (§4.13 stop-gap: "normalize how a token is
+    *written*, not what it *means*"). Deterministic, pure, and idempotent — must be applied
+    identically to the search term and the stored value; asymmetric application is a
+    matching bug by construction. Lives entirely here so it is deletable in one commit when
+    Phase 5's canonicalization engine lands; do not extend beyond these six steps (the
+    explicit non-goal list in docs/engineering/replay-architecture.md §4.13 is a contract,
+    not a backlog).
+
+    Raises ``RetrievalSpecError`` if the term normalizes to empty rather than matching
+    everything (ADR-14.11 strict slots).
+    """
+    s = unicodedata.normalize("NFC", s)
+    s = s.casefold()
+    # Not redundant: case folding is not closed under normalization (UAX #15), so a second
+    # NFC pass is required for the idempotence guarantee below to hold.
+    s = unicodedata.normalize("NFC", s)
+
+    start, end = 0, len(s)
+    while start < end and _is_item_edge_char(s[start]):
+        start += 1
+    while end > start and _is_item_edge_char(s[end - 1]):
+        end -= 1
+    s = s[start:end]
+
+    s = _WHITESPACE_RUN_RE.sub(" ", s)
+
+    if not s:
+        raise RetrievalSpecError("item term normalizes to empty")
+    return s
+
+
+def _item_names(payload: dict) -> list[str]:
+    """Extracted item names a lookup can match against. Only meal-shaped payloads carry an
+    ``items`` array (engine/types.py MealPayload); other types yield none, exactly as the
+    prior JSONB-containment filter also matched only meal payloads."""
+    return [item["name"] for item in payload.get("items", []) if item.get("name")]
 
 
 def lookup_events(
     cur: psycopg.Cursor, user_id: UUID, spec: LookupSpec
 ) -> tuple[LookupResult, RetrievalStep]:
-    """Newest/oldest event(s) of a type, optionally filtered by exact item containment."""
-    sql = _SQL_LOOKUP_HEAD
-    params: dict[str, object] = {"user_id": user_id, "type": spec.type, "n": spec.n}
-    if spec.item is not None:
-        sql += _FRAG_CONTAINS
-        params["contains"] = Jsonb({"items": [{"name": spec.item}]})
-    sql = (sql + _SQL_LOOKUP_TAIL.format(order=_DIRECTIONS[spec.direction])).strip()
+    """Newest/oldest event(s) of a type, optionally filtered by item match.
 
+    Item matching (§4.13) is exact after ``normalize_item()`` — case, edge punctuation, and
+    whitespace insensitive, but never fuzzy (no stemming, substring, or synonym matching).
+    It runs in Python: CockroachDB has neither Unicode NFC normalization nor full casefold,
+    so any SQL-side approximation would be a *different* function on the two sides, breaking
+    the symmetry the match depends on.
+    """
+    order = _DIRECTIONS[spec.direction]
+
+    if spec.item is None:
+        sql = (_SQL_LOOKUP_HEAD + _SQL_LOOKUP_TAIL.format(order=order)).strip()
+        params: dict[str, object] = {"user_id": user_id, "type": spec.type, "n": spec.n}
+        cur.execute(sql, params)
+        entries = tuple(EvidenceSnapshot.from_row(row) for row in cur.fetchall())
+        step = RetrievalStep(
+            family="lookup", sql=sql, params=_display_params(params), row_count=len(entries)
+        )
+        return LookupResult(spec=spec, entries=entries), step
+
+    normalized_term = normalize_item(spec.item)
+    sql = (_SQL_LOOKUP_HEAD_ITEM + _SQL_LOOKUP_TAIL_ITEM.format(order=order)).strip()
+    params = {"user_id": user_id, "type": spec.type}
     cur.execute(sql, params)
-    entries = tuple(EvidenceSnapshot.from_row(row) for row in cur.fetchall())
 
-    step = RetrievalStep(
-        family="lookup", sql=sql, params=_display_params(params), row_count=len(entries)
-    )
+    matched = []
+    for row in cur.fetchall():
+        if any(normalize_item(name) == normalized_term for name in _item_names(row["payload"])):
+            matched.append(row)
+            if len(matched) >= spec.n:
+                break
+    entries = tuple(EvidenceSnapshot.from_row(row) for row in matched)
+
+    display = _display_params(params)
+    display["item"] = spec.item
+    display["item_normalized"] = normalized_term
+    display["n"] = spec.n
+    step = RetrievalStep(family="lookup", sql=sql, params=display, row_count=len(entries))
     return LookupResult(spec=spec, entries=entries), step
 
 

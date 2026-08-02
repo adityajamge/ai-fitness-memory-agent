@@ -160,9 +160,9 @@ def build_tool_specs() -> list[ToolSpec]:
             description=(
                 "Semantic search over what the user wrote, by meaning rather than exact "
                 "words. Use for narrative questions ('when did I complain about my knee?') "
-                "and as the fuzzy companion to lookup_events, whose item filter is EXACT: "
-                "for 'when did I last eat chicken?', issue BOTH so wordings like 'grilled "
-                "chicken' are still found."
+                "and as the fuzzy companion to lookup_events, whose item filter only ignores "
+                "case/whitespace/punctuation, not wording: for 'when did I last eat "
+                "chicken?', issue BOTH so wordings like 'grilled chicken' are still found."
             ),
             input_schema=_schema(
                 {
@@ -215,9 +215,10 @@ def build_tool_specs() -> list[ToolSpec]:
             name=LOOKUP_EVENTS,
             description=(
                 "Find the most recent (or earliest) event of a type, optionally filtered to "
-                "an item by EXACT name match on the extracted items. Use for 'when did I "
-                "last...?'. Because the item match is exact, pair it with recall_memories "
-                "when the item could be worded differently."
+                "an item by name match on the extracted items (case/whitespace/punctuation "
+                "insensitive, but not fuzzy). Use for 'when did I last...?'. Because the "
+                "match is not fuzzy, pair it with recall_memories when the item could be "
+                "worded differently."
             ),
             input_schema=_schema(
                 {

@@ -189,7 +189,8 @@ def test_item_containment_answers_when_did_i_last_eat_chicken(db, user_id) -> No
     # Both chicken meals, newest first; the paneer dinner (newer than the first chicken
     # meal) never matches.
     assert [e.id for e in result.entries] == [ids[2], ids[0]]
-    assert step.params["contains"] == {"items": [{"name": "chicken"}]}
+    assert step.params["item"] == "chicken"
+    assert step.params["item_normalized"] == "chicken"
 
 
 def test_item_with_no_match_is_empty_not_an_error(db, user_id) -> None:
