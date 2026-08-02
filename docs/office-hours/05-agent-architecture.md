@@ -65,9 +65,17 @@ trace emission. Full contract: [06-retrieval-strategy.md → query-planning boun
 ## Model independence contract
 
 - All model calls (chat narration, extraction, vision, embeddings) go through one provider
-  interface owned by the app, defaulting to **Amazon Bedrock**.
+  **interface** owned by the app, defaulting to **Amazon Bedrock**.
 - The Memory Engine takes that interface as a dependency — it never imports a provider SDK.
 - Embeddings: Titan Text Embeddings V2, 512-dim, normalized ([ADR-13.2](09-decisions.md#adr-13)).
+- **One interface, but not necessarily one backing provider** ([ADR-13.2](09-decisions.md#adr-13),
+  amended 2026-08-02). The **LLM** role (`extract_events`/`plan`/`narrate`) and the
+  **embedding** role (`embed`) are selected independently — `LLM_PROVIDER` /
+  `EMBEDDING_PROVIDER`, each falling back to `MODEL_PROVIDER`. A mixed configuration is
+  composed by `CompositeProvider`, which satisfies the same Protocol, so the engine cannot
+  tell the difference and no signature below the boundary changes. The LLM is freely
+  swappable; the embedder is effectively fixed once memories exist, since vectors from
+  different models are not comparable.
 - Acceptance check: switching provider must be a config change, zero memory-layer edits.
 
 ## Conversation state ([ADR-13.14](09-decisions.md#adr-13), refined by [ADR-14.9](09-decisions.md#adr-14))
@@ -126,15 +134,16 @@ citation validation ships.
 
 ## Model surfaces (the provider contract)
 
-The engine depends on one `ModelProvider` Protocol and nothing else about the LLM:
+The engine depends on one `ModelProvider` Protocol and nothing else about the LLM. The
+**Role** column is what provider selection keys on (ADR-13.2 amendment):
 
-| Surface | Phase | Contract |
-|---|---|---|
-| `extract_events` | 2 | text → typed events; `[]` is an affirmed "nothing to log", anything unparseable **raises** so the input survives as a note (ADR-13.5) |
-| `embed` | 2 | normalized 512-dim vectors, all-or-nothing (ADR-13.2) |
-| `plan` | 3 | turn → typed tool calls; `[]` is "no memory operation needed" ([ADR-14.2](09-decisions.md#adr-14)) |
-| `narrate` | 3 | assembled context → prose with citation markers; **prose only** |
-| vision | 5 | photo → meal events |
+| Surface | Role | Phase | Contract |
+|---|---|---|---|
+| `extract_events` | LLM | 2 | text → typed events; `[]` is an affirmed "nothing to log", anything unparseable **raises** so the input survives as a note (ADR-13.5) |
+| `embed` | **embedding** | 2 | normalized 512-dim vectors, all-or-nothing (ADR-13.2) |
+| `plan` | LLM | 3 | turn → typed tool calls; `[]` is "no memory operation needed" ([ADR-14.2](09-decisions.md#adr-14)) |
+| `narrate` | LLM | 3 | assembled context → prose with citation markers; **prose only** |
+| vision | LLM | 5 | photo → meal events |
 
 Each surface's empty result is a *positive assertion* rather than a shrug — the same posture
 in both directions, which is what keeps "never lose the user's input" and "never invent a

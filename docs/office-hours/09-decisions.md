@@ -142,6 +142,28 @@ earlier ADRs or docs.
    queue/worker — infra for a single-user-scale demo.)*
 2. **Embeddings: Bedrock Titan Text Embeddings V2, 512-dim, normalized**; `VECTOR(512)`.
    CockroachDB's C-SPANN index is Euclidean-only; unit vectors make L2 ≡ cosine.
+   **Amended 2026-08-02 — provider selection is per role, not global.** The original design
+   assumed one provider served every model call, expressed as a single `MODEL_PROVIDER`. That
+   conflates two concerns which vary independently:
+
+   | Role | Methods | Swappability |
+   |---|---|---|
+   | **LLM** | `extract_events`, `plan`, `narrate` | free — cost/quality/vendor availability |
+   | **Embeddings** | `embed` | **effectively a one-way door** once memories exist: vectors from different models occupy different spaces, so changing it means re-embedding every row |
+
+   Forced by evidence, not preference: on the builder's AWS account Bedrock serves Titan but
+   **refuses `us.anthropic.claude-sonnet-4`** (`ResourceNotFoundException` — "marked by
+   provider as Legacy"). So `MODEL_PROVIDER=bedrock` cannot do `plan`/`narrate`, while
+   `claude_api` cannot `embed` — **no single value satisfies the app**. Selection is now
+   `LLM_PROVIDER` / `EMBEDDING_PROVIDER`, each falling back to `MODEL_PROVIDER` then the
+   default, composed by `CompositeProvider` (`agent/providers/__init__.py`). Titan V2 / 512 /
+   normalized remains the embedding decision; only *who may serve the other role* changed.
+   **This strengthens rather than weakens [ADR-1](#adr-1)** — "the LLM should remain
+   replaceable" is now true of the LLM specifically, instead of being coupled to the embedder.
+   `claude_api` is consequently no longer a development-only adapter: paired with a Bedrock
+   embedding role it is a supported production configuration for the LLM role. Backward
+   compatible — a `MODEL_PROVIDER`-only config resolves both roles to it and is returned
+   **unwrapped**, so existing deployments and tests are untouched.
 3. **Hosting: AWS App Runner**, single Docker image (FastAPI serving the built Vite/React
    SPA); deploy-early in Milestone 1. *(Rejected: ECS+ALB — setup cost without demo-visible
    benefit; Lambda+APIGW — cold starts + SSE friction.)*

@@ -103,12 +103,32 @@ dependencies. **The Phase 2 write path does.** The container reads its config th
 | `EXTRACTION_MODEL_ID` / `EMBEDDING_MODEL_ID` | model overrides | optional; defaults in `engine/config.py` |
 | `EMBED_DIMS` | embedding dimensions | optional; defaults to `512` — **must match `VECTOR(512)`** in `engine/schema.sql` |
 | `DEFAULT_TZ` | fallback timezone for events the model can't place, and the zone aggregation buckets are computed in | optional; defaults to `Asia/Kolkata` |
-| `MODEL_PROVIDER` | which `ModelProvider` to build | optional; defaults to `bedrock` — **leave unset in production**; `claude_api` is a development-only adapter that cannot embed |
+| `LLM_PROVIDER` | provider for `extract_events` / `plan` / `narrate` | optional; falls back to `MODEL_PROVIDER`, then `bedrock`. `claude_api` is a supported production value here (needs `ANTHROPIC_API_KEY`) |
+| `EMBEDDING_PROVIDER` | provider for `embed` | optional; falls back to `MODEL_PROVIDER`, then `bedrock`. **Effectively a one-way door** — see the note below |
+| `MODEL_PROVIDER` | shorthand setting *both* roles at once | optional; defaults to `bedrock`. Retained for backward compatibility; the per-role variables above win when set |
 | `SESSION_TTL_SECONDS` / `BACKFILL_BATCH` | session lifetime, opportunistic backfill page size | optional; defaults in `engine/config.py` |
 
 Bedrock access comes from the task role, not from keys in env vars — the task execution /
 infrastructure roles created by the Express wizard need `bedrock:InvokeModel` added for
 ingestion to work.
+
+> **Provider roles ([ADR-13.2](office-hours/09-decisions.md#adr-13), amended 2026-08-02).**
+> The LLM and embedding roles are selected independently, because Bedrock model access is
+> granted per model — an account can hold Titan embeddings without Claude inference, which is
+> exactly the case this project hit. A mixed deployment is configured as:
+>
+> ```
+> LLM_PROVIDER=claude_api        # + ANTHROPIC_API_KEY
+> EMBEDDING_PROVIDER=bedrock     # + bedrock:InvokeModel on the task role
+> ```
+>
+> When both roles resolve to the same provider the concrete instance is used directly; only a
+> genuinely mixed configuration builds a `CompositeProvider`.
+>
+> ⚠️ **`EMBEDDING_PROVIDER` is effectively a one-way door.** Vectors from different embedding
+> models are not comparable, so changing it after memories exist requires nulling and
+> re-embedding every row (`python -m cli.backfill`). Treat it as fixed once data is written.
+> `LLM_PROVIDER` carries no such constraint and can be changed freely.
 
 The full variable list, with which are required and what each defaults to, is
 [`.env.example`](../.env.example) at the repo root. That file is a **development** template:

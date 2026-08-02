@@ -1,11 +1,18 @@
-"""Claude Developer Platform implementation of engine.model.ModelProvider —
-**a development adapter, not the production provider.**
+"""Claude Developer Platform implementation of engine.model.ModelProvider.
 
-Why this exists: ADR-13 fixes Bedrock as the architecture's default (Titan V2 embeddings,
-Converse extraction). This adapter lets the app run end-to-end on a platform.claude.com API
-key when Bedrock access isn't available, exercising the *same* engine, graph, and API with
-zero edits below the provider boundary. That round-trip is the ADR-1 acceptance check —
-"switching provider must be a config change, zero memory-layer edits" — actually performed.
+**Supported for the LLM role in production** (ADR-13.2, amended 2026-08-02): provider
+selection is per role, and `LLM_PROVIDER=claude_api` + `EMBEDDING_PROVIDER=bedrock` is a
+first-class deployment. It began as a development adapter for running without Bedrock access,
+and still serves that purpose when used for both roles — but it is no longer *only* that.
+
+Why per-role selection exists: Bedrock grants model access **per model**, so an account can
+hold Titan embeddings while refusing Claude inference (this project's own account returns
+`ResourceNotFoundException` for `us.anthropic.claude-sonnet-4`, "marked by provider as
+Legacy"). Neither provider alone can serve the whole Protocol; `CompositeProvider`
+(`agent/providers/__init__.py`) routes each role to the one that can.
+
+Running this provider for *both* roles remains the ADR-1 acceptance check — "switching
+provider must be a config change, zero memory-layer edits" — actually performed.
 
 **It cannot embed, and that is deliberate.** The Claude API has no embeddings endpoint, and
 Titan V2 (512-dim, normalized — ADR-13.2) is a Bedrock model. Rather than inventing vectors,

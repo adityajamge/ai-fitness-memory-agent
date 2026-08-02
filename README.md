@@ -95,22 +95,30 @@ Model access is not configured by environment variables: Amazon Bedrock credenti
 from the AWS credential chain (locally `aws configure`/SSO, in ECS the task role). Only the
 model *ids* and region are overridable.
 
-### Running with the Claude API (development)
+### Choosing model providers (per role)
 
-The architecture's model provider is **Amazon Bedrock** ([ADR-13](docs/office-hours/09-decisions.md#adr-13)):
-Converse for extraction/planning/narration, Titan V2 for embeddings. When Bedrock access
-isn't available, a **development adapter** runs the same app on a
-[platform.claude.com](https://platform.claude.com) API key — same engine, same graph, same
-API, selected purely by configuration:
+Two model roles are selected **independently**
+([ADR-13.2](docs/office-hours/09-decisions.md#adr-13), amended 2026-08-02):
+
+| Variable | Serves | Notes |
+|---|---|---|
+| `LLM_PROVIDER` | `extract_events`, `plan`, `narrate` | freely swappable |
+| `EMBEDDING_PROVIDER` | `embed` | pinned by `VECTOR(512)`; see the warning below |
+| `MODEL_PROVIDER` | both, when the two above are unset | backward-compatible shorthand |
+
+They are separate because they vary independently, and because Bedrock grants model access
+*per model*: an account can hold Titan embeddings without Claude inference — exactly the case
+this project hit. The mixed configuration is a first-class, supported deployment:
 
 ```bash
 pip install -e . --group dev     # includes the `anthropic` SDK
 ```
 
 ```ini
-# .env
+# .env — Claude API reasoning + Bedrock embeddings
 DATABASE_URL=postgresql://...            # your CockroachDB
-MODEL_PROVIDER=claude_api
+LLM_PROVIDER=claude_api
+EMBEDDING_PROVIDER=bedrock
 ANTHROPIC_API_KEY=sk-ant-...             # read by the SDK, not by engine/config.py
 # CLAUDE_API_MODEL_ID=claude-opus-5      # optional, this is the default
 # CLAUDE_API_EFFORT=low                  # optional; low|medium|high|xhigh|max
@@ -120,17 +128,27 @@ ANTHROPIC_API_KEY=sk-ant-...             # read by the SDK, not by engine/config
 uvicorn api.main:app --port 8080
 ```
 
-Switching back is one line (`MODEL_PROVIDER=bedrock`, or delete it) — no code change. That
-round trip is the acceptance check for the model-independence contract
+An all-Bedrock deployment is `MODEL_PROVIDER=bedrock` (or nothing at all — it is the default);
+an all-Claude-API one is `MODEL_PROVIDER=claude_api`. When both roles resolve to the same
+provider that concrete provider is used directly; only a genuinely mixed configuration builds
+a `CompositeProvider`, which does nothing but route each method to the right provider.
+
+Every one of these is a configuration change with **no code change**, which is the acceptance
+check for the model-independence contract
 ([ADR-1](docs/office-hours/09-decisions.md#adr-1)): swapping providers touches the app's
 composition root only, never the Memory Engine.
 
-**One capability is deliberately missing.** The Claude API has no embeddings endpoint, and
-Titan V2 is a Bedrock model. Rather than fabricating vectors, the adapter's `embed()` raises,
-which the Phase 2 write path already handles: memories are stored with **NULL embeddings**
-and stay eligible for `python -m cli.backfill` once Bedrock is configured. Fabricated vectors
-would look embedded, never qualify for backfill, and silently degrade recall forever.
-Consequences while running on this provider:
+> ⚠️ **`EMBEDDING_PROVIDER` is effectively a one-way door.** Vectors from different embedding
+> models are not comparable, so changing it after memories exist means nulling and re-embedding
+> every row. `LLM_PROVIDER` carries no such constraint.
+
+**One capability is deliberately missing from the Claude API.** It has no embeddings endpoint,
+and Titan V2 is a Bedrock model — which is precisely why the roles are separable. Rather than
+fabricating vectors, `ClaudeAPIProvider.embed()` raises, which the Phase 2 write path already
+handles: memories are stored with **NULL embeddings** and stay eligible for
+`python -m cli.backfill` once a real embedder is configured. Fabricated vectors would look
+embedded, never qualify for backfill, and silently degrade recall forever. So if you set
+`EMBEDDING_PROVIDER=claude_api` (or run all-Claude-API):
 
 - Every ingest logs `embedding failed; N rows -> NULL, backfill pending` — expected, not a bug.
 - `recall_memories` (semantic search) cannot run; the turn degrades honestly, reporting the
