@@ -24,9 +24,15 @@
 > - **New, beyond the original map:** the graph-state durability suite
 >   ([ADR-14.9](09-decisions.md#adr-14)) — the checkpointer guard against a real database, an
 >   allowlist tripwire, and a pinning test for LangGraph's silent-drop semantics.
+> - **Phase 4 (2026-08-02): 445 tests green.** The whole `cli/replay` block below (T8 M1–M4):
+>   converter determinism + expansion rules, the resume ledger incl. `rebuild_from_db`, the
+>   two new engine entry points (`ingest_events`, `ingest_events_superseding`) and
+>   `normalize_item`, and the orchestration loop's resume/halt/correction/exit-code behavior.
+>   The load-bearing ones are the **zero-extraction property** and the **forced-double-run
+>   duplicate guard**. Detail: [engineering/replay-architecture.md](../engineering/replay-architecture.md) §7.
 >
 > Still planned: consolidation (Phase 5), trace persistence + citation validation (T7),
-> photo/S3 ingestion, replay CLI, the 4 Playwright E2E paths, and both live-model eval lanes.
+> photo/S3 ingestion, the 4 Playwright E2E paths, and both live-model eval lanes.
 
 ```
 CODE PATHS                                               USER FLOWS
@@ -67,10 +73,17 @@ CODE PATHS                                               USER FLOWS
 [+] canaries (permanent)
   ├── VECTOR(512) index + K-NN ordering on normalized vectors (T1)
   └── PostgresSaver on CockroachDB checkpoint round-trip (T2)
-[+] cli/replay
-  ├── small-batch inserts (vector-index footgun guard)
-  ├── extraction cache: second run makes zero model calls
-  └── idempotent resume after interrupt
+[+] cli/replay  (T8 M1–M4 — full block in engineering/replay-architecture.md §7)
+  ├── converter (M1): byte-determinism · expansion Rules 1–3 · type mapping ·
+  │        the two narrowings · record_id stability · payloads validate
+  ├── ledger (M2): drift detection · rebuild_from_db · corrupt-ledger safety ·
+  │        record_id guard rejects a non-derivable id
+  ├── engine (M3): direct/extract paths yield identical row shape · direct-path
+  │        validation failure is FATAL · normalize_item contract + non-goals
+  └── main loop (M4): PROPERTY extract_calls == 0 after a full run ·
+           idempotent resume after interrupt · forced double-run → NO duplicates ·
+           correction reported-then-applied (one txn) · halt at 5 consecutive ·
+           failure artifact fields · exit codes 0/1/2/3
 [+] LLM extraction: [→EVAL] golden set, tolerance ranges
 
 TOTAL: 33 paths  |  E2E: 4 (Playwright)  |  EVAL: 2 (live-model lane)

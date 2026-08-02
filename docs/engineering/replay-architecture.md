@@ -39,10 +39,20 @@
 > it below describe a **local-only file**; a clone will not contain it, and M1's converter must be
 > pointed at a local copy.
 >
-> **When M1–M5 land**, promote §4 into a new ADR in
-> [09-decisions.md](../office-hours/09-decisions.md) — mirroring how ADR-14 absorbed Phase 3's
-> in-flight decisions — and update this header rather than leaving two documents both claiming
-> to be canonical.
+> **Implementation status 2026-08-02 — M1–M4 COMPLETE, M5 pending.** Landed as 8 reviewed
+> commits (`483cd79`…`791a99b`); **445 tests green** against a clean cluster. M1 dataset contract
+> + converter · M2 resume ledger · M3 `ingest_events` + shared tail + `normalize_item` · M4
+> `cli/replay.py` orchestration (resume, §4.10 halt + failure artifact, §4.12 corrections via
+> §4.14's `ingest_events_superseding`, §4.15 exit codes + freshness check, `--rebuild-ledger`).
+> **M5 — the production run against the real reconstruction (~424 records) — has not been
+> executed.** Every §4 decision below is now implemented; none was re-litigated during build.
+>
+> **ADR promotion is deliberately still PENDING.** Per the plan below, §4 is promoted into a new
+> ADR in [09-decisions.md](../office-hours/09-decisions.md) — mirroring how ADR-14 absorbed
+> Phase 3's in-flight decisions — **once M5 lands**, not before: M5 is the step that can still
+> invalidate a §4 decision by meeting real data. Until then this document remains canonical for
+> Phase 4, and 09-decisions.md carries no Phase 4 ADR. Update this header when the promotion
+> happens rather than leaving two documents both claiming to be canonical.
 
 ## 1. Why this document exists
 

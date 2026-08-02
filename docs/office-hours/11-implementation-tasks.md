@@ -36,9 +36,16 @@
   - Files: `engine/trace.py`, `api/turns.py` · Verify: property test — no assembled context without a persisted trace; invalid-citation fixture flagged
   - ⚠️ **Blocking contract decision — settle before writing the validator** ([ADR-14.8](09-decisions.md#adr-14)): the citable set is `trace.evidence` **∪ aggregate/count contributing IDs** (`ContextBlock.citable_ids()`). Because assembly is pure ([ADR-14.7](09-decisions.md#adr-14)), an aggregate's contributing rows are IDs without metadata and are absent from `trace.evidence` — validating against it alone would flag *valid* citations of aggregated data as invalid. Either validate against the full citable set, or carry those IDs into the persisted trace (recommended, keeps "the UI reads the trace" literally true; pairs naturally with T16's batch-fetch hydration).
   - Note: the trace object and its by-construction emission already exist (Phase 3, M1/M3); T7 adds **persistence + validation**, not the artifact.
-- [ ] **T8 (P1, ~2.5d / ~4h)** — cli — Replay CLI: markdown→JSONL converter, direct-ingest, idempotent resume, supersession-based corrections
+- [x] **T8 (P1, ~2.5d / ~4h)** — cli — Replay CLI: markdown→JSONL converter, direct-ingest, idempotent resume, supersession-based corrections
+  - **Status 2026-08-02: CODE COMPLETE (M1–M4 shipped); M5 = the operational production run, pending.**
+    M1 dataset contract + converter (`cli/replay_dataset.py`, `cli/convert.py`) · M2 resume ledger
+    (`cli/replay_ledger.py`) · M3 engine support (`ingest_events` + shared persistence tail;
+    `normalize_item` query-time stop-gap) · M4 orchestration (`cli/replay.py` — resume loop, §4.10
+    halt + failure artifact, §4.12 correction workflow via `ingest_events_superseding`, §4.15 exit
+    codes + advisory freshness check, `--rebuild-ledger`). Landed as 8 reviewed commits
+    (`483cd79`…`791a99b`). **445 tests green** against a clean CockroachDB cluster.
   - Surfaced by: Outside voice #7 (replay = dominant cost) + Step 0 vector-batch footgun
-  - Architecture (LOCKED 2026-07-30): [../engineering/replay-architecture.md](../engineering/replay-architecture.md) — 13 decisions, risk analysis, M1–M5 plan, test strategy
+  - Architecture (LOCKED 2026-07-30, amended 2026-08-02): [../engineering/replay-architecture.md](../engineering/replay-architecture.md) — 15 decisions, risk analysis, M1–M5 plan, test strategy
   - ⚠️ **Contract amended 2026-07-30 — the extraction cache is removed.** This entry originally
     specified "extraction-output cache (re-runs never re-call Bedrock)". Structuring the
     reconstruction moved to **dev-time** tooling ([ADR-10](09-decisions.md#adr-10)'s already-locked

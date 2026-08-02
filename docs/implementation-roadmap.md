@@ -170,6 +170,18 @@
 
 ## Phase 4 — History Bootstrap (Replay) *(~3–5 days, includes human reconstruction time)*
 
+> **Status 2026-08-02: CODE COMPLETE (M1–M4) — M5 (the production run) pending.** Built in
+> four reviewed milestones, landed as 8 commits (`483cd79`…`791a99b`): M1 dataset contract +
+> converter · M2 idempotent resume ledger · M3 engine support (`ingest_events` + the shared
+> persistence tail, `normalize_item`) · M4 orchestration (`cli/replay.py` — resume loop, halt
+> threshold + failure artifact, supersession-based corrections, exit codes, `--rebuild-ledger`).
+> **445 tests green** against a clean CockroachDB cluster. The zero-extraction property and the
+> forced-double-run duplicate guard are both enforced by tests, not convention.
+>
+> **M5 remains**: convert + replay the real reconstruction (~424 records) and verify OQ5 in the
+> database. Until M5 runs, the account is still empty and the money question is still
+> unanswerable — the *capability* is done, the *data* is not.
+
 > **Before starting:** [docs/engineering/replay-architecture.md](engineering/replay-architecture.md)
 > is the **locked** architecture for this phase — 13 design decisions, risk analysis, the M1–M5
 > milestone breakdown, and the testing strategy. Read it before writing any Phase 4 code.
