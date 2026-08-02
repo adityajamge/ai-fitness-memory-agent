@@ -39,20 +39,24 @@
 > it below describe a **local-only file**; a clone will not contain it, and M1's converter must be
 > pointed at a local copy.
 >
-> **Implementation status 2026-08-02 — M1–M4 COMPLETE, M5 pending.** Landed as 8 reviewed
-> commits (`483cd79`…`791a99b`); **445 tests green** against a clean cluster. M1 dataset contract
-> + converter · M2 resume ledger · M3 `ingest_events` + shared tail + `normalize_item` · M4
-> `cli/replay.py` orchestration (resume, §4.10 halt + failure artifact, §4.12 corrections via
-> §4.14's `ingest_events_superseding`, §4.15 exit codes + freshness check, `--rebuild-ledger`).
-> **M5 — the production run against the real reconstruction (~424 records) — has not been
-> executed.** Every §4 decision below is now implemented; none was re-litigated during build.
+> **Implementation status 2026-08-02 — ALL MILESTONES COMPLETE (M1–M5).** Landed as 8 reviewed
+> commits; **498 tests green**. M1 dataset contract + converter · M2 resume ledger · M3
+> `ingest_events` + shared tail + `normalize_item` · M4 `cli/replay.py` orchestration (resume,
+> §4.10 halt + failure artifact, §4.12 corrections via §4.14's `ingest_events_superseding`,
+> §4.15 exit codes + freshness check, `--rebuild-ledger`) · **M5 production run: 424 records
+> committed, 0 failed, 0 NULL embeddings, idempotent on rerun — OQ5 resolved GO** (see the M5
+> entry in §6 for measurements). Every §4 decision is implemented and now validated against real
+> data; none was re-litigated during build, and the two defects M5 surfaced were contract gaps
+> between milestones rather than reversals (§4.1, §4.3).
 >
-> **ADR promotion is deliberately still PENDING.** Per the plan below, §4 is promoted into a new
-> ADR in [09-decisions.md](../office-hours/09-decisions.md) — mirroring how ADR-14 absorbed
-> Phase 3's in-flight decisions — **once M5 lands**, not before: M5 is the step that can still
-> invalidate a §4 decision by meeting real data. Until then this document remains canonical for
-> Phase 4, and 09-decisions.md carries no Phase 4 ADR. Update this header when the promotion
-> happens rather than leaving two documents both claiming to be canonical.
+> **ADR promotion COMPLETE 2026-08-02 → [ADR-15](../office-hours/09-decisions.md#adr-15).**
+> M5 landed and validated §4 against real data, so the architecturally binding decisions —
+> replay as a batch client of the production write path, zero runtime inference, CLI-owned
+> idempotency, period expansion with its two honesty signals, supersession-only corrections —
+> now live in ADR-15. **Division of responsibility from here: ADR-15 is canonical for the
+> *decisions and their rationale*; this document remains canonical for the *how*** (dataset
+> format, expansion rules, CLI contract, failure artifact, testing strategy). Change a decision
+> in ADR-15; change a mechanism here.
 
 ## 1. Why this document exists
 

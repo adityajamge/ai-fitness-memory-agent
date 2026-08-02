@@ -19,8 +19,18 @@
 
 | # | Question | Decide at | Notes |
 |---|---|---|---|
-| OQ5 | Does the real data yield the body-fat causal story, or a different one? | **The Assignment, before any code** | Go/no-go for the demo script; must survive sanitization (ADR-7 as revised by ADR-13); note 13A framing — insights over reconstructed history use event-time language |
 | OQ6 | Blood-report parsing depth in 40 days | Milestone 2 | Fallback: structured manual entry + one parsed example |
+
+**OQ5 — RESOLVED 2026-08-02 (Phase 4 M5): GO, and it is the *deficiency-correction* story, not
+body fat.** The real data yields **Story A**: Vitamin D 6.20 → 38.4 ng/mL and B12 152 → 752
+pg/mL between 2026-03-25 and 2026-07-03, with the causal chain (supplement start 2026-03-28,
+dose reduction 2026-06-24, protein intervention) present and retrievable. Verified in the
+database through the production retrieval path after replaying 424 records, not by reading the
+reconstruction — `lookup_events` returns both blood reports; semantic recall on *"what changed
+before my vitamin D recovered"* returns the intervention records; weekly protein aggregates trace
+124 → 217 → 227 → 252 g. Story C (the body-scan fallback) is **not needed**. Sanitization for the
+public repo (ADR-7) remains outstanding and is Phase 7 work — the raw reconstruction and payload
+table are gitignored and stay local. See [ADR-15](09-decisions.md#adr-15).
 
 ## Advisory items carried from reviews (non-blocking)
 

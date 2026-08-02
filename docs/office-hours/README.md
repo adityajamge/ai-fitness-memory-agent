@@ -44,8 +44,8 @@ flagged the insight when the data arrived.
 | [06-retrieval-strategy.md](06-retrieval-strategy.md) | Hybrid SQL + vector retrieval, when each path fires, ranking | Building retrieval or debugging answers |
 | [07-glass-box-ui.md](07-glass-box-ui.md) | UI philosophy, approved wireframe v3, ranked sub-features + cut order | Building the UI |
 | [08-roadmap.md](08-roadmap.md) | Milestones 1–4, the Assignment, degradation strategy, submission checklist | Planning any week |
-| [09-decisions.md](09-decisions.md) | ADRs: decisions, trade-offs, assumptions, **rejected alternatives** (incl. ADR-12 evidence traces, ADR-13 eng-review lockdown, **ADR-14 Phase 3 agent spine & read path**) | Before re-opening any settled question |
-| [10-open-questions.md](10-open-questions.md) | Open questions — 5 of 7 resolved 2026-07-12; OQ5/OQ6 remain | Before starting Milestone 1 |
+| [09-decisions.md](09-decisions.md) | ADRs: decisions, trade-offs, assumptions, **rejected alternatives** (incl. ADR-12 evidence traces, ADR-13 eng-review lockdown, ADR-14 Phase 3 agent spine & read path, **ADR-15 Phase 4 replay**) | Before re-opening any settled question |
+| [10-open-questions.md](10-open-questions.md) | Open questions — 6 of 7 resolved (**OQ5 resolved 2026-08-02 by the Phase 4 replay: GO**); only OQ6 remains | Before starting Milestone 1 |
 | [11-implementation-tasks.md](11-implementation-tasks.md) | The 18 review-derived tasks, parallelization lanes, outside-voice dispositions | Planning any build session |
 | [12-test-plan.md](12-test-plan.md) | Coverage map (33 paths), eval suites, failure-modes table, test infra | Writing any code or test |
 

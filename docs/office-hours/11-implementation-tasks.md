@@ -37,7 +37,9 @@
   - ⚠️ **Blocking contract decision — settle before writing the validator** ([ADR-14.8](09-decisions.md#adr-14)): the citable set is `trace.evidence` **∪ aggregate/count contributing IDs** (`ContextBlock.citable_ids()`). Because assembly is pure ([ADR-14.7](09-decisions.md#adr-14)), an aggregate's contributing rows are IDs without metadata and are absent from `trace.evidence` — validating against it alone would flag *valid* citations of aggregated data as invalid. Either validate against the full citable set, or carry those IDs into the persisted trace (recommended, keeps "the UI reads the trace" literally true; pairs naturally with T16's batch-fetch hydration).
   - Note: the trace object and its by-construction emission already exist (Phase 3, M1/M3); T7 adds **persistence + validation**, not the artifact.
 - [x] **T8 (P1, ~2.5d / ~4h)** — cli — Replay CLI: markdown→JSONL converter, direct-ingest, idempotent resume, supersession-based corrections
-  - **Status 2026-08-02: CODE COMPLETE (M1–M4 shipped); M5 = the operational production run, pending.**
+  - **Status 2026-08-02: COMPLETE — all five milestones. OQ5 resolved GO; decisions promoted to [ADR-15](09-decisions.md#adr-15).**
+    M5 replayed 424 real records into the live account: 0 failed, 0 NULL embeddings, zero
+    extraction calls, idempotent rerun (0 new / 424 skipped). **498 tests green.**
     M1 dataset contract + converter (`cli/replay_dataset.py`, `cli/convert.py`) · M2 resume ledger
     (`cli/replay_ledger.py`) · M3 engine support (`ingest_events` + shared persistence tail;
     `normalize_item` query-time stop-gap) · M4 orchestration (`cli/replay.py` — resume loop, §4.10

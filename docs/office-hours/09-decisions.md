@@ -388,6 +388,109 @@ response shape is designed so Phase 6 *adds* fields rather than reshaping. ADR-1
 ("a trace exists whenever context was assembled") already holds — only its storage is
 deferred.
 
+## <a name="adr-15"></a>ADR-15 — Phase 4 decisions (history bootstrap / replay, 2026-07-29 → 2026-08-02)
+
+Decisions taken during Phase 4 and **now proven by a production run**: 424 records of the
+builder's real reconstructed history replayed into the live account, 0 failures, 0 NULL
+embeddings, idempotent on rerun. They were held in
+[engineering/replay-architecture.md](../engineering/replay-architecture.md) §4 while Phase 4 was
+in flight; that document remains canonical for the *how* (dataset format, expansion rules, CLI
+contract, failure artifact). This ADR records only what is architecturally binding, and only
+what implementation and M5 actually validated.
+
+**OQ5 is resolved: GO.** The money question is answerable from the database — Vitamin D
+6.20 (2026-03-25) → 38.4 (2026-07-03) returns through `lookup_events`, with the causal chain
+(supplement start, dose reduction) reachable by semantic recall. Story C, the fallback narrative,
+is not needed.
+
+### 15.1 Replay is the production write path used as a batch client — no import feature
+
+Replay reuses `IngestionService` end-to-end through a second entry point (`ingest_events`), which
+skips extraction and shares validation, embedding, the single write transaction, receipts, and
+backfill with `ingest_text`. No parallel pipeline, no bulk-insert path, no `external_ref` column.
+
+**Why:** a second write path would need its own proof of the never-lose-input and
+transaction-boundary guarantees. One shared tail keeps those one testable property.
+**Invariant:** one record = one transaction, row-at-a-time — never batch inserts to speed a bulk
+run (that reintroduces the C-SPANN footgun the T1 canary guards). **Tradeoff:** ~1.01 s/record
+and no parallelism; irrelevant at 424 records, and it left the write path's guarantees untouched.
+This also means [ADR-13.4](#adr-13)'s "every account starts empty" is preserved — replay is a
+**dev-time operator tool**, not a user-facing import.
+
+### 15.2 Zero runtime inference: structuring happens at dev time
+
+Every replay record reaches the database already typed. Turning an unstructured personal history
+into typed events is inference, and Phase 4 performs it at **development** time (LLM-assisted,
+human-reviewed into a reviewed payload table) rather than at replay time — the same dev-time /
+runtime split [ADR-10](#adr-10) locked for the MCP server.
+
+**Why:** the values replay commits are the ones the demo verifies (the Vitamin D pair). Re-parsing
+them through a model at runtime risks a transcription error landing precisely there. The cost
+argument (re-runs are free) is real but secondary — this is a correctness decision.
+**Invariant, mechanically checked:** a replay run makes **zero** `extract_events` calls; a
+property test asserts it, and the M5 run confirmed it. Consequently the originally-planned
+extraction cache was **deleted rather than kept as unexercised infrastructure**; its re-add
+trigger is recorded in replay-architecture.md §8. **Tradeoff:** replay cannot ingest anything the
+converter cannot type — by design, since a validation failure on this path means bad *input*, and
+is fatal rather than silently degraded to a note.
+
+### 15.3 Idempotency lives in the CLI, keyed on converter-owned ids
+
+The engine keeps its no-deduplication behavior (correct for live chat). All replay protection is
+a local append-only ledger keyed on a `record_id` derived from the record's **stable coordinates**
+(`source_ref` + occurrence), never its content, written **strictly after** the ingest call returns.
+
+**Why content-keying was rejected:** it would make an ordinary markdown edit produce a new key for
+an already-committed record, re-ingesting it — the P0 duplicate path reachable through a
+documentation change. **Why post-commit ordering:** the reverse marks work that may never commit
+and skips it forever. **Invariant:** ledger writes strictly after commit; ids are converter-owned
+and machine-verified, never hand-written. **Accepted, bounded residual:** a crash between commit
+and ledger write re-processes exactly one record — pinned by test, not eliminated. **Proven:**
+rerunning the full production command reported 0 new / 424 skipped in 2.7s with zero duplicate
+rows.
+
+### 15.4 Periods expand into dated occurrences, and must say so
+
+`memories.event_time` is a single timestamp, so period facts ("4 eggs daily, March–April") are
+resolved at conversion time into one record per occurrence — but only when the assertion carries a
+per-occurrence quantity, at **its own cadence**, clamped at the live-logging cutover.
+
+**Why cadence fidelity is not a detail:** expanding a *weekly* 60,000 IU dose daily would assert
+7× the real dose — fabricated data in the table the glass box invites judges to click into. The
+real dataset produced 13 weekly records, not 88. **The honesty mechanism is two signals, not one**:
+lowered `confidence` **and** an inline `expanded_from` marker naming the parent assertion and its
+bounds. Shipping only the first is an ADR-4 violation, because nothing then distinguishes a
+materialized day from an observed event — this happened in the first production run and was
+repaired by metadata backfill (replay-architecture.md §4.1). **Tradeoff, acknowledged:** synthetic
+daily rows are a **replay-scoped tactic**, not the architecture's opinion on periods. Storing one
+row per period and materializing occurrences during aggregation is the better design; it is
+deferred to Phase 5 on scope, not merit, and is recorded as a handoff.
+
+### 15.5 Corrections propagate by supersession, never by rewrite, and never automatically
+
+Stable ids prevent duplicates *and* silently prevent corrections: editing a fact leaves the id
+unchanged, so a re-run skips it. Drift is therefore detected by comparing a stored content hash,
+reported as a field-level diff on **every** run, and applied only under an explicit
+`--apply-corrections` — which inserts replacements and `mark_superseded`s the prior rows in one
+transaction ([ADR-9](#adr-9): retraction never deletes).
+
+**Why the flag:** if the converter ever drifts subtly (float formatting, whitespace), automatic
+behavior would mass-supersede the whole dataset in one run. Detection is free and always on; the
+wide-blast-radius action requires intent. **Status, stated honestly:** implemented and tested, but
+**not exercised by M5** — the production run had no corrections. The first real correction will be
+the true test.
+
+### 15.6 What Phase 4 taught: seams, not components, were where defects lived
+
+Both defects the milestone found sat **between** milestones whose sides were each individually
+correct and tested — the M2 id guard not knowing a third id shape M1 legitimately produced, and
+the M1→M3 adapter dropping a field neither side required. Neither raised an error; both would have
+shipped a run reporting success. **Consequence for later phases:** a green summary line is not
+evidence of success, and integration seams need their own assertions at the *outermost* observable
+layer (the committed row), not only at the unit that owns the logic. The M5 smoke step — a
+10-record rehearsal into a throwaway account — is what caught the first and is retained as
+standard practice for any future bulk operation.
+
 ## Standing assumptions (verify, don't trust)
 
 1. The builder's real history contains a demo-worthy causal story (Assignment verifies; a
@@ -398,9 +501,13 @@ deferred.
    text-first logging remains fully functional).
 4. Budget stays ≈ $50–100 for 40 days — **must be re-derived line-item** (Fargate + ALB share
    since the 13.3 amendment, previously App Runner idle
-   cost, CockroachDB tier, replay Bedrock runs with extraction caching, evals) as a
+   cost, CockroachDB tier, replay Bedrock runs, evals) as a
    Milestone 1 task; abuse controls are out of scope (ADR-13.15), so this assumption also
    rests on no hostile traffic.
+   **Replay's share resolved 2026-08-02 ([ADR-15.2](#adr-15)):** replay makes zero extraction
+   calls, so the line item is 424 Titan embedding calls (well under $0.01) rather than the
+   originally-budgeted extraction runs. The extraction cache that assumption referenced no
+   longer exists.
 5. LangGraph PostgresSaver works on CockroachDB (day-one canary — same gate class as vector
    indexing; fallback is a thin hand-rolled checkpointer if the canary fails).
    **Resolved 2026-07-17:** stock saver fails; fallback landed as a thin read-path subclass
