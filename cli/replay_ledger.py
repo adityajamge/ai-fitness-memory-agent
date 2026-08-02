@@ -116,6 +116,16 @@ _POINT_ID_RE = re.compile(rf"^(?P<slug>{_SLUG})\.(?P<day>{_DAY})$")
 _EXPANDED_ID_RE = re.compile(
     rf"^(?P<composition>{_SLUG}\.{_DAY}\.(?:{_DAY}|ongoing))#(?P<day>{_DAY})$"
 )
+#: `<rtype>.<start>.<end|ongoing>` — a **collapsed period**: a period fact the converter chose
+#: not to expand, emitted as a single dated record (§4.1's two narrowings — a change marker
+#: covered by a §3 period, or a `*-pattern` with no cadence, becomes one `note`). It keeps the
+#: period-shaped id because those bounds are what make the record self-describing, but carries
+#: no `expanded_from` because nothing was materialized. Added 2026-08-02 (M2 amendment): the
+#: guard originally knew only the two shapes above and rejected all six of these in the real
+#: dataset — see verify_record_id.
+_PERIOD_ID_RE = re.compile(
+    rf"^(?P<slug>{_SLUG})\.(?P<start>{_DAY})\.(?P<end>{_DAY}|ongoing)$"
+)
 
 
 def verify_record_id(record: ReplayRecord) -> None:
@@ -127,13 +137,29 @@ def verify_record_id(record: ReplayRecord) -> None:
     *checked*, so this is a guard rather than a README note (the `_GuardedSerde` precedent in
     graph-state-durability.md).
 
+    **Three legitimate shapes** (a record without ``expanded_from`` may be either of the last
+    two):
+
+    ==================  ==========================================  ==================
+    Shape               Grammar                                     ``expanded_from``
+    ==================  ==========================================  ==================
+    point event         ``<type>.<date>``                           absent
+    collapsed period    ``<type>.<start>.<end|ongoing>``            absent
+    expanded occurrence ``<type>.<start>.<end|ongoing>#<date>``     present
+    ==================  ==========================================  ==================
+
     **Scope, stated honestly.** For an expanded record the check is exact: the composition and
-    occurrence date must reconstruct the id. For a point event the *type* half is not
+    occurrence date must reconstruct the id. For the other two the *type* half is not
     recoverable from the record alone — the record carries the engine type (`supplement`), which
     differs from the reconstruction type that formed the id (`medication`) wherever the type map
     folds them. So the grammar and the embedded date are verified and the slug is accepted.
     That still catches the threat this guard exists for — an invented or copy-pasted id — since
     both fail the grammar or the date check.
+
+    A collapsed period is held to exactly the same strictness as a point event: its **start**
+    date must equal the record's ``event_time`` (the converter always dates these at the period
+    start), and a concrete ``end`` must not precede the start. Nothing here is relaxed — the
+    third shape was always produced by the converter and simply had no grammar.
     """
     rid, day = record.record_id, record.event_time[:10]
 
@@ -157,15 +183,37 @@ def verify_record_id(record: ReplayRecord) -> None:
             )
         return
 
-    m = _POINT_ID_RE.match(rid)
-    if not m:
+    # A '#' means the converter materialized an occurrence, which is only legal alongside
+    # expanded_from — checked before the grammars so the message names the real problem.
+    if "#" in rid:
         raise LedgerError(
-            f"record_id {rid!r} is not a converter-derived point-event id "
-            f"(expected '<type>.<date>'); a record with a '#' must carry expanded_from"
+            f"record_id {rid!r} carries an occurrence marker ('#') but the record has no "
+            f"expanded_from; only a materialized period day may use that form"
         )
-    if m["day"] != day:
+
+    point = _POINT_ID_RE.match(rid)
+    if point:
+        if point["day"] != day:
+            raise LedgerError(
+                f"record_id {rid!r} carries date {point['day']} but the record's event_time "
+                f"is {day}"
+            )
+        return
+
+    period = _PERIOD_ID_RE.match(rid)
+    if not period:
         raise LedgerError(
-            f"record_id {rid!r} carries date {m['day']} but the record's event_time is {day}"
+            f"record_id {rid!r} is not a converter-derived id (expected '<type>.<date>' for a "
+            f"point event or '<type>.<start>.<end|ongoing>' for a collapsed period)"
+        )
+    if period["start"] != day:
+        raise LedgerError(
+            f"record_id {rid!r} carries period start {period['start']} but the record's "
+            f"event_time is {day} — collapsed periods are dated at their start"
+        )
+    if period["end"] != "ongoing" and period["end"] < period["start"]:
+        raise LedgerError(
+            f"record_id {rid!r} ends ({period['end']}) before it starts ({period['start']})"
         )
 
 

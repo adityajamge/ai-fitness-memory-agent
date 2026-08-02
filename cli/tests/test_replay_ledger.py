@@ -244,6 +244,107 @@ def test_expanded_record_needs_the_expanded_shape():
         verify_record_id(tampered)
 
 
+# ── collapsed periods: the third shape (M2 amendment, 2026-08-02) ─────────────────────────
+#
+# §4.1's two narrowings collapse a *period* into a single dated `note` — a change marker
+# covered by a §3 period, or a `*-pattern` with no cadence (the lifelong-vegetarian and
+# junk-food phases). Those keep the period-shaped id but have no expanded_from, so they match
+# neither original grammar. The guard rejected all six in the real dataset, which the M5 smoke
+# test caught. These records are the narrative Story A's causal chain cites, so losing them
+# silently would have been the expensive kind of bug.
+
+
+def _collapsed(record_id: str = "meal-pattern.2006-08-14.2026-03-26", **kw) -> ReplayRecord:
+    """A collapsed period: period-shaped id, dated at the period START, no expanded_from."""
+    start = record_id.split(".")[1]
+    return ReplayRecord(
+        record_id=record_id,
+        type=kw.pop("type", "note"),
+        event_time=kw.pop("event_time", f"{start}T12:00:00+05:30"),
+        tz=TZ,
+        confidence=kw.pop("confidence", 0.6),
+        payload=kw.pop("payload", {"text": "strictly vegetarian from birth"}),
+        source_ref=kw.pop("source_ref", "§3 Diet phases :: 2006-08-14 → 2026-03-26"),
+        summary=kw.pop("summary", "strictly vegetarian from birth"),
+        **kw,
+    )
+
+
+@pytest.mark.parametrize(
+    "record_id",
+    [
+        "meal-pattern.2006-08-14.2026-03-26",  # closed period
+        "illness.2026-03-28.2026-04-01",  # short closed period
+        "note.2026-06-23.ongoing",  # open-ended
+        "meal-pattern.2026-07-06.ongoing",
+        "supplement.2026-03-28.ongoing",
+    ],
+)
+def test_collapsed_period_ids_pass(record_id: str):
+    """Every real-dataset shape the smoke test surfaced."""
+    verify_record_id(_collapsed(record_id))
+
+
+def test_all_three_shapes_pass_together():
+    verify_record_id(_point())
+    verify_record_id(_collapsed())
+    verify_record_id(_expanded())
+
+
+def test_collapsed_period_start_must_match_event_time():
+    """Held to the same strictness as a point event — the date in the id must be the record's."""
+    record = _collapsed(
+        "meal-pattern.2006-08-14.2026-03-26", event_time="2026-05-01T12:00:00+05:30"
+    )
+    with pytest.raises(LedgerError, match="carries period start 2006-08-14"):
+        verify_record_id(record)
+
+
+def test_collapsed_period_dated_at_end_is_rejected():
+    """Dating a collapsed period at its END is exactly the hand-edit the guard must catch."""
+    record = _collapsed(
+        "meal-pattern.2006-08-14.2026-03-26", event_time="2026-03-26T12:00:00+05:30"
+    )
+    with pytest.raises(LedgerError, match="collapsed periods are dated at their start"):
+        verify_record_id(record)
+
+
+def test_collapsed_period_end_before_start_is_rejected():
+    """An extra strictness the two original grammars never had."""
+    record = _collapsed("meal-pattern.2026-05-01.2026-01-01")
+    with pytest.raises(LedgerError, match="ends .* before it starts"):
+        verify_record_id(record)
+
+
+@pytest.mark.parametrize(
+    "bad_id",
+    [
+        "meal-pattern.2006-08-14.2026-03-26.2026-04-01",  # four parts
+        "meal-pattern.2006-08-14.forever",  # 'forever' is not 'ongoing'
+        "meal-pattern.2006-08-14.",  # trailing dot, empty end
+        "meal-pattern..2026-03-26",  # empty start
+        "Meal-Pattern.2006-08-14.2026-03-26",  # not a converter slug
+        "meal-pattern.14-08-2006.2026-03-26",  # wrong date format
+        "meal pattern.2006-08-14.2026-03-26",  # space in slug
+        "meal-pattern.2006-08-14.ongoing#2026-03-26",  # '#' without expanded_from
+    ],
+)
+def test_invented_period_shaped_ids_are_still_rejected(bad_id: str):
+    """The guard must not have been widened into 'anything with dots passes'."""
+    with pytest.raises(LedgerError):
+        verify_record_id(_collapsed(bad_id, event_time="2006-08-14T12:00:00+05:30"))
+
+
+def test_occurrence_marker_without_expanded_from_names_the_real_problem():
+    with pytest.raises(LedgerError, match="occurrence marker"):
+        verify_record_id(
+            _collapsed(
+                "meal-pattern.2006-08-14.ongoing#2006-08-14",
+                event_time="2006-08-14T12:00:00+05:30",
+            )
+        )
+
+
 # ── file robustness ───────────────────────────────────────────────────────────────────────
 
 
