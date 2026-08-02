@@ -9,9 +9,6 @@ IngestionService, argparse, main().
 Orchestration only: every write goes through IngestionService's ``ingest_events`` (new
 records) or ``ingest_events_superseding`` (corrections) — this module never opens a
 transaction or calls engine.repository directly.
-
-Not yet implemented: --rebuild-ledger CLI wiring (ReplayLedger.rebuild_from_db already exists
-and is tested at the M2 level; only the flag parsing + call-through is outstanding).
 """
 
 from __future__ import annotations
@@ -285,9 +282,25 @@ def main() -> None:
         action="store_true",
         help=f"continue past the {HALT_THRESHOLD}-consecutive-failure halt (§4.10)",
     )
+    parser.add_argument(
+        "--rebuild-ledger",
+        action="store_true",
+        help=(
+            "reconstruct the ledger from committed source='replay' rows and exit (§4.3); "
+            "a distinct mode -- does not also replay in the same invocation"
+        ),
+    )
     args = parser.parse_args()
 
     ledger_path = args.ledger or _default_ledger_path(args.dataset)
+
+    if args.rebuild_ledger:
+        settings = load_settings()
+        db = Database(settings.database_url)
+        with db.transaction() as cur:
+            ledger = ReplayLedger.rebuild_from_db(ledger_path, cur, args.user)
+        print(f"rebuilt ledger: {len(ledger)} record(s) recovered")
+        sys.exit(EXIT_OK)
 
     try:
         manifest = load_manifest(args.dataset)

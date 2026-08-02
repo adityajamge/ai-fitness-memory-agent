@@ -1,10 +1,10 @@
 """Tests for the replay CLI's main loop (T8 M4).
 
-Covers the full replay flow: NEW/DONE resume (Commit 3), and the §4.10 halt threshold +
-failure artifact, the §4.12 correction workflow, the §4.15 exit codes, and the advisory
-freshness check (Commit 4). --rebuild-ledger CLI wiring is the one M4 item not yet covered
-here — ReplayLedger.rebuild_from_db itself is already fully tested at the M2 level
-(cli/tests/test_replay_ledger.py); only the flag parsing is outstanding.
+Covers the full replay flow: NEW/DONE resume, the §4.10 halt threshold + failure artifact,
+the §4.12 correction workflow, the §4.15 exit codes and advisory freshness check, and
+--rebuild-ledger CLI wiring (ReplayLedger.rebuild_from_db itself is already fully tested at
+the M2 level — cli/tests/test_replay_ledger.py — this file only proves the CLI calls it
+correctly).
 
 DB-backed, via cli/tests/conftest's real-CockroachDB `db`/`user_id` fixtures and
 `FakeModelProvider`.
@@ -92,7 +92,7 @@ def _run(svc, ledger, records, user_id, tmp_path: Path, **kw):
     return run_replay(svc, ledger, records, user_id, **kw)
 
 
-# ── run_replay: NEW/DONE resume (Commit 3) ──────────────────────────────────────────────
+# ── run_replay: NEW/DONE resume ──────────────────────────────────────────────────────────
 
 
 def test_new_records_are_ingested_and_marked_done(db, user_id, tmp_path: Path) -> None:
@@ -560,3 +560,32 @@ def test_main_exit_halted_at_the_threshold(user_id, tmp_path: Path, cli_env) -> 
 def test_main_exit_fatal_on_missing_dataset(user_id, tmp_path: Path, cli_env) -> None:
     code = cli_env("--dataset", str(tmp_path / "nope.jsonl"), "--user", str(user_id))
     assert code == EXIT_FATAL
+
+
+# ── main(): --rebuild-ledger ─────────────────────────────────────────────────────────────
+
+
+def test_main_rebuild_ledger_recovers_state_and_exits_without_replaying(
+    user_id, tmp_path: Path, cli_env, capsys
+) -> None:
+    records = [_record("2026-03-25"), _record("2026-03-26")]
+    dataset = _write_dataset(tmp_path, records)
+    ledger_path = _default_ledger_path(dataset)
+
+    code = cli_env("--dataset", str(dataset), "--user", str(user_id))
+    assert code == EXIT_OK
+    ledger_path.unlink()  # simulate losing the ledger file
+
+    code = cli_env("--rebuild-ledger", "--dataset", str(dataset), "--user", str(user_id))
+    assert code == EXIT_OK
+    assert "rebuilt ledger: 2 record(s) recovered" in capsys.readouterr().out
+
+    rebuilt = ReplayLedger.load(ledger_path)
+    for record in records:
+        assert rebuilt.is_done(record.record_id)
+
+    # A follow-up plain replay sees everything as DONE -- proving rebuild alone never wrote
+    # any new memory rows.
+    code = cli_env("--dataset", str(dataset), "--user", str(user_id))
+    assert code == EXIT_OK
+    assert "0 new, 2 skipped" in capsys.readouterr().out
