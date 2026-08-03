@@ -11,6 +11,7 @@ sends the whole turn to the note fallback, so required fields are kept minimal o
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
@@ -18,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 __all__ = [
     "MemoryPayload",
+    "EffectScale",
     "MealPayload",
     "WorkoutPayload",
     "SleepPayload",
@@ -58,6 +60,61 @@ MAX_EVIDENCE_IDS = 24
 #: Float slack when checking ``pattern_strength == effect × coverage × specificity``.
 #: Components are stored at full precision, so this absorbs IEEE rounding only.
 STRENGTH_TOLERANCE = 1e-6
+
+
+@dataclass(frozen=True, slots=True)
+class EffectScale:
+    """How big a change has to be, **in the metric's own units** (consolidation-architecture
+    §4.13, invariant **I-24**).
+
+    One scale per consolidatable series, because relative change is the wrong yardstick for a
+    physiologically bounded quantity. Vitamin D moves in multiples — 6.2 → 38.4 is 5.2× — while
+    body fat and weight move in small fractions of themselves and always will. A single relative
+    floor across both either refuses every real body-composition change or admits pure
+    measurement noise in the markers; there is no value that does neither, because they are not
+    the same kind of quantity.
+
+    Each field answers exactly one question, which is what makes the pair explainable:
+
+    ``min_delta``
+        *Is this bigger than our measurement noise?* The gate. Below it the engine says nothing
+        (**I-22**) — a BIA scale that varies ±1–2 points with hydration cannot support a claim
+        about a 0.8-point move, and the account's own body-scan payload carries that caveat.
+
+    ``full_delta``
+        *What does a full-size change look like?* The denominator of ``effect``, so a change of
+        this size scores 1.0 and the score means the same thing in every series. Without it a
+        real 3.2-point body-fat drop would publish as ``effect = 0.08`` beside a diet change at
+        0.84 — the engine calling a genuine change flimsy, which is a worse failure than
+        refusing to speak at all.
+
+    **These are product heuristics, not clinical thresholds** (ADR-13.12, **I-2**). They state
+    what *this application* treats as a meaningful or full-size change, anchored to measurement
+    precision and to the size of change a person would describe as real. Borrowing clinical
+    cutoffs would imply an authority the engine does not have — the same line that keeps a
+    pattern strength from being called a probability. Every value ships with its basis written
+    beside it in ``engine/insights.py``; changing one is a reviewed product judgment.
+    """
+
+    min_delta: float
+    full_delta: float
+
+    def __post_init__(self) -> None:
+        if self.min_delta <= 0:
+            raise ValueError(f"min_delta must be positive, got {self.min_delta}")
+        if self.full_delta < self.min_delta:
+            raise ValueError(
+                f"full_delta {self.full_delta} is below min_delta {self.min_delta}; a full-size "
+                "change cannot be smaller than the smallest change worth reporting"
+            )
+
+    def gates(self, delta: float) -> bool:
+        """Whether a change clears the noise floor and is worth a claim."""
+        return abs(delta) >= self.min_delta
+
+    def effect(self, delta: float) -> float:
+        """``min(1, |Δ| / full_delta)`` — the share of a full-size change, capped at one."""
+        return min(1.0, abs(delta) / self.full_delta)
 
 
 class MemoryPayload(BaseModel):

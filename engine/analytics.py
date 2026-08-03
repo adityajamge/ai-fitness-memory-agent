@@ -34,7 +34,7 @@ from datetime import date, datetime
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from engine.types import MAX_EVIDENCE_IDS
+from engine.types import MAX_EVIDENCE_IDS, EffectScale
 
 logger = logging.getLogger(__name__)
 
@@ -47,22 +47,24 @@ __all__ = [
     "detect_level_shifts",
     "detect_intervention_outcomes",
     "pattern_strength",
-    "MIN_EFFECT",
+    "EffectScale",
     "MIN_SPAN_DAYS",
     "MIN_INTERVAL_DAYS",
     "MIN_MEASUREMENTS",
     "MIN_INTERVENTIONS",
     "CONCURRENCY_DAYS",
     "MIN_INTERVENTION_GAP_DAYS",
-    "EFFECT_EPSILON",
 ]
 
 # ── thresholds (§4.15) — the engine refuses to speak below these (I-22) ────────────────
 # Constants, not per-user or adaptive: a threshold nobody can predict is a threshold nobody
 # can audit, and "why did it say that" has to be answerable from this file alone.
 
-#: Relative change a claim must clear to be worth making, on either detector.
-MIN_EFFECT = 0.15
+# There is deliberately no global effect floor. How big a change has to be is a property of
+# the *series*, declared as an ``EffectScale`` in ``engine/insights.py`` and passed in: relative
+# change is the wrong yardstick for a physiologically bounded quantity, and no single constant
+# serves both a marker that moves 5x and a body-fat percentage that never will (§4.13).
+
 #: Days each compared side of a level shift must span. A one-day observation has no *level*,
 #: which is why day-to-day noise in live logging can never produce a shift.
 MIN_SPAN_DAYS = 7
@@ -79,9 +81,6 @@ CONCURRENCY_DAYS = 3
 #: and a supplement started the same week are one decision, and counting them twice would
 #: understate attribution twice over.
 MIN_INTERVENTION_GAP_DAYS = 3
-
-#: Guards the effect denominator when a baseline is zero.
-EFFECT_EPSILON = 1e-9
 
 #: Value equality when collapsing. Absorbs float noise without merging genuinely different
 #: levels — the values compared here come from one payload table, so they are normally
@@ -231,9 +230,14 @@ def pattern_strength(effect: float, coverage: float, specificity: float) -> floa
     return effect * coverage * specificity
 
 
-def _effect(pre: float, post: float) -> float:
-    """Relative change against the baseline, capped at 1 (§4.13)."""
-    return min(1.0, abs(post - pre) / max(abs(pre), EFFECT_EPSILON))
+def _effect(pre: float, post: float, scale: EffectScale) -> float:
+    """The share of a full-size change this move represents (§4.13).
+
+    Against the series' own ``full_delta`` rather than the baseline, so the number means the
+    same thing in every series: a 3.2-point body-fat drop and a 32 ng/mL vitamin D rise are
+    both real, and a relative denominator would score the first at 0.08 and the second at 1.0.
+    """
+    return scale.effect(post - pre)
 
 
 # ── collapse (§4.2) ────────────────────────────────────────────────────────────────────
@@ -302,10 +306,14 @@ def detect_level_shifts(
     *,
     metric: str,
     tz: str,
-    min_effect: float = MIN_EFFECT,
+    scale: EffectScale,
     min_span_days: int = MIN_SPAN_DAYS,
 ) -> list[Finding]:
     """Where a metric's level moved between adjacent observations, and stayed moved.
+
+    ``scale`` is required, not defaulted: how big a change has to be is a property of the
+    series, and a detector that guessed it would be inventing the one judgment this argument
+    exists to make explicit.
 
     Each compared side must span ``min_span_days`` (**I-22**). That is what keeps this honest
     on live data: a single logged day has no level, so day-to-day variation can never produce a
@@ -332,15 +340,16 @@ def detect_level_shifts(
                 f"span {pre_span}/{post_span}d at {post.start.date()} below {min_span_days}d",
             )
             continue
-        effect = _effect(pre.value, post.value)
-        if effect < min_effect:
+        delta = post.value - pre.value
+        if not scale.gates(delta):
             _refuse(
                 "level_shift",
                 metric,
-                f"effect {effect:.3f} at {post.start.date()} below {min_effect}",
+                f"change {abs(delta):g} at {post.start.date()} below the "
+                f"{scale.min_delta:g} noise floor",
             )
             continue
-        candidates.append((pre, post, effect))
+        candidates.append((pre, post, _effect(pre.value, post.value, scale)))
 
     boundaries = [post.start for _, post, _ in candidates]
     findings: list[Finding] = []
@@ -391,8 +400,8 @@ def detect_intervention_outcomes(
     *,
     metric: str,
     tz: str,
+    scale: EffectScale,
     behavioural_dates: Collection[date] = (),
-    min_effect: float = MIN_EFFECT,
     min_interval_days: int = MIN_INTERVAL_DAYS,
     min_measurements: int = MIN_MEASUREMENTS,
     min_interventions: int = MIN_INTERVENTIONS,
@@ -406,6 +415,10 @@ def detect_intervention_outcomes(
     the set of interventions inside it — local and defensible. First-to-last would sweep every
     intervention the account has ever seen into one claim and drive specificity toward zero as
     a user's history grows, which is the wrong answer getting more wrong over time.
+
+    ``scale`` is required for the same reason as on the other detector: a marker's noise
+    floor is a property of how it is measured, and body composition and a blood marker do not
+    share one.
 
     ``coverage`` asks whether the engine was actually watching during the interval: the
     fraction of its days on which any behavioural memory exists. A marker that moved while the
@@ -432,10 +445,15 @@ def detect_intervention_outcomes(
         )
         return []
 
-    effect = _effect(earlier.value, later.value)
-    if effect < min_effect:
-        _refuse("intervention_outcome", metric, f"effect {effect:.3f} below {min_effect}")
+    delta = later.value - earlier.value
+    if not scale.gates(delta):
+        _refuse(
+            "intervention_outcome",
+            metric,
+            f"change {abs(delta):g} below the {scale.min_delta:g} noise floor",
+        )
         return []
+    effect = _effect(earlier.value, later.value, scale)
 
     inside = [i for i in interventions if earlier.end < i.at <= later.start]
     merged = _merge_interventions(inside, zone)

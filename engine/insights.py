@@ -33,6 +33,7 @@ from engine.types import (
     INSIGHT_KINDS,
     MAX_EVIDENCE_IDS,
     SERIES_KINDS,
+    EffectScale,
     RetractionCondition,
 )
 
@@ -40,6 +41,7 @@ __all__ = [
     "SeriesDef",
     "SeriesKey",
     "CONSOLIDATION_SERIES",
+    "EffectScale",
     "INSIGHT_KINDS",
     "SERIES_KINDS",
     "MAX_EVIDENCE_IDS",
@@ -60,8 +62,13 @@ class UnknownSeries(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class SeriesDef:
-    """One consolidatable series: what it is about, which detector may run on it, and how to
-    say its name and unit in prose.
+    """One consolidatable series: what it is about, which detector may run on it, how big a
+    change has to be, and how to say its name and unit in prose.
+
+    ``scale`` is required (**I-24**): a series with no declared ``EffectScale`` cannot be
+    consolidated, because there would be no units-bearing answer to "is this change big enough
+    to mention" — and the relative fallback that question used to have is exactly what this
+    field replaced.
 
     ``label``/``unit`` exist for ``render_retraction_condition`` and the Phase 6 UI. They are
     display strings only — nothing deterministic ever branches on them.
@@ -71,6 +78,7 @@ class SeriesDef:
     detector: Literal["level_shift", "intervention_outcome"]
     label: str
     unit: str
+    scale: EffectScale
 
 
 #: The closed vocabulary of series consolidation may run on (**I-9**) — a strict *subset* of
@@ -82,21 +90,71 @@ class SeriesDef:
 #: Which detector each series gets follows from how it is measured, not from preference
 #: (§4.1): behaviours are logged densely enough to have a *level*, outcomes are measured
 #: sparsely and only support a before/after statement.
+#: **The calibration table.** Every ``EffectScale`` below is a **product heuristic, not a
+#: clinical threshold** (ADR-13.12, **I-2**): it states what *this application* treats as a
+#: change worth mentioning and as a full-size change. ``min_delta`` is anchored to how noisy the
+#: measurement is, ``full_delta`` to the size of change a person would describe as real. Each
+#: carries its basis inline, because a calibration constant without a stated reason is a magic
+#: number, and changing one is a reviewed product judgment rather than a tuning exercise.
 CONSOLIDATION_SERIES: dict[str, SeriesDef] = {
     # ── behavioural: things the user does, logged densely ─────────────────────────────
-    "protein_g": SeriesDef("behavioural", "level_shift", "protein", "g/day"),
-    "sleep_hours": SeriesDef("behavioural", "level_shift", "sleep", "h/night"),
+    "protein_g": SeriesDef(
+        "behavioural", "level_shift", "protein", "g/day",
+        # 5 g/day is below one egg (~6 g), so anything smaller is logging noise.
+        # 30 g/day ≈ 0.5 g/kg bodyweight — a whole dietary-strategy step, which is why the
+        # account's real 45 → 83 shift caps at a full 1.0.
+        EffectScale(min_delta=5.0, full_delta=30.0),
+    ),
+    "sleep_hours": SeriesDef(
+        "behavioural", "level_shift", "sleep", "h/night",
+        # Self-reported sleep rounds to the half hour; 1.5 h is the gap between a 6 h and a
+        # 7.5 h night.
+        EffectScale(min_delta=0.5, full_delta=1.5),
+    ),
     # ── outcome: things the user measures, sparsely ───────────────────────────────────
-    "body_fat_pct": SeriesDef("outcome", "intervention_outcome", "body fat", "%"),
-    "weight_kg": SeriesDef("outcome", "intervention_outcome", "weight", "kg"),
+    "body_fat_pct": SeriesDef(
+        "outcome", "intervention_outcome", "body fat", "%",
+        # BIA scales vary ±1–2 points with hydration — the account's own body-scan payload
+        # carries exactly that caveat, so 1.5 points is the honest noise floor. 8 points is a
+        # visible change in body composition.
+        EffectScale(min_delta=1.5, full_delta=8.0),
+    ),
+    "weight_kg": SeriesDef(
+        "outcome", "intervention_outcome", "weight", "kg",
+        # 1.5 kg is day-to-day water and food fluctuation; 8 kg is ≈10% of adult bodyweight.
+        EffectScale(min_delta=1.5, full_delta=8.0),
+    ),
     # blood markers (§4.5) — curated by hand so the vocabulary stays closed even though
     # BloodReportPayload.markers is an open dict. Units are baked into the key, matching the
-    # qty_g / duration_min convention the extraction prompt already teaches.
-    "vitamin_d_ng_ml": SeriesDef("outcome", "intervention_outcome", "vitamin D", "ng/mL"),
-    "vitamin_b12_pg_ml": SeriesDef("outcome", "intervention_outcome", "vitamin B12", "pg/mL"),
-    "ferritin_ng_ml": SeriesDef("outcome", "intervention_outcome", "ferritin", "ng/mL"),
-    "ldl_mg_dl": SeriesDef("outcome", "intervention_outcome", "LDL cholesterol", "mg/dL"),
-    "hba1c_pct": SeriesDef("outcome", "intervention_outcome", "HbA1c", "%"),
+    # qty_g / duration_min convention the extraction prompt already teaches. Every min_delta
+    # here is assay variability plus reporting rounding; every full_delta is the span between
+    # the two states a person would name.
+    "vitamin_d_ng_ml": SeriesDef(
+        "outcome", "intervention_outcome", "vitamin D", "ng/mL",
+        # 20 ng/mL is roughly deficient → sufficient; the account's 6.2 → 38.4 exceeds it and
+        # therefore caps.
+        EffectScale(min_delta=5.0, full_delta=20.0),
+    ),
+    "vitamin_b12_pg_ml": SeriesDef(
+        "outcome", "intervention_outcome", "vitamin B12", "pg/mL",
+        # ~300 spans low (~150) to comfortably normal.
+        EffectScale(min_delta=50.0, full_delta=300.0),
+    ),
+    "ferritin_ng_ml": SeriesDef(
+        "outcome", "intervention_outcome", "ferritin", "ng/mL",
+        # Ferritin also swings with inflammation day to day, hence the wider floor.
+        EffectScale(min_delta=15.0, full_delta=60.0),
+    ),
+    "ldl_mg_dl": SeriesDef(
+        "outcome", "intervention_outcome", "LDL cholesterol", "mg/dL",
+        # 40 mg/dL is one treatment-response step.
+        EffectScale(min_delta=10.0, full_delta=40.0),
+    ),
+    "hba1c_pct": SeriesDef(
+        "outcome", "intervention_outcome", "HbA1c", "%",
+        # Assay precision is commonly ±0.2–0.3; one full percentage point is a full-size move.
+        EffectScale(min_delta=0.3, full_delta=1.0),
+    ),
 }
 
 
@@ -142,6 +200,11 @@ class SeriesKey:
     @property
     def detector(self) -> str:
         return self.definition.detector
+
+    @property
+    def scale(self) -> EffectScale:
+        """The series' units-bearing change scale — what a detector needs to gate and score."""
+        return self.definition.scale
 
     def __str__(self) -> str:
         return f"{self.kind}:{self.metric}"

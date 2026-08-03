@@ -286,7 +286,15 @@ earlier ADRs or docs.
     gaps left missing (never interpolated), the documented formula published *with its three
     components*, and "labeled hypothesis, never probability or causal inference" — plus a new
     minimum-evidence rule under which a detector that cannot clear its thresholds **emits
-    nothing**. Full rationale and rejected alternatives:
+    nothing**. **Further amended 2026-08-04:** the *effect* factor is measured against a
+    **per-series scale in the metric's own units**, not as a relative change against the
+    baseline. Implementation showed a single relative floor cannot serve both a marker that
+    moves multiples (vitamin D 6.2 → 38.4) and a physiologically bounded quantity — it refused
+    every clinically meaningful body-composition and weight change outright. Each consolidatable
+    series now declares `min_delta` (the noise floor, which gates) and `full_delta` (a full-size
+    change, which is `effect`'s denominator); these are **product heuristics with a stated
+    basis, never clinical thresholds**, which is the same honesty line that keeps a pattern
+    strength from being called a probability. Full rationale and rejected alternatives:
     [../engineering/consolidation-architecture.md §4.1–§4.3, §4.13, §4.15](../engineering/consolidation-architecture.md).
 13. **Citation validation scope (honest claim):** mechanical validation guarantees citations
     resolve to real evidence in the turn's trace; **numeric/directional fidelity of prose is

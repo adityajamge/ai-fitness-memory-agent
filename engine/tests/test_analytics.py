@@ -29,7 +29,6 @@ import pytest
 
 from engine.analytics import (
     CONCURRENCY_DAYS,
-    MIN_EFFECT,
     MIN_INTERVAL_DAYS,
     MIN_SPAN_DAYS,
     Finding,
@@ -41,6 +40,7 @@ from engine.analytics import (
     detect_level_shifts,
     pattern_strength,
 )
+from engine.insights import CONSOLIDATION_SERIES
 from engine.tests.fixtures import (
     TZ,
     protein_days,
@@ -48,10 +48,16 @@ from engine.tests.fixtures import (
     vitamin_d_interventions,
     vitamin_d_measurements,
 )
-from engine.types import MAX_EVIDENCE_IDS
+from engine.types import MAX_EVIDENCE_IDS, EffectScale
 
 IST = ZoneInfo(TZ)
 UTC = timezone.utc
+
+# The real calibration, not a test-local invention: detectors are exercised with the scales
+# the product actually ships (I-24).
+PROTEIN = CONSOLIDATION_SERIES["protein_g"].scale
+VITD = CONSOLIDATION_SERIES["vitamin_d_ng_ml"].scale
+BODYFAT = CONSOLIDATION_SERIES["body_fat_pct"].scale
 
 
 def _sample(day: str, value: float, *, composition=None, assertion=None, mid=None) -> MetricSample:
@@ -122,7 +128,9 @@ def test_one_composition_carrying_two_levels_is_two_observations():
 def test_the_real_series_yields_its_three_level_shifts_with_pinned_components():
     """The numeric contract. If §4.13's arithmetic changes, this fails before a walkthrough
     does."""
-    findings = detect_level_shifts(collapse(protein_series(), tz=TZ), metric="protein_g", tz=TZ)
+    findings = detect_level_shifts(
+        collapse(protein_series(), tz=TZ), metric="protein_g", tz=TZ, scale=PROTEIN
+    )
 
     assert [(f.pre_value, f.post_value) for f in findings] == [
         (31.0, 36.0),
@@ -134,14 +142,16 @@ def test_the_real_series_yields_its_three_level_shifts_with_pinned_components():
         "2026-06-15",
         "2026-06-23",
     ]
-    assert [round(f.effect, 3) for f in findings] == [0.161, 0.25, 0.844]
+    # Against protein's 30 g/day full-size step: 5 -> 0.167, 9 -> 0.300, and the 38 g/day
+    # jump exceeds a whole dietary-strategy change, so it caps at 1.0.
+    assert [round(f.effect, 3) for f in findings] == [0.167, 0.3, 1.0]
     # Every day of every compared window carries a row (the expansion materialized them), so
     # coverage is 1.0 — the honesty signal for expanded data is confidence + expanded_from
     # (ADR-15.4), deliberately not a second discount here.
     assert [f.coverage for f in findings] == [1.0, 1.0, 1.0]
     # The three boundaries are >3 days apart, so each shift stands alone in its own series.
     assert [f.specificity for f in findings] == [1.0, 1.0, 1.0]
-    assert [round(f.pattern_strength, 3) for f in findings] == [0.161, 0.25, 0.844]
+    assert [round(f.pattern_strength, 3) for f in findings] == [0.167, 0.3, 1.0]
 
 
 def test_the_real_vitamin_d_pair_yields_one_intervention_outcome():
@@ -153,6 +163,7 @@ def test_the_real_vitamin_d_pair_yields_one_intervention_outcome():
         vitamin_d_interventions(),
         metric="vitamin_d_ng_ml",
         tz=TZ,
+        scale=VITD,
         behavioural_dates=protein_days(),
     )
 
@@ -176,6 +187,7 @@ def test_the_real_vitamin_d_claim_stays_a_hypothesis():
         vitamin_d_interventions(),
         metric="vitamin_d_ng_ml",
         tz=TZ,
+        scale=VITD,
         behavioural_dates=protein_days(),
     )
     assert findings[0].effect == 1.0
@@ -191,6 +203,7 @@ def _body_fat_beat(post: float) -> list[Finding]:
                       at=datetime(2026, 6, 23, tzinfo=UTC), kind="level_shift")],
         metric="body_fat_pct",
         tz=TZ,
+        scale=BODYFAT,
         behavioural_dates={datetime(2026, 6, 20).date() + timedelta(days=i) for i in range(44)},
     )
 
@@ -204,20 +217,18 @@ def test_a_single_clean_intervention_scores_high():
     assert findings[0].pattern_strength > 0.05
 
 
-def test_a_realistic_body_fat_move_is_refused_by_the_global_effect_floor():
-    """**Known tension, pinned deliberately** (reported at M2, not silently worked around).
+def test_a_real_body_fat_move_produces_an_insight_while_scale_noise_does_not():
+    """The regression this scale exists for. Under the old single *relative* floor a 3.2-point
+    body-fat drop scored 0.082 and was refused outright, while nothing stopped a 0.8-point BIA
+    wobble from qualifying on a series that happened to sit near zero.
 
-    ``MIN_EFFECT`` is a *relative* floor applied to every series, and 0.15 is calibrated for
-    markers that move multiples (vitamin D went 6.2 -> 38.4, a 5.2x move). Body composition and
-    weight do not move that way: a 3.2-point body-fat drop in six weeks is a large real change
-    and only 8% relative, so it is refused. Weight is worse — a 3 kg loss is 4%.
+    Against body fat's own scale — 1.5 points of noise, 8 points of full-size change — a real
+    six-week drop scores 0.40 and a hydration swing is silent."""
+    real = _body_fat_beat(36.0)  # 3.2 points
+    assert len(real) == 1
+    assert round(real[0].effect, 3) == 0.4
 
-    The threshold is §4.15's locked value and is left exactly as approved. This test exists so
-    the consequence is visible in the suite rather than discovered on camera, and it must be
-    revisited (per-series floors are the obvious fix) before M3 persists outcome insights.
-    """
-    assert _body_fat_beat(36.0) == []  # 39.2 -> 36.0 is 8.2% relative
-    assert _body_fat_beat(33.3) != []  # 15.1% — only an implausibly large drop clears the bar
+    assert _body_fat_beat(38.4) == []  # 0.8 points — inside BIA's own variability
 
 
 # ══ collapse (§4.2) ════════════════════════════════════════════════════════════════════
@@ -272,15 +283,16 @@ def test_collapse_of_nothing_is_nothing():
 def test_a_series_without_a_shift_yields_nothing():
     """The negative half of the contract — a flat series must produce silence."""
     observations = [_obs("2026-05-01", 30, 50.0), _obs("2026-06-01", 30, 50.5)]
-    assert detect_level_shifts(observations, metric="protein_g", tz=TZ) == []
+    assert detect_level_shifts(observations, metric="protein_g", tz=TZ, scale=PROTEIN) == []
 
 
-def test_a_change_below_the_effect_floor_is_refused_with_a_reason(caplog):
-    """I-22. Silence with a recorded reason is a result; silence without one is a bug."""
-    observations = [_obs("2026-05-01", 30, 100.0), _obs("2026-06-01", 30, 110.0)]
+def test_a_change_below_the_noise_floor_is_refused_with_a_reason(caplog):
+    """I-22. Silence with a recorded reason is a result; silence without one is a bug — and the
+    reason is now stated in the metric's own units, which is what makes it explainable."""
+    observations = [_obs("2026-05-01", 30, 100.0), _obs("2026-06-01", 30, 103.0)]  # 3 g/day
     with caplog.at_level(logging.DEBUG, logger="engine.analytics"):
-        assert detect_level_shifts(observations, metric="protein_g", tz=TZ) == []
-    assert "effect" in caplog.text and "below" in caplog.text
+        assert detect_level_shifts(observations, metric="protein_g", tz=TZ, scale=PROTEIN) == []
+    assert "noise floor" in caplog.text
 
 
 def test_short_spans_cannot_produce_a_level_shift(caplog):
@@ -288,21 +300,29 @@ def test_short_spans_cannot_produce_a_level_shift(caplog):
     become a claim — the reason live data routes to the other detector."""
     observations = [_obs("2026-05-01", 1, 40.0), _obs("2026-05-02", 1, 90.0)]
     with caplog.at_level(logging.DEBUG, logger="engine.analytics"):
-        assert detect_level_shifts(observations, metric="protein_g", tz=TZ) == []
+        assert detect_level_shifts(observations, metric="protein_g", tz=TZ, scale=PROTEIN) == []
     assert "span" in caplog.text
 
 
 def test_span_threshold_is_applied_to_both_sides():
     long_side = _obs("2026-05-01", 30, 40.0)
     short_side = _obs("2026-06-01", MIN_SPAN_DAYS - 1, 90.0)
-    assert detect_level_shifts([long_side, short_side], metric="protein_g", tz=TZ) == []
+    assert (
+        detect_level_shifts([long_side, short_side], metric="protein_g", tz=TZ, scale=PROTEIN)
+        == []
+    )
     ok = _obs("2026-06-01", MIN_SPAN_DAYS, 90.0)
-    assert len(detect_level_shifts([long_side, ok], metric="protein_g", tz=TZ)) == 1
+    assert len(detect_level_shifts([long_side, ok], metric="protein_g", tz=TZ, scale=PROTEIN)) == 1
 
 
 def test_a_single_observation_yields_nothing(caplog):
     with caplog.at_level(logging.DEBUG, logger="engine.analytics"):
-        assert detect_level_shifts([_obs("2026-05-01", 30, 40.0)], metric="protein_g", tz=TZ) == []
+        assert (
+            detect_level_shifts(
+                [_obs("2026-05-01", 30, 40.0)], metric="protein_g", tz=TZ, scale=PROTEIN
+            )
+            == []
+        )
     assert "need 2" in caplog.text
 
 
@@ -314,26 +334,28 @@ def test_concurrent_shifts_reduce_each_other_specificity():
         _obs("2026-05-21", 10, 90.0),
     ]
     findings = detect_level_shifts(
-        observations, metric="protein_g", tz=TZ, min_span_days=CONCURRENCY_DAYS
+        observations, metric="protein_g", tz=TZ, scale=PROTEIN, min_span_days=CONCURRENCY_DAYS
     )
     assert [f.specificity for f in findings] == [1.0, 1.0]  # 10 days apart: independent
 
     tight = [
         _obs("2026-05-01", 10, 40.0), _obs("2026-05-11", 3, 60.0), _obs("2026-05-14", 10, 90.0)
     ]
-    findings = detect_level_shifts(tight, metric="protein_g", tz=TZ, min_span_days=3)
+    findings = detect_level_shifts(tight, metric="protein_g", tz=TZ, scale=PROTEIN, min_span_days=3)
     assert [f.specificity for f in findings] == [0.5, 0.5]
 
 
 def test_sparse_coverage_lowers_the_score():
     """A stretch logged half the time supports half the claim."""
     dense = detect_level_shifts(
-        [_obs("2026-05-01", 30, 40.0), _obs("2026-06-01", 30, 90.0)], metric="protein_g", tz=TZ
+        [_obs("2026-05-01", 30, 40.0), _obs("2026-06-01", 30, 90.0)],
+        metric="protein_g", tz=TZ, scale=PROTEIN,
     )[0]
     sparse = detect_level_shifts(
         [_obs("2026-05-01", 30, 40.0, covered=15), _obs("2026-06-01", 30, 90.0, covered=15)],
         metric="protein_g",
         tz=TZ,
+        scale=PROTEIN,
     )[0]
     assert dense.coverage == 1.0
     assert sparse.coverage == 0.5
@@ -342,7 +364,8 @@ def test_sparse_coverage_lowers_the_score():
 
 def test_a_drop_is_as_detectable_as_a_rise():
     findings = detect_level_shifts(
-        [_obs("2026-05-01", 30, 90.0), _obs("2026-06-01", 30, 40.0)], metric="protein_g", tz=TZ
+        [_obs("2026-05-01", 30, 90.0), _obs("2026-06-01", 30, 40.0)],
+        metric="protein_g", tz=TZ, scale=PROTEIN,
     )
     assert len(findings) == 1
     assert findings[0].post_value < findings[0].pre_value
@@ -364,7 +387,7 @@ def test_one_measurement_yields_nothing(caplog):
     with caplog.at_level(logging.DEBUG, logger="engine.analytics"):
         assert detect_intervention_outcomes(
             _measurements(("2026-05-01", 10.0)), [_intervention("2026-05-10")],
-            metric="vitamin_d_ng_ml", tz=TZ,
+            metric="vitamin_d_ng_ml", tz=TZ, scale=VITD,
         ) == []
     assert "measurement" in caplog.text
 
@@ -375,7 +398,7 @@ def test_a_too_short_interval_yields_nothing(caplog):
         assert detect_intervention_outcomes(
             _measurements(("2026-05-01", 10.0), ("2026-05-05", 30.0)),
             [_intervention("2026-05-02")],
-            metric="vitamin_d_ng_ml", tz=TZ,
+            metric="vitamin_d_ng_ml", tz=TZ, scale=VITD,
         ) == []
     assert "interval" in caplog.text
 
@@ -387,7 +410,7 @@ def test_no_intervention_inside_the_interval_yields_nothing(caplog):
         assert detect_intervention_outcomes(
             _measurements(("2026-03-25", 6.2), ("2026-07-03", 38.4)),
             [_intervention("2026-01-01")],  # outside
-            metric="vitamin_d_ng_ml", tz=TZ, behavioural_dates=protein_days(),
+            metric="vitamin_d_ng_ml", tz=TZ, scale=VITD, behavioural_dates=protein_days(),
         ) == []
     assert "no intervention" in caplog.text
 
@@ -398,7 +421,7 @@ def test_the_compared_pair_is_the_two_most_recent_measurements():
     findings = detect_intervention_outcomes(
         _measurements(("2026-01-01", 5.0), ("2026-03-25", 6.2), ("2026-07-03", 38.4)),
         [_intervention("2026-03-28")],
-        metric="vitamin_d_ng_ml", tz=TZ, behavioural_dates=protein_days(),
+        metric="vitamin_d_ng_ml", tz=TZ, scale=VITD, behavioural_dates=protein_days(),
     )
     assert (findings[0].pre_value, findings[0].post_value) == (6.2, 38.4)
 
@@ -410,9 +433,11 @@ def test_interventions_on_adjacent_days_merge_into_one_explanation():
     apart = [_intervention("2026-04-01", "a"), _intervention("2026-05-01", "b")]
     together = [_intervention("2026-04-01", "a"), _intervention("2026-04-02", "b")]
 
-    assert detect_intervention_outcomes(measurements, apart, metric="vitamin_d_ng_ml", tz=TZ,
+    assert detect_intervention_outcomes(measurements, apart, metric="vitamin_d_ng_ml",
+                                        tz=TZ, scale=VITD,
                                         behavioural_dates=protein_days())[0].specificity == 0.5
-    assert detect_intervention_outcomes(measurements, together, metric="vitamin_d_ng_ml", tz=TZ,
+    assert detect_intervention_outcomes(measurements, together, metric="vitamin_d_ng_ml",
+                                        tz=TZ, scale=VITD,
                                         behavioural_dates=protein_days())[0].specificity == 1.0
 
 
@@ -421,7 +446,7 @@ def test_zero_behavioural_coverage_drives_the_score_to_zero():
     findings = detect_intervention_outcomes(
         _measurements(("2026-03-25", 6.2), ("2026-07-03", 38.4)),
         [_intervention("2026-04-01")],
-        metric="vitamin_d_ng_ml", tz=TZ, behavioural_dates=set(),
+        metric="vitamin_d_ng_ml", tz=TZ, scale=VITD, behavioural_dates=set(),
     )
     assert findings[0].coverage == 0.0
     assert findings[0].pattern_strength == 0.0
@@ -433,14 +458,16 @@ def test_interventions_outside_the_interval_are_excluded():
         measurements,
         [_intervention("2026-03-01", "before"), _intervention("2026-04-01", "inside"),
          _intervention("2026-08-01", "after")],
-        metric="vitamin_d_ng_ml", tz=TZ, behavioural_dates=protein_days(),
+        metric="vitamin_d_ng_ml", tz=TZ, scale=VITD, behavioural_dates=protein_days(),
     )
     assert findings[0].intervention_ids == ("inside",)
 
 
 def test_level_shift_findings_convert_into_interventions():
     """§4.4's bridge: a detected shift is a structural change the outcome detector can cite."""
-    shift = detect_level_shifts(collapse(protein_series(), tz=TZ), metric="protein_g", tz=TZ)[-1]
+    shift = detect_level_shifts(
+        collapse(protein_series(), tz=TZ), metric="protein_g", tz=TZ, scale=PROTEIN
+    )[-1]
     intervention = Intervention.from_level_shift(shift)
     assert intervention.kind == "level_shift"
     assert intervention.ident == "level_shift:protein_g:2026-06-23"
@@ -466,11 +493,11 @@ def test_every_finding_publishes_components_that_explain_its_score():
     """I-19, across everything the kernel can emit — the same identity M1's payload validator
     re-checks before anything is persisted."""
     findings: list[Finding] = detect_level_shifts(
-        collapse(protein_series(), tz=TZ), metric="protein_g", tz=TZ
+        collapse(protein_series(), tz=TZ), metric="protein_g", tz=TZ, scale=PROTEIN
     )
     findings += detect_intervention_outcomes(
         collapse(vitamin_d_measurements(), tz=TZ), vitamin_d_interventions(),
-        metric="vitamin_d_ng_ml", tz=TZ, behavioural_dates=protein_days(),
+        metric="vitamin_d_ng_ml", tz=TZ, scale=VITD, behavioural_dates=protein_days(),
     )
     assert findings
     for f in findings:
@@ -480,7 +507,8 @@ def test_every_finding_publishes_components_that_explain_its_score():
 
 def test_effect_is_capped_and_survives_a_zero_baseline():
     findings = detect_level_shifts(
-        [_obs("2026-05-01", 30, 0.0), _obs("2026-06-01", 30, 50.0)], metric="protein_g", tz=TZ
+        [_obs("2026-05-01", 30, 0.0), _obs("2026-06-01", 30, 50.0)],
+        metric="protein_g", tz=TZ, scale=PROTEIN,
     )
     assert findings[0].effect == 1.0
 
@@ -494,7 +522,7 @@ def test_lineage_is_capped_while_the_count_stays_true():
     ]
     findings = detect_intervention_outcomes(
         _measurements(("2026-03-25", 6.2), ("2026-07-03", 38.4)), interventions,
-        metric="vitamin_d_ng_ml", tz=TZ, behavioural_dates=protein_days(),
+        metric="vitamin_d_ng_ml", tz=TZ, scale=VITD, behavioural_dates=protein_days(),
     )
     assert len(findings[0].evidence_ids) == MAX_EVIDENCE_IDS
     assert findings[0].evidence_count > MAX_EVIDENCE_IDS
@@ -516,8 +544,12 @@ def test_perturbing_every_text_field_changes_no_number():
     reworded = [
         dataclasses.replace(s, assertion="TOTALLY DIFFERENT PROSE " * 3) for s in samples
     ]
-    baseline = detect_level_shifts(collapse(samples, tz=TZ), metric="protein_g", tz=TZ)
-    perturbed = detect_level_shifts(collapse(reworded, tz=TZ), metric="protein_g", tz=TZ)
+    baseline = detect_level_shifts(
+        collapse(samples, tz=TZ), metric="protein_g", tz=TZ, scale=PROTEIN
+    )
+    perturbed = detect_level_shifts(
+        collapse(reworded, tz=TZ), metric="protein_g", tz=TZ, scale=PROTEIN
+    )
 
     def numeric(f):
         return (f.pre_value, f.post_value, f.effect, f.coverage, f.specificity,
@@ -529,9 +561,10 @@ def test_perturbing_every_text_field_changes_no_number():
                 for i in vitamin_d_interventions()]
     measurements = collapse(vitamin_d_measurements(), tz=TZ)
     a = detect_intervention_outcomes(measurements, vitamin_d_interventions(),
-                                     metric="vitamin_d_ng_ml", tz=TZ,
+                                     metric="vitamin_d_ng_ml", tz=TZ, scale=VITD,
                                      behavioural_dates=protein_days())
-    b = detect_intervention_outcomes(measurements, labelled, metric="vitamin_d_ng_ml", tz=TZ,
+    b = detect_intervention_outcomes(measurements, labelled, metric="vitamin_d_ng_ml",
+                                     tz=TZ, scale=VITD,
                                      behavioural_dates=protein_days())
     assert numeric(a[0]) == numeric(b[0])
 
@@ -539,8 +572,8 @@ def test_perturbing_every_text_field_changes_no_number():
 def test_detectors_are_deterministic():
     """I-7: same inputs, same findings, every time."""
     observations = collapse(protein_series(), tz=TZ)
-    first = detect_level_shifts(observations, metric="protein_g", tz=TZ)
-    second = detect_level_shifts(observations, metric="protein_g", tz=TZ)
+    first = detect_level_shifts(observations, metric="protein_g", tz=TZ, scale=PROTEIN)
+    second = detect_level_shifts(observations, metric="protein_g", tz=TZ, scale=PROTEIN)
     assert first == second
 
 
@@ -548,7 +581,7 @@ def test_detectors_do_not_mutate_their_inputs():
     samples = protein_series()
     snapshot = list(samples)
     observations = collapse(samples, tz=TZ)
-    detect_level_shifts(observations, metric="protein_g", tz=TZ)
+    detect_level_shifts(observations, metric="protein_g", tz=TZ, scale=PROTEIN)
     assert samples == snapshot
 
 
@@ -568,4 +601,37 @@ def test_bucketing_uses_the_supplied_timezone():
 
 def test_thresholds_are_module_constants_not_magic():
     """A threshold nobody can look up is a threshold nobody can audit."""
-    assert (MIN_EFFECT, MIN_SPAN_DAYS, MIN_INTERVAL_DAYS, CONCURRENCY_DAYS) == (0.15, 7, 14, 3)
+    assert (MIN_SPAN_DAYS, MIN_INTERVAL_DAYS, CONCURRENCY_DAYS) == (7, 14, 3)
+
+
+def test_there_is_no_global_effect_floor_left():
+    """I-24. How big a change has to be is a property of the series, not of the module — the
+    whole point of the scale. A reintroduced global constant would silently re-break body
+    composition."""
+    import engine.analytics as analytics
+
+    assert not hasattr(analytics, "MIN_EFFECT")
+    assert not hasattr(analytics, "EFFECT_EPSILON")
+
+
+def test_every_series_ships_a_usable_scale():
+    """I-24: a series with no declared scale cannot be consolidated at all."""
+    for metric, definition in CONSOLIDATION_SERIES.items():
+        assert isinstance(definition.scale, EffectScale), metric
+        assert 0 < definition.scale.min_delta <= definition.scale.full_delta, metric
+
+
+def test_a_scale_cannot_be_incoherent():
+    with pytest.raises(ValueError, match="positive"):
+        EffectScale(min_delta=0.0, full_delta=10.0)
+    with pytest.raises(ValueError, match="below min_delta"):
+        EffectScale(min_delta=10.0, full_delta=1.0)
+
+
+def test_effect_is_comparable_across_series():
+    """The property a relative denominator could not give: a real change in a bounded metric
+    and a real change in one that moves multiples both score as real."""
+    body_fat = BODYFAT.effect(-3.2)
+    vitamin_d = VITD.effect(32.2)
+    assert body_fat > 0.15  # would have been 0.082 under a relative denominator
+    assert vitamin_d == 1.0

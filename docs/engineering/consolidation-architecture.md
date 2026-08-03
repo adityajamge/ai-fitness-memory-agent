@@ -284,13 +284,21 @@ edit.
 `metric` names an entry in a new closed vocabulary `CONSOLIDATION_SERIES`, a **subset** of
 `engine/retrieval.METRICS`:
 
-| Metric | Kind | Detector | Notes |
-|---|---|---|---|
-| `protein_g` | behavioural | `level_shift` | the account's one dense series |
-| `body_fat_pct` | outcome | `intervention_outcome` | scans are sparse |
-| `weight_kg` | outcome | `intervention_outcome` | |
-| `sleep_hours` | behavioural | `level_shift` | dormant today, correct when live-logged |
-| `vitamin_d_ng_ml`, `vitamin_b12_pg_ml`, `ferritin_ng_ml`, `ldl_mg_dl`, `hba1c_pct` | outcome | `intervention_outcome` | §4.5 |
+Each entry also declares an **`EffectScale`** — `min_delta` (noise floor) and `full_delta`
+(full-size change), both in the metric's own units (§4.13 amendment). The values below are
+product heuristics with their basis recorded beside them in `engine/insights.py`.
+
+| Metric | Kind | Detector | `min_delta` | `full_delta` | Notes |
+|---|---|---|---|---|---|
+| `protein_g` | behavioural | `level_shift` | 5 g/day | 30 g/day | the account's one dense series |
+| `sleep_hours` | behavioural | `level_shift` | 0.5 h | 1.5 h | dormant today, correct when live-logged |
+| `body_fat_pct` | outcome | `intervention_outcome` | 1.5 pts | 8 pts | scans are sparse; BIA varies ±1–2 pts |
+| `weight_kg` | outcome | `intervention_outcome` | 1.5 kg | 8 kg | |
+| `vitamin_d_ng_ml` | outcome | `intervention_outcome` | 5 | 20 | §4.5 |
+| `vitamin_b12_pg_ml` | outcome | `intervention_outcome` | 50 | 300 | §4.5 |
+| `ferritin_ng_ml` | outcome | `intervention_outcome` | 15 | 60 | §4.5 |
+| `ldl_mg_dl` | outcome | `intervention_outcome` | 10 | 40 | §4.5 |
+| `hba1c_pct` | outcome | `intervention_outcome` | 0.3 | 1.0 | §4.5 |
 
 A meal therefore touches **one** series (`protein_g`), not four — carbs/fat/kcal stay aggregatable
 but are not consolidatable. This is the primary defence of the time budget (§4.8).
@@ -630,12 +638,39 @@ pattern_strength = effect × coverage × specificity
 
 | Factor | `level_shift` | `intervention_outcome` |
 |---|---|---|
-| **effect** | `min(1, |post − pre| / max(|pre|, ε))` | same, over the two measurements |
+| **effect** | `min(1, |post − pre| / full_delta)` | same, over the two measurements |
 | **coverage** | fraction of the compared windows' days holding ≥1 contributing memory | fraction of the interval's days holding ≥1 behavioural memory |
 | **specificity** | `1 / n_concurrent`, where `n_concurrent` counts other detected changes within ±`CONCURRENCY_DAYS` (3) | `1 / n_interventions` in the interval, after merging interventions closer than `MIN_INTERVENTION_GAP_DAYS` |
 
 All three components are **stored on the insight and rendered by the UI**, so the arithmetic is
 inspectable rather than a bare number. Constants are module-level, documented, and fixture-pinned.
+
+**Amended 2026-08-04 (M2 → M3 boundary) — `effect` is measured against a per-series scale, not
+against the baseline.** The original denominator made `effect` a *relative* change, and M2's
+implementation showed that cannot work across these metrics: a marker that moves multiples
+(vitamin D, 6.2 → 38.4, a 5.2× move) and a physiologically bounded quantity (body fat, weight)
+are not the same kind of number. Under one relative floor a **3.2-point body-fat drop scored
+0.082 and was refused**, while the money question scored 1.0 — so the live demo beat could never
+fire, and a per-metric *floor* alone would have fixed the gate while still publishing that real
+change as `pattern_strength 0.08` beside a diet change at 0.84.
+
+Every consolidatable series therefore declares an **`EffectScale`** in its own units (§4.4):
+
+| Field | Question | Used for |
+|---|---|---|
+| `min_delta` | is this bigger than our measurement noise? | the **gate** — replaces `MIN_EFFECT` |
+| `full_delta` | what does a full-size change look like? | the **denominator** of `effect` |
+
+`coverage`, `specificity`, and the product are unchanged. The global `MIN_EFFECT` and the
+zero-baseline epsilon are **removed** — one mechanism, expressed in units a reader can check
+("we won't claim a body-fat change under 1.5 points, because the scale isn't that precise").
+The values are **product heuristics, not clinical thresholds** (ADR-13.12, I-2): they state what
+*this application* treats as meaningful, each carrying its basis inline in
+`engine/insights.py`. *(Rejected: a per-metric relative floor — fixes the gate, leaves the
+score dishonest; one absolute floor for all series — the units differ; z-scores against series
+variance — needs per-user distribution estimation, is unstable as data arrives, and drifts back
+toward the statistical machinery §4.3 removed; borrowed clinical cutoffs — implies an authority
+the engine does not have.)*
 
 **Why "specificity" replaces "lag consistency".** ADR-13.12's third factor assumed a lag-correlation
 detector that §4.3 removes. Specificity generalises it honestly: it asks *how uniquely this claim's
@@ -706,7 +741,7 @@ insight and a logged refusal reason (which is itself useful glass-box material l
 
 | Constant | Value | Applies to |
 |---|---|---|
-| `MIN_EFFECT` | 0.15 | both |
+| `EffectScale.min_delta` | **per series**, in the metric's own units (§4.13 amendment) | both |
 | `MIN_SPAN_DAYS` | 7 | `level_shift` — each compared side |
 | `MIN_INTERVAL_DAYS` | 14 | `intervention_outcome` |
 | `MIN_MEASUREMENTS` | 2 | `intervention_outcome` |
@@ -838,6 +873,7 @@ Numbered so tests and code comments can cite them.
 | **I-21** | Retraction evaluation contains no model call and no language. |
 | **I-22** | A detector that cannot clear its thresholds emits nothing. Silence is a tested outcome. |
 | **I-23** | Every photo turn persists something, for every failure outcome. |
+| **I-24** | Every consolidatable series declares an `EffectScale`; a series without one cannot be consolidated. There is no global effect floor to fall back on. |
 
 **Carried forward unchanged from earlier phases** (must stay green): all six
 ingestion-transaction-boundary rules; never-lose-input; the shared (B)–(F) tail is not forked; the
