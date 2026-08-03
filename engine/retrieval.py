@@ -78,6 +78,15 @@ METRICS: dict[str, MetricDef] = {
     "workout_distance_km": MetricDef("workout", ("distance_km",)),
     # supplement → SupplementPayload
     "supplement_dose_mg": MetricDef("supplement", ("dose_mg",)),
+    # blood_report → BloodReportPayload.markers (Phase 5 §4.5). `markers` is an open
+    # dict[str, float], so it has no typed hot field to derive a whitelist from — these five
+    # are curated by hand, which is what keeps the planner's vocabulary closed (06). Marker
+    # keys carry their unit, matching the qty_g / duration_min convention.
+    "vitamin_d_ng_ml": MetricDef("blood_report", ("markers", "vitamin_d_ng_ml")),
+    "vitamin_b12_pg_ml": MetricDef("blood_report", ("markers", "vitamin_b12_pg_ml")),
+    "ferritin_ng_ml": MetricDef("blood_report", ("markers", "ferritin_ng_ml")),
+    "ldl_mg_dl": MetricDef("blood_report", ("markers", "ldl_mg_dl")),
+    "hba1c_pct": MetricDef("blood_report", ("markers", "hba1c_pct")),
 }
 
 _AGG_FNS = {"sum": "SUM", "avg": "AVG", "min": "MIN", "max": "MAX"}  # + 'count', special-cased

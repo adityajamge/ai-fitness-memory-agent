@@ -11,7 +11,10 @@ sends the whole turn to the note fallback, so required fields are kept minimal o
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 __all__ = [
     "MemoryPayload",
@@ -24,12 +27,37 @@ __all__ = [
     "SupplementPayload",
     "NotePayload",
     "InsightPayload",
+    "RetractionCondition",
+    "INSIGHT_KINDS",
+    "SERIES_KINDS",
+    "MAX_EVIDENCE_IDS",
+    "STRENGTH_TOLERANCE",
     "MEMORY_TYPE_REGISTRY",
     "UnknownMemoryType",
     "validate_payload",
     "payload_to_json",
     "ValidationError",
 ]
+
+#: The registered insight kinds (invariant **I-1**). Adding one is a reviewed, ADR-recorded
+#: act, not an implementation detail — which is why the payload field below is a ``Literal``
+#: rather than a free string, and why this frozenset is derived from it rather than the other
+#: way round. Definitions: consolidation-architecture.md §4.1.
+INSIGHT_KINDS: frozenset[str] = frozenset({"level_shift", "intervention_outcome"})
+
+#: What a series *is about*: a behaviour the user controls, or an outcome they measure
+#: (§4.4). It decides which detector may run on it.
+SERIES_KINDS: frozenset[str] = frozenset({"behavioural", "outcome"})
+
+#: Lineage cap (§4.2, invariant **I-5**). An insight cites the boundary rows of each
+#: contributing segment plus every contributing point event, up to this many — a 105-row
+#: supplement segment would otherwise produce a lineage the Phase 6 graph cannot render.
+#: ``evidence_count`` always carries the *true* total, which is what keeps the cap honest.
+MAX_EVIDENCE_IDS = 24
+
+#: Float slack when checking ``pattern_strength == effect × coverage × specificity``.
+#: Components are stored at full precision, so this absorbs IEEE rounding only.
+STRENGTH_TOLERANCE = 1e-6
 
 
 class MemoryPayload(BaseModel):
@@ -99,13 +127,105 @@ class NotePayload(MemoryPayload):
     text: str
 
 
-class InsightPayload(MemoryPayload):
-    """Derived tier-2 memory. Minimal in Phase 2; T5 (Phase 5) adds the typed
-    ``retraction_condition`` object + deterministic evaluator."""
+class RetractionCondition(MemoryPayload):
+    """What would make the engine withdraw a claim (ADR-13.11, pinned by §4.14).
 
+    ``direction`` is the movement that would **contradict** the insight. ``threshold`` is the
+    optional comparator half — ADR-13.11's "comparator/direction" was one field or two
+    depending on how you read it, and the answer is: the comparator exists when there is
+    something absolute to compare against, and ``direction`` alone otherwise.
+
+    A **counterexample** is an observation of ``metric`` inside the trailing ``window_days``
+    that either (no threshold) moves in ``direction`` relative to the insight's post-shift
+    level — its later measurement, for an ``intervention_outcome`` — or (with a threshold)
+    crosses that threshold in ``direction``. ``count >= min_count`` retracts. Evaluation is
+    pure arithmetic over typed fields with no model call (**I-21**), and retraction flips
+    ``status`` without deleting or rewriting anything (ADR-9, **I-20**).
+
+    Prose is **rendered from this object** and never stored as the condition — see
+    ``engine.insights.render_retraction_condition``. Storing the sentence would make the
+    displayed rule and the evaluated rule two things that can disagree.
+    """
+
+    metric: str
+    direction: Literal["rising", "falling"]
+    window_days: int
+    min_count: int
+    threshold: float | None = None
+
+    @model_validator(mode="after")
+    def _positive_bounds(self) -> RetractionCondition:
+        if self.window_days < 1:
+            raise ValueError("window_days must be >= 1")
+        if self.min_count < 1:
+            raise ValueError("min_count must be >= 1")
+        return self
+
+
+class InsightPayload(MemoryPayload):
+    """Derived tier-2 memory — a claim the user never made, so every field that makes it
+    auditable is required (consolidation-architecture.md §4.1, §4.6, §4.12, §4.13).
+
+    ``kind`` is closed (**I-1**). ``series_metric`` names a ``CONSOLIDATION_SERIES`` entry;
+    membership is checked by ``engine.insights.validate_series`` rather than here, because a
+    payload model that imported the series vocabulary would invert the layering this module
+    depends on (see ``engine/insights.py``'s note on the one-way dependency).
+
+    ``window_start``/``window_end`` are what the claim is *about*; the row's ``event_time`` is
+    ``window_end`` and its ``created_at`` stays truthful (§4.12, ADR-13.10) — an insight
+    derived today about May is not back-dated.
+
+    **The three strength components are required whenever a score is published** (**I-19**),
+    and the score must equal their product. That is enforced here rather than trusted, because
+    a ``pattern_strength`` whose components do not explain it is exactly the
+    unfalsifiable-number failure ADR-13.12 exists to prevent. Computing the factors is the
+    detector's job (§4.13); agreeing with them is this contract's.
+    """
+
+    kind: Literal["level_shift", "intervention_outcome"]
     hypothesis: str
-    evidence_ids: list[str] = Field(default_factory=list)
-    pattern_strength: float | None = None
+    series_metric: str
+    series_kind: Literal["behavioural", "outcome"]
+    window_start: datetime
+    window_end: datetime
+    #: Boundary-anchored and capped (§4.2). Never the complete set for an expanded period —
+    #: ``evidence_count`` is.
+    evidence_ids: list[str] = Field(min_length=1)
+    #: The true number of contributing memories, capped or not. Rendering this beside a capped
+    #: lineage is what stops the cap from quietly under-reporting the evidence.
+    evidence_count: int
+    effect: float
+    coverage: float
+    specificity: float
+    pattern_strength: float
+    #: Deterministic identity of the *claim* (§4.6). Stable under rewording, changes on a value
+    #: change — which is what makes "recompute wrote nothing" decidable without a deep compare.
+    fingerprint: str
+    retraction_condition: RetractionCondition | None = None
+
+    @model_validator(mode="after")
+    def _coherent(self) -> InsightPayload:
+        for name in ("effect", "coverage", "specificity", "pattern_strength"):
+            value = getattr(self, name)
+            if not 0.0 <= value <= 1.0:
+                raise ValueError(f"{name} must be within [0, 1], got {value}")
+        product = self.effect * self.coverage * self.specificity
+        if abs(self.pattern_strength - product) > STRENGTH_TOLERANCE:
+            raise ValueError(
+                f"pattern_strength {self.pattern_strength} does not equal "
+                f"effect × coverage × specificity ({product}); a published score must be "
+                "explained by its components (I-19)"
+            )
+        if self.window_end < self.window_start:
+            raise ValueError("window_end must not precede window_start")
+        if len(self.evidence_ids) > MAX_EVIDENCE_IDS:
+            raise ValueError(f"evidence_ids exceeds the {MAX_EVIDENCE_IDS}-id lineage cap")
+        if self.evidence_count < len(self.evidence_ids):
+            raise ValueError(
+                f"evidence_count {self.evidence_count} is below the {len(self.evidence_ids)} "
+                "ids cited; it is the true total, never the truncated one"
+            )
+        return self
 
 
 MEMORY_TYPE_REGISTRY: dict[str, type[MemoryPayload]] = {
