@@ -11,6 +11,7 @@ degrade in large batches (the T1 canary and T8 replay guard the same footgun).
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 import psycopg
@@ -106,6 +107,139 @@ def get_memory(cur: psycopg.Cursor, user_id: UUID, memory_id: UUID) -> dict | No
         [memory_id, user_id],
     )
     return cur.fetchone()
+
+
+# ── consolidation reads (Phase 5 M3) ──────────────────────────────────────────────────
+# All user-scoped, all parameterized — including the JSONB path, which is engine-owned and
+# bound rather than interpolated (same posture as engine/retrieval.py's builders).
+
+_SQL_SERIES = """
+SELECT id,
+       event_time,
+       (payload #>> %(path)s::TEXT[])::FLOAT8 AS value,
+       confidence,
+       provenance,
+       payload -> 'expanded_from' ->> 'composition' AS composition,
+       payload -> 'expanded_from' ->> 'assertion'   AS assertion
+FROM memories
+WHERE user_id = %(user_id)s
+  AND type = %(type)s
+  AND status = 'active'
+  AND payload #>> %(path)s::TEXT[] IS NOT NULL
+ORDER BY event_time, id
+"""
+
+
+def fetch_series(
+    cur: psycopg.Cursor, user_id: UUID, memory_type: str, path: tuple[str, ...]
+) -> list[dict]:
+    """Every active row carrying a value for one metric, oldest first.
+
+    Returns the raw ingredients of an ``analytics.MetricSample`` **plus** ``confidence`` and
+    ``provenance``, which the sample type deliberately does not carry (it is prose- and
+    metadata-free by design, I-8) but which an insight needs to inherit honestly (§4.12).
+
+    ``expanded_from`` is projected out of the payload because the collapse is defined on it
+    (§4.2): a row that came from a period assertion must be distinguishable from an observed
+    point event, or 30 materialized days would read as 30 independent observations.
+    """
+    cur.execute(_SQL_SERIES, {"user_id": user_id, "type": memory_type, "path": list(path)})
+    return cur.fetchall()
+
+
+_SQL_TYPE_ROWS = """
+SELECT id, event_time, confidence, provenance, payload ->> 'name' AS name
+FROM memories
+WHERE user_id = %(user_id)s
+  AND type = %(type)s
+  AND status = 'active'
+ORDER BY event_time, id
+"""
+
+
+def fetch_type_rows(cur: psycopg.Cursor, user_id: UUID, memory_type: str) -> list[dict]:
+    """Active rows of one type, oldest first — the input to structural onset detection (§4.4).
+
+    Reduced to first-occurrences in Python rather than by ``DISTINCT ON``: the reduction is
+    part of the intervention *definition*, so keeping it beside that definition (and out of
+    SQL) is what lets it be unit-tested without a database.
+    """
+    cur.execute(_SQL_TYPE_ROWS, {"user_id": user_id, "type": memory_type})
+    return cur.fetchall()
+
+
+_SQL_BEHAVIOURAL_TIMES = """
+SELECT DISTINCT event_time
+FROM memories
+WHERE user_id = %(user_id)s
+  AND type = ANY(%(types)s)
+  AND status = 'active'
+"""
+
+
+def fetch_behavioural_times(
+    cur: psycopg.Cursor, user_id: UUID, types: list[str]
+) -> list[datetime]:
+    """Instants on which the user logged *behaviour* — the raw material for an
+    ``intervention_outcome``'s coverage factor (§4.13).
+
+    Instants, not dates: bucketing to a local day is the engine's job and depends on the
+    user's timezone (ADR-14.10), which SQL here has no business deciding.
+    """
+    cur.execute(_SQL_BEHAVIOURAL_TIMES, {"user_id": user_id, "types": types})
+    return [row["event_time"] for row in cur.fetchall()]
+
+
+_SQL_ACTIVE_INSIGHT = """
+SELECT id, created_at, payload
+FROM memories
+WHERE user_id = %(user_id)s
+  AND type = 'insight'
+  AND status = 'active'
+  AND payload ->> 'kind' = %(kind)s
+  AND payload ->> 'series_metric' = %(metric)s
+ORDER BY created_at DESC, id DESC
+"""
+
+
+def find_active_insights(
+    cur: psycopg.Cursor, user_id: UUID, kind: str, metric: str
+) -> list[dict]:
+    """Active insights for one identity ``(user_id, kind, series_metric)`` (§4.6).
+
+    Returns a list although **I-10** allows at most one: the caller reconciles a surplus rather
+    than this query hiding it. Silently taking the newest would let a duplicate accumulate
+    invisibly, which is the failure the identity rule exists to prevent.
+    """
+    cur.execute(_SQL_ACTIVE_INSIGHT, {"user_id": user_id, "kind": kind, "metric": metric})
+    return cur.fetchall()
+
+
+_SQL_SERIES_LEARNED_AT = """
+SELECT max(created_at) AS learned_at
+FROM memories
+WHERE user_id = %(user_id)s
+  AND type = %(type)s
+  AND status = 'active'
+  AND payload #>> %(path)s::TEXT[] IS NOT NULL
+"""
+
+
+def series_learned_at(
+    cur: psycopg.Cursor, user_id: UUID, memory_type: str, path: tuple[str, ...]
+) -> datetime | None:
+    """When the engine last *learned* anything about a series (§4.7).
+
+    Freshness is derived from this rather than stored on the insight: ``created_at`` already
+    means "when we learned it" (04's bi-temporal model), so "has anything arrived since this
+    claim was derived" is the schema's own reading. Storing a ``last_evaluated_at`` would add a
+    second source of truth for a derivable fact — and would make ``memories`` mutable in a way
+    it currently is not (**I-13**).
+    """
+    cur.execute(_SQL_SERIES_LEARNED_AT, {"user_id": user_id, "type": memory_type,
+                                         "path": list(path)})
+    row = cur.fetchone()
+    return row["learned_at"] if row else None
 
 
 def get_note(cur: psycopg.Cursor, user_id: UUID, note_id: UUID) -> dict | None:
