@@ -223,7 +223,28 @@
 
 ---
 
-## Phase 5 — Insight Engine *(~4–5 days)*
+## Phase 5 — Insight Engine *(~5–6 days)*
+
+> **Before starting:** [docs/engineering/consolidation-architecture.md](engineering/consolidation-architecture.md)
+> is the **locked** architecture for this phase (approved 2026-08-03) — 18 decisions, 23
+> invariants, risk analysis, the M0–M7 milestone breakdown, and the test strategy. Read it
+> before writing any Phase 5 code, exactly as replay-architecture.md gated Phase 4.
+>
+> **Three things the original plan below did not account for**, all settled by that document:
+> **(1)** the detector set changed — measured against the data the Phase 4 replay committed,
+> `ruptures` PELT and the 7–35d lag scan have nothing they can honestly run on, and are
+> replaced by deterministic `level_shift` + `intervention_outcome` detectors
+> ([ADR-13.12 amendment](office-hours/09-decisions.md#adr-13)); `ruptures` is not a dependency.
+> **(2) A new deliverable: `cli/consolidate.py`.** Consolidation is event-driven and replay is
+> idempotent, so *nothing in the phase as originally written creates insights over the already
+> replayed history* — the mature account would ship with zero insights and the money shot's
+> "had already flagged it" clause would be false. **(3)** Scope calls: entity canonicalization
+> and period-aware aggregation (both handed here by replay-architecture §8) are **deliberately
+> deferred** — canonicalization's cheap pre-replay window closed on 2026-08-02 and the
+> recommended design does not need it; note-confidence threading rides the photo milestone.
+>
+> Estimate raised 4–5 → 5–6 days for the added CLI and the M0 fixture work; photo ingestion
+> (M7) is the **designated first cut** if the phase overruns.
 
 - **Objective:** the memory thinks: derived insights with lineage, honest scoring, and
   retraction — plus photo logging.
@@ -234,11 +255,20 @@
   bucketing, ruptures PELT, bounded lag scan, pattern-strength formula), **T12** (latency
   profile).
 - **Deliverables:**
-  - Consolidation in-request under the ~300ms budget, on-demand `analyze_series`
-  - Insight rows: hypothesis, `evidence_ids`, `pattern_strength` (documented formula),
-    typed `retraction_condition`, honest lifecycle (`retracted`/`superseded`, never deleted)
-  - Photo ingestion: S3 upload → Bedrock vision → meal events (Milestone 2 item)
-  - Measured latency profile for ingest/query/both turns (`docs/latency.md`)
+  - Consolidation at stage (F₀) — post-commit, best-effort, budgeted — plus on-demand
+    `analyze_series`, graph-dispatched like `log_memory` so the retrieval builder set stays
+    read-only
+  - Insight rows: hypothesis, `evidence_ids`, `pattern_strength` (published *with* its three
+    components), typed `retraction_condition`, honest lifecycle (`retracted`/`superseded`,
+    never deleted), one active insight per `(user_id, kind, series_key)`
+  - **`cli/consolidate.py`** — one-shot retroactive pass over the replayed history, so the
+    mature account actually has insights (truthful `created_at`, event-time framing per
+    ADR-13.10)
+  - Insight-lookup builder family + insight lineage populated in `EvidenceTrace`
+  - Photo ingestion: S3 upload → Bedrock vision → meal events (Milestone 2 item; first to cut)
+  - Measured latency profile for ingest/query/both turns (`docs/latency.md`) — measured
+    against the **deployed** cross-region path, and ADR-13.1's provisional ~300ms re-derived
+    from it
 - **Dependencies:** Phase 4 (real series to analyze — insights over synthetic fixtures only
   prove tests, not the product).
 - **Definition of Done:** consolidation test block green (changepoint present/absent, budget

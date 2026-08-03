@@ -10,7 +10,7 @@ first time.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 
@@ -21,6 +21,7 @@ from engine.model import ExtractedEvent
 from engine.repository import insert_memories, mark_superseded
 from engine.retrieval import AggregateSpec, RetrievalSpecError, aggregate_memories
 from engine.tests.conftest import FakeModelProvider
+from engine.tests.dbcleanup import new_user
 
 UTC = timezone.utc
 IST = "Asia/Kolkata"
@@ -199,7 +200,7 @@ def test_wrong_type_is_never_aggregated(db, user_id) -> None:
 
 
 def test_cross_user_isolation(db, user_id) -> None:
-    other = uuid4()
+    other = new_user()
     _seed(db, [_meal(other, datetime(2026, 7, 10, tzinfo=UTC), 500)])
     _seed(db, [_meal(user_id, datetime(2026, 7, 10, tzinfo=UTC), 30)])
 

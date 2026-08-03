@@ -41,6 +41,7 @@ from cli.replay_ledger import (
 )
 from engine.memory import Memory
 from engine.repository import insert_memory
+from engine.tests.dbcleanup import new_user
 
 TZ = "Asia/Kolkata"
 NOW = datetime(2026, 7, 31, 9, 0, tzinfo=timezone.utc)
@@ -489,7 +490,7 @@ def test_rebuild_ignores_live_rows_and_other_users(db, user_id, ledger_path: Pat
     _seed_replay_row(db, user_id, "meal-pattern.2026-03-26.2026-04-24#2026-04-01")
     _seed_replay_row(db, user_id, "chat-should-be-ignored", source="chat")
 
-    _seed_replay_row(db, uuid.uuid4(), "meal-pattern.2026-03-26.2026-04-24#2026-04-09")
+    _seed_replay_row(db, new_user(), "meal-pattern.2026-03-26.2026-04-24#2026-04-09")
 
     with db.transaction() as cur:
         rebuilt = ReplayLedger.rebuild_from_db(ledger_path, cur, user_id, now=NOW)

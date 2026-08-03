@@ -13,6 +13,7 @@ from engine.ingestion import IngestionService
 from engine.model import ExtractedEvent
 from engine.repository import get_memory
 from engine.tests.conftest import FakeModelProvider
+from engine.tests.dbcleanup import new_user
 from engine.types import ValidationError
 
 
@@ -290,10 +291,9 @@ def test_reprocess_is_scoped_to_owner(db, user_id):
 
 def test_cross_user_get_returns_none(db, user_id):
     """Scoping at the repository layer: another user cannot fetch this user's memory."""
-    import uuid
 
     receipt = _service(db, FakeModelProvider([_meal_event()])).ingest_text(user_id, "lunch")
-    other_user = uuid.uuid4()
+    other_user = new_user()
     assert _fetch(db, other_user, receipt.created[0].id) is None
 
 

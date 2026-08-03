@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 
@@ -22,6 +22,7 @@ from engine.retrieval import (
     get_timeline,
     lookup_events,
 )
+from engine.tests.dbcleanup import new_user
 from engine.trace import EvidenceSnapshot
 
 UTC = timezone.utc
@@ -110,7 +111,7 @@ def test_limit_truncates_from_the_start_of_the_slice(db, user_id) -> None:
 
 
 def test_superseded_and_other_users_rows_excluded(db, user_id) -> None:
-    other = uuid4()
+    other = new_user()
     _seed(db, [_mem(other, T0)])
     keep, drop = _seed(db, [_mem(user_id, T0), _mem(user_id, T0 + timedelta(hours=1))])
     with db.transaction() as cur:
@@ -201,7 +202,7 @@ def test_item_with_no_match_is_empty_not_an_error(db, user_id) -> None:
 
 
 def test_lookup_excludes_superseded_and_other_users(db, user_id) -> None:
-    other = uuid4()
+    other = new_user()
     _seed(db, [_mem(other, T0 + timedelta(days=30))])
     keep, drop = _seed(
         db, [_mem(user_id, T0), _mem(user_id, T0 + timedelta(days=1))]

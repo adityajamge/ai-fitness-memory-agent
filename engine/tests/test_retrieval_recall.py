@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import math
 from datetime import datetime, timedelta, timezone
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 
@@ -27,6 +27,7 @@ from engine.retrieval import (
     recall_memories,
 )
 from engine.tests.conftest import FakeModelProvider
+from engine.tests.dbcleanup import new_user
 
 UTC = timezone.utc
 DIMS = 512
@@ -162,7 +163,7 @@ def test_date_filter(db, user_id) -> None:
 
 
 def test_cross_user_isolation(db, user_id) -> None:
-    other = uuid4()
+    other = new_user()
     _seed(db, [_mem(other, "other user's secret", _basis(0))])
     _seed(db, [_mem(user_id, "mine", _basis(1))])
 

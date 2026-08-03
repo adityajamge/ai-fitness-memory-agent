@@ -25,6 +25,7 @@ from engine.model import (
     ToolCall,
     ToolSpec,
 )
+from engine.tests.dbcleanup import register_user
 
 #: Test-suite database URL.
 #:
@@ -34,11 +35,12 @@ from engine.model import (
 #: identical to before while guaranteeing every consumer, including the FastAPI app that
 #: ``api/tests`` builds through ``load_settings()``, resolves the same test cluster.
 #:
-#: **The suite must never run against the cluster holding the real replayed history.** The
-#: fixtures below mint a fresh ``user_id`` per test and never clean up, and ``memories`` has no
-#: foreign key to ``users``, so one full-suite run permanently adds ~230 memories and ~30 orphan
-#: users. A prior cluster reached ~9k memories / ~4.7k users and stopped passing the suite
-#: entirely (persistent SerializationFailure, a different random test each run).
+#: **The suite must never run against the cluster holding the real replayed history.** Every
+#: id below is minted fresh per test, and ``memories`` has no foreign key to ``users``, so rows
+#: written here are orphans no cascade would reach. Since Phase 5 M0 they are registered with
+#: ``engine/tests/dbcleanup.py`` and purged at session end, which stops a run from permanently
+#: growing the cluster — but the purge deletes *only ids this run minted*, so it is a hygiene
+#: mechanism, **not** a licence to point the suite at real data.
 DATABASE_URL = os.environ.get(
     "DATABASE_URL", "postgresql://root@127.0.0.1:26257/defaultdb?sslmode=disable"
 )
@@ -147,5 +149,9 @@ def db() -> Database:
 
 @pytest.fixture()
 def user_id() -> uuid.UUID:
-    """A fresh user per test — isolation without per-test DDL (every query is user-scoped)."""
-    return uuid.uuid4()
+    """A fresh user per test — isolation without per-test DDL (every query is user-scoped).
+
+    Registered for the end-of-session purge (M0): this is one of the two choke points through
+    which every test-owned row enters the database, so registering here means no test has to
+    remember to clean up and no new test can forget to."""
+    return register_user(uuid.uuid4())

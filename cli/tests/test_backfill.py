@@ -22,6 +22,7 @@ from engine.ingestion import IngestionService
 from engine.memory import Memory
 from engine.model import ExtractedEvent
 from engine.repository import insert_memory
+from engine.tests.dbcleanup import new_user
 
 
 def _meal_event(summary: str) -> ExtractedEvent:
@@ -92,7 +93,7 @@ def test_backfill_user_terminates_when_embedding_keeps_failing(db, user_id):
 
 # ── user discovery (_users_with_gaps) ──────────────────────────────────────────────────
 def test_users_with_gaps_finds_only_users_with_active_null_rows(db):
-    user_a, user_b = uuid.uuid4(), uuid.uuid4()
+    user_a, user_b = new_user(), new_user()
     _seed_null_rows(db, user_a, 1)  # A: active NULL row -> a gap
     provider = FakeModelProvider([_meal_event("embedded fine")])
     _service(db, provider).ingest_text(user_b, "embedded fine")  # B: fully embedded
@@ -105,7 +106,7 @@ def test_users_with_gaps_finds_only_users_with_active_null_rows(db):
 def test_users_with_gaps_ignores_inactive_rows(db):
     """A superseded/retracted NULL row is not a gap — the sweep only chases active rows,
     matching fetch_unembedded's own filter."""
-    user_c = uuid.uuid4()
+    user_c = new_user()
     superseded = Memory(
         user_id=user_c,
         event_time=datetime(2026, 7, 21, 9, 0, tzinfo=timezone.utc),
@@ -161,7 +162,7 @@ def test_main_single_user_without_gaps_reports_zero(db, user_id, cli_env, capsys
 
 
 def test_main_all_sweeps_users_with_gaps(db, cli_env, capsys):
-    user_a, user_b = uuid.uuid4(), uuid.uuid4()
+    user_a, user_b = new_user(), new_user()
     _seed_null_rows(db, user_a, 2)
     _seed_null_rows(db, user_b, 1)
 

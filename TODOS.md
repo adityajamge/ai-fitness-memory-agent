@@ -115,7 +115,35 @@
     cluster drifts back to the same state and M5's `[→PERF]` numbers stop being repeatable.
 - **Depends on / blocked by:** none; can be picked up any time.
 
-## DB test fixtures never clean up, so every run permanently grows the cluster (surfaced 2026-08-02)
+## ~~DB test fixtures never clean up, so every run permanently grows the cluster~~ — RESOLVED 2026-08-03 (Phase 5 M0)
+
+- **Fixed by** `engine/tests/dbcleanup.py`: a registry of the ids this run mints, plus one
+  session-scoped purge in the root `conftest.py`. Registration is automatic at the two choke
+  points every test-owned row passes through — the `user_id` fixture and `unique_email()` — so
+  no test changed and no new test can forget to opt in.
+- **The design decision the entry asked for** was between a per-test teardown, a per-run
+  schema, and a `TRUNCATE` reset. All three were rejected: per-test teardown adds a round trip
+  to ~500 tests on a suite already taking ~4 minutes (and far worse against a cross-region
+  cluster); a per-run schema means DDL per run and a second migration path to keep correct;
+  `TRUNCATE` has to fight `schema_locked` (see the entry above) and is a whole-table weapon
+  aimed at a per-row problem. The registry deletes **only ids this process minted** — it
+  cannot touch a row it did not create, which is a stronger safety property than any sweep,
+  and it holds even if `DATABASE_URL` is misconfigured.
+- **Verified 2026-08-03:** starting from a cleared test cluster, a full 508-test run leaves
+  **`memories` 0, `users` 0, `sessions` 0, `user_profile` 0** — down from +1,455 / +146 / +135
+  before the fix. Suite runtime is unchanged (3m48s vs ~4m).
+- **Known remainder — LangGraph checkpoint rows: 281 per full run** (70 `checkpoints` + 61
+  `checkpoint_blobs` + 150 `checkpoint_writes`, measured 2026-08-03). Agent tests that drive
+  the graph directly use raw thread ids (`m5-…`/`guard-…`/`canary-…`) rather than the
+  `<user_id>:<thread>` namespacing `api/routers/chat.py` applies, so the prefix purge cannot
+  see them. Closing it is the same mechanical change `new_user()` applied to users — register
+  the thread id at ~5 call sites in agent test modules — and was deliberately left outside
+  M0's scope. Worth doing before the count matters again; at 281/run it is roughly 20 runs to
+  the scale that caused the original problem.
+- **Escape hatch:** `KEEP_TEST_ROWS=1` leaves everything in place for post-mortem inspection.
+
+<details>
+<summary>Original entry (kept as the record of the root cause)</summary>
 
 - **What:** `engine/tests/conftest.py`'s `user_id` fixture mints a fresh UUID per test and
   nothing ever deletes the rows written under it. `memories` has **no foreign key to `users`**,
@@ -136,6 +164,8 @@
   of which write rows — but the gap is pre-existing, dating to the Phase 2 fixtures.
 - **Depends on / blocked by:** none. Worth doing **before** the cluster accumulates again;
   it is currently clean (0 rows, fresh cluster, 2026-08-02).
+
+</details>
 
 ## Drop embedding normalization when CockroachDB ships cosine distance
 

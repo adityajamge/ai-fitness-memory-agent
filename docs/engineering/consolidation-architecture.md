@@ -1,9 +1,11 @@
 # Consolidation & Insight Engine Architecture (Phase 5 / T5 · T6 · T12)
 
-> Engineering deep dive (see [README.md](README.md) conventions). **Status: DRAFT — awaiting
-> builder approval.** Once approved this document is the **locked** architecture for Phase 5,
-> the same way [replay-architecture.md](replay-architecture.md) was locked for Phase 4: read it
-> before writing any Phase 5 code, and do not re-litigate §4 silently.
+> Engineering deep dive (see [README.md](README.md) conventions). **Status: LOCKED 2026-08-03
+> (approved as written).** This is the architecture for Phase 5, the same way
+> [replay-architecture.md](replay-architecture.md) was locked for Phase 4: read it before
+> writing any Phase 5 code, and do not re-litigate §4 silently. Changes are permitted only
+> when a **genuine implementation issue** is discovered — in which case stop, raise it, and
+> amend this document explicitly, exactly as Phase 4 did for its §4.1 and §4.14 amendments.
 >
 > Decisions it implements or amends: [ADR-3](../office-hours/09-decisions.md#adr-3) (event-driven
 > consolidation), [ADR-9](../office-hours/09-decisions.md) (retraction never deletes),

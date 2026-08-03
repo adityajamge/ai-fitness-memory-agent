@@ -140,6 +140,24 @@ earlier ADRs or docs.
    rides the same pass. **Lambda is out of the runtime architecture** (AWS = Bedrock + S3 +
    the app host — ECS Express Mode since the 13.3 amendment). *(Rejected: async
    queue/worker — infra for a single-user-scale demo.)*
+   **Amended 2026-08-03 (Phase 5 M0) — the stage is now specified, and the number is
+   provisional.** "Synchronously in the ingestion request" was silent about *where* in the
+   pipeline. It runs at **stage (F₀)**: after the turn's write transaction commits, after the
+   receipt is built from committed rows, before the opportunistic embedding backfill — in its
+   own transaction(s), best-effort, with created insights appended to the receipt. Pre-commit
+   would let a *derived*-data failure lose the user's actual input, inverting never-lose-input;
+   inside the transaction would violate transaction-boundaries rule 1 the moment an embedding
+   is needed. A consolidation failure therefore **never fails a turn** (the same posture as
+   backfill), because an insight lost to an error costs one re-derivation and nothing else.
+   Insights are written with `embedding = NULL` and embedded by the existing T15 backfill,
+   which removes a model call from the budget entirely.
+   **The ~300ms figure predates the deployed topology and is provisional.**
+   [../deploy.md](../deploy.md) records app in us-east-1 and CockroachDB Cloud in ap-south-1;
+   a single round trip on that path is ~200–250ms and stage (F₀) needs 2–3. **T12 measures the
+   real number and this item is re-derived from that measurement** — an honest amendment, not
+   a silently relaxed constant. Rationale and the two structural defences (one consolidatable
+   series per meal; no embed call on the hot path):
+   [../engineering/consolidation-architecture.md §4.8](../engineering/consolidation-architecture.md).
 2. **Embeddings: Bedrock Titan Text Embeddings V2, 512-dim, normalized**; `VECTOR(512)`.
    CockroachDB's C-SPANN index is Euclidean-only; unit vectors make L2 ≡ cosine.
    **Amended 2026-08-02 — provider selection is per role, not global.** The original design
@@ -221,10 +239,55 @@ earlier ADRs or docs.
     `retraction_condition` object ({metric, comparator/direction, window_days, min_count});
     evaluated deterministically in the consolidation pass; prose is rendered from the object.
     *(Rejected: LLM-evaluated prose conditions — nondeterministic, budget-hostile.)*
+    **Refined 2026-08-03 (Phase 5 M0) — the schema is pinned and "counterexample" is defined.**
+    "comparator/direction" was ambiguous about whether one field or two were meant, and the
+    canonical example ("retract if 3+ counterexamples in rolling 30d") never said what a
+    counterexample *is* — both are load-bearing for a *deterministic* evaluator, which is the
+    entire point of typing the condition. Pinned as
+    `{metric, direction: 'rising'|'falling', threshold: float|None, window_days, min_count}`:
+    the comparator exists as an optional `threshold` when there is something to compare
+    against, and `direction` alone otherwise. An observation of `metric` inside the trailing
+    `window_days` is a **counterexample** when — with no threshold — it moves in `direction`
+    relative to the insight's post-shift level (`level_shift`) or its later measurement
+    (`intervention_outcome`), or — with a threshold — it crosses that threshold in
+    `direction`. `count ≥ min_count` flips `status='retracted'`; ADR-9 still holds, nothing is
+    ever deleted or rewritten. Full spec:
+    [../engineering/consolidation-architecture.md §4.14](../engineering/consolidation-architecture.md).
 12. **Analytics honesty:** consolidation output is a **labeled heuristic pattern flag** —
     daily bucketing with gaps left missing, `ruptures` PELT, bounded lag scan (7–35d) over
     whitelisted series pairs, documented "pattern strength" formula (effect size × coverage ×
     lag consistency). Never presented as probability or causal inference.
+    **Amended 2026-08-03 (Phase 5 M0) — the detector set is replaced; the honesty posture is
+    not.** Measured against the data the Phase 4 replay actually committed, the two named
+    algorithms have nothing they can honestly run on. The account's only daily metric series
+    (`protein_g`) is a **four-level step function with zero within-segment variance**, written
+    by the converter's period expansion from three reviewed payload-table entries — PELT over
+    it rediscovers the converter's own boundaries at infinite effect size and would publish a
+    near-perfect pattern strength for an artifact, in the panel the glass box invites judges to
+    click into. And the bounded lag scan has **no valid pair**: workout metrics are `null` by
+    design, supplement doses conflate products, and sleep and weight have zero rows. Both are
+    therefore **removed rather than kept as unexercised infrastructure**, the same call
+    [ADR-15.2](#adr-15) made for the replay extraction cache, with the same discipline of
+    recording a re-add trigger and recipe (consolidation-architecture.md §10). `ruptures` is
+    consequently **not a dependency of this project**.
+    Two deterministic detectors replace them, matched to how health data is actually generated
+    (sparse outcome measurements, dense behavioural change): **`level_shift`** — a metric's
+    level moves between adjacent observation segments — and **`intervention_outcome`** — a
+    sparsely-measured marker changes between two measurements, with the structurally-detected
+    changes inside that interval reported as its lineage. Interventions are detected
+    **structurally** (series onset, or a level shift in a behavioural series), never by reading
+    note prose: the engine still never interprets language.
+    Two consequences for this item's own wording: consolidation observes **assertions, not
+    materialized period days** (an expanded period collapses to one observation, so the
+    `expanded_from` honesty signal of [ADR-15.4](#adr-15) is read rather than discarded), and
+    the pattern-strength formula's third factor is renamed **lag consistency → specificity**
+    (`1 / concurrent changes`), which generalizes it once no lag detector exists and is what
+    keeps `intervention_outcome` from reading as causal. **Unchanged:** daily bucketing with
+    gaps left missing (never interpolated), the documented formula published *with its three
+    components*, and "labeled hypothesis, never probability or causal inference" — plus a new
+    minimum-evidence rule under which a detector that cannot clear its thresholds **emits
+    nothing**. Full rationale and rejected alternatives:
+    [../engineering/consolidation-architecture.md §4.1–§4.3, §4.13, §4.15](../engineering/consolidation-architecture.md).
 13. **Citation validation scope (honest claim):** mechanical validation guarantees citations
     resolve to real evidence in the turn's trace; **numeric/directional fidelity of prose is
     covered by the citation-compliance eval, not runtime validation**. Docs must not claim
@@ -490,6 +553,16 @@ evidence of success, and integration seams need their own assertions at the *out
 layer (the committed row), not only at the unit that owns the logic. The M5 smoke step — a
 10-record rehearsal into a throwaway account — is what caught the first and is retained as
 standard practice for any future bulk operation.
+
+## ADR-16 — Phase 5 (insight engine) — *pending*
+
+Phase 5's decisions are held in
+[../engineering/consolidation-architecture.md §4](../engineering/consolidation-architecture.md)
+(**LOCKED 2026-08-03**) while the phase is in flight — the same holding pattern
+[ADR-15](#adr-15) used for replay. That document is canonical for the *how*; the amendments it
+required to ADR-13.1, 13.11, and 13.12 are already recorded inline above. When M1–M7 land,
+§4 is promoted here as **ADR-16**, recording only what is architecturally binding and only
+what implementation actually validated.
 
 ## Standing assumptions (verify, don't trust)
 

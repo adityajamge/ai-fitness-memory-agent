@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from api.main import create_app
 from engine.model import ExtractedEvent
 from engine.tests.conftest import FakeModelProvider
+from engine.tests.dbcleanup import register_email
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL", "postgresql://root@127.0.0.1:26257/defaultdb?sslmode=disable"
@@ -25,7 +26,12 @@ _DB_REQUIRED = bool(os.environ.get("CI") or os.environ.get("REQUIRE_DB"))
 
 
 def unique_email() -> str:
-    return f"user-{uuid.uuid4().hex}@example.com"
+    """A fresh signup address per test, registered for the end-of-session purge (M0).
+
+    The second choke point (with the ``user_id`` fixture): api tests never mint the user id
+    themselves — the app does, behind ``POST /api/auth/signup`` — so the email is what this run
+    can register, and ``dbcleanup.purge`` resolves it to an id at session end."""
+    return register_email(f"user-{uuid.uuid4().hex}@example.com")
 
 
 def _require_db() -> None:
