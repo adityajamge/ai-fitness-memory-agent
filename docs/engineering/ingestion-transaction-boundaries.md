@@ -53,6 +53,8 @@ Scope and limits (stated so the demo and README never overclaim — honesty post
 5. **Embedding failure never fails a turn and never rolls back a write.** (§6)
 6. **Backfill never affects the turn that triggered it.** It runs after commit, in its own
    transaction(s), best-effort. (§7)
+7. **Consolidation never affects the turn that triggered it.** Same posture, same reason (§7.1,
+   Phase 5 stage (F₀)).
 
 ## 4. Pipeline stages and where the boundary sits
 
@@ -78,7 +80,10 @@ ingest_text(user_id, text)
 │        ▼
 ├─ (E) build receipt from committed rows   (parse_status="ok")
 │        ▼
-└─ (F) opportunistic backfill  (post-commit, separate txn, bounded, best-effort — §7)
+├─ (F₀) CONSOLIDATION  (Phase 5 — post-commit, own txns, budgeted, best-effort — §7.1)
+│        derives insights from the series this turn touched; appends them to the receipt
+│        ▼
+└─ (F₁) opportunistic backfill  (post-commit, separate txn, bounded, best-effort — §7)
 
 NOTE PATH:
    (D') ══ SINGLE WRITE TRANSACTION ══  INSERT one `note` memory (raw text in payload)  COMMIT
@@ -162,6 +167,31 @@ Losing an embedding degrades recall temporarily; it never loses a memory.
   turn failure, because the turn already succeeded. The rows simply remain NULL for the next
   backfill pass.
 
+## 7.1 Stage (F₀) — consolidation (Phase 5)
+
+Consolidation rides this tail between the receipt and the backfill. Canonical reference:
+[consolidation-architecture.md §4.8](consolidation-architecture.md).
+
+- **Post-commit, always.** Running it before (D) would let a *derived*-data failure roll back a
+  fact the user reported — inverting never-lose-input for the sake of a hypothesis.
+- **Outside the write transaction** (invariant I-14), which is what keeps **rule 1** true: it
+  performs several round trips, and none of them happen while a transaction is open.
+- **Never fails a turn** (I-15). A raising consolidator is caught and logged exactly as backfill
+  is; the memories stay committed and the receipt stays honest. An insight lost to an error costs
+  one re-derivation, because the next ingest touching the series recomputes it and the identity
+  rule makes that idempotent.
+- **No model call.** Insights are written with `embedding = NULL` and picked up by (F₁) (I-16),
+  so the stage adds no Bedrock round trip to the ingest path.
+- **Scoped to touched series.** A meal payload carries four metrics but only `protein_g` is
+  consolidatable, so lunch costs one series scan; a turn touching nothing consolidatable opens no
+  connection at all.
+- **Budgeted, and a deferral is a result, not an error.** Overflow leaves the remainder for the
+  on-demand path and the turn is undisturbed.
+
+The receipt gains an `insights` list, kept separate from `created`: the user reported what is in
+`created`, while an insight is a claim the engine made *about* it, and one list would let a receipt
+imply the user logged something they never said.
+
 ## 8. `reprocess_note` — the supersession transaction
 
 `reprocess_note(user_id, note_id)` is the recovery path that upgrades a note into typed
@@ -230,6 +260,11 @@ transaction (D)/(D') as the memories (ADR-13.14: "written in one transaction aft
 completes"). This document's boundary does not move — the trace/turn writes are additional
 statements inside the *existing* single transaction, preserving rule 2 (atomic turn) and the
 turn-commit-failure guarantee. Phase 2 creates those tables but does not write to them.
+
+**Stage (F₀) sits outside that transaction and must stay there** (§7.1, I-14). An insight is
+derived data: losing it costs one re-derivation, whereas widening the atomic turn to cover it
+would put several round trips — and a failure mode that has nothing to do with the user's input —
+inside the transaction that guarantees never-lose-input.
 
 ## 13. Known deviations (audited 2026-07-21)
 

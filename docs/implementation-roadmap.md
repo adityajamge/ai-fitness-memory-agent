@@ -225,6 +225,21 @@
 
 ## Phase 5 — Insight Engine *(~5–6 days)*
 
+> **Status 2026-08-04: M0–M5a complete, 656 tests green.** M0 decisions + fixture hygiene
+> (`ce4d961`) · M1 insight contracts (`f2d109b`) · EffectScale amendment (`0343958`) · M2
+> analytics kernel (`b2d5b25`) · M3 consolidation service + identity (`7385769`) · M4 typed
+> retraction (`d45ca8b`) · claim_dates identity fix (`7c49123`) · M5a stage (F₀) hook
+> (`489f1cc`). **Remaining:** M5b insight builder family + trace lineage · M5c `analyze_series`
+> dispatch · M5d `cli/consolidate.py` · M6 latency (T12) · M7 photo ingestion (first to cut).
+>
+> Three approved amendments came out of implementation and are recorded in the architecture
+> doc's §11 implementation record: **per-series `EffectScale`** (a single relative effect floor
+> refused every clinically meaningful body-composition change), **typed `pre_value`/`post_value`**
+> (§4.14's direction-only retraction had no reference to compare against), and **`claim_dates`**
+> (fingerprinting the evidence window made an unchanged claim supersede itself once per logged
+> day). Measured: consolidation costs **~635 ms/series** cross-region, so ADR-13.1's provisional
+> 300 ms completes exactly one series — T12's to re-derive.
+
 > **Before starting:** [docs/engineering/consolidation-architecture.md](engineering/consolidation-architecture.md)
 > is the **locked** architecture for this phase (approved 2026-08-03) — 18 decisions, 23
 > invariants, risk analysis, the M0–M7 milestone breakdown, and the test strategy. Read it

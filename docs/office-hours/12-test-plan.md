@@ -31,8 +31,21 @@
 >   The load-bearing ones are the **zero-extraction property** and the **forced-double-run
 >   duplicate guard**. Detail: [engineering/replay-architecture.md](../engineering/replay-architecture.md) §7.
 >
-> Still planned: consolidation (Phase 5), trace persistence + citation validation (T7),
-> photo/S3 ingestion, the 4 Playwright E2E paths, and both live-model eval lanes.
+> - **Phase 5 (2026-08-04): 656 tests green.** The whole `engine/consolidation` block below,
+>   across M0–M5a: the analytics kernel pinned against the **real** protein series and Vitamin D
+>   pair (sanitized fixtures, ADR-7), the insight payload contracts and drift canary, the
+>   identity rule, typed retraction, and the stage-(F₀) ingestion hook. The load-bearing ones are
+>   **I-12** (recompute over unchanged data writes zero rows, asserted at the committed-row
+>   layer), **I-20** (retraction flips `status` and leaves the payload byte-identical), **I-21**
+>   (no model, no prose, proven by rewriting a hypothesis to say the opposite and asserting the
+>   verdict is unchanged), and **I-8** (no note text reaches a detector). Detail:
+>   [engineering/consolidation-architecture.md](../engineering/consolidation-architecture.md) §9, §11.
+>   Test hygiene: since Phase 5 M0 a full run leaves **zero** residue for the ids it mints.
+>
+> Still planned: the insight builder family + trace lineage (M5b), `analyze_series` dispatch
+> (M5c), the retroactive CLI (M5d), the latency profile (M6/T12), trace persistence + citation
+> validation (T7), photo/S3 ingestion (M7), the 4 Playwright E2E paths, and both live-model
+> eval lanes.
 
 ```
 CODE PATHS                                               USER FLOWS
@@ -55,13 +68,16 @@ CODE PATHS                                               USER FLOWS
   ├── recall: vector top-k, status='active' filter,               memories or traces (SECURITY)
   │        NULL-embedding rows excluded
   └── timeline: ordered slice, range edges
-[+] engine/consolidation (1A sync + budget, 17A analytics)
-  ├── fixture series WITH changepoint → insight row, correct evidence_ids
-  ├── series WITHOUT changepoint → no insight
+[+] engine/consolidation (1A sync + budget, 17A analytics) — M0-M5a done
+  ├── real series WITH level shift → insight row, boundary-anchored evidence_ids
+  ├── series WITHOUT a qualifying shift → nothing, with a recorded reason (I-22)
   ├── budget exceeded → defers cleanly, ingestion still succeeds
-  ├── typed retraction condition met → status='retracted' (never deleted)
-  ├── supersession chains via superseded_by
-  └── pattern-strength formula: documented, deterministic on fixtures
+  ├── typed retraction condition met → status='retracted' (never deleted, payload intact)
+  ├── supersession chains via superseded_by; retraction leaves it NULL
+  ├── pattern-strength formula: documented, deterministic, pinned on REAL fixtures
+  ├── PROPERTY: recompute over unchanged data writes ZERO rows (I-12, committed-row layer)
+  ├── no prose reaches a detector or an evaluator (I-8 / I-21, structural + behavioural)
+  └── stage (F₀) runs post-commit and never fails a turn (I-14 / I-15)
 [+] engine/trace (ADR-12)
   ├── PROPERTY: no assembled context without a persisted trace
   ├── trace fields complete (queries, evidence, insights, ranking)

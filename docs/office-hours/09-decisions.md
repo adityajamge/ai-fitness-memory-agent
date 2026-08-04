@@ -155,7 +155,10 @@ earlier ADRs or docs.
    [../deploy.md](../deploy.md) records app in us-east-1 and CockroachDB Cloud in ap-south-1;
    a single round trip on that path is ~200–250ms and stage (F₀) needs 2–3. **T12 measures the
    real number and this item is re-derived from that measurement** — an honest amendment, not
-   a silently relaxed constant. Rationale and the two structural defences (one consolidatable
+   a silently relaxed constant. **First measurement (Phase 5 M3, 2026-08-04):** one series costs
+   **~635 ms** on that path, so 300 ms completes exactly one series and defers the rest. The
+   deferral mechanism is correct — nothing partial, no error, the turn undisturbed — and the
+   number stands until T12 measures the deployed service rather than a developer machine. Rationale and the two structural defences (one consolidatable
    series per meal; no embed call on the hot path):
    [../engineering/consolidation-architecture.md §4.8](../engineering/consolidation-architecture.md).
 2. **Embeddings: Bedrock Titan Text Embeddings V2, 512-dim, normalized**; `VECTOR(512)`.

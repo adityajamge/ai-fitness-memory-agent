@@ -392,6 +392,30 @@ Fingerprinting rather than deep-comparing payloads keeps the comparison cheap, d
 independent of incidental payload changes (a reworded hypothesis string must not trigger a
 supersession).
 
+**Amended 2026-08-04 (M5a) — identity keys on the claim's dates, not its evidence window.**
+The first implementation fingerprinted `window_start`/`window_end`. For a `level_shift` those bound
+the *compared observations*, and the post-side observation grows every time another day at the same
+level is logged — so three identical lunches on three consecutive days produced **three** insight
+rows with identical kind, series, boundary and values. No *active* duplicates, so this milestone's
+own property test still passed, but a user logging lunch daily would accumulate ~30 superseded rows
+a month for one unchanged claim, filling the lineage chain — where "the engine changed its mind" is
+supposed to be legible — with noise.
+
+`Finding.claim_dates` now supplies what identifies a claim: for `level_shift` the **boundary alone**
+("moved from A to B starting here"), for `intervention_outcome` the **measurement pair** (there the
+window *is* the claim, and adding behavioural rows between two measurements moves neither).
+`window_start`/`window_end` remain on the payload unchanged — they are what the claim is *about*,
+and §4.12 needs `window_end` for `event_time`. Every real change is still caught: a different
+boundary changes the dates, a different level changes the values, different interventions change the
+id set. **Accepted consequence:** when evidence accumulates at an unchanged level, `coverage` (and
+so `pattern_strength`) can drift slightly stale on the stored row until the claim itself changes —
+correct under this section, since a score is not the claim, and §4.7's derived freshness already
+tells `analyze_series` when a recompute is warranted.
+
+**Found at the M3→M5 seam**, exactly the failure class [ADR-15.6](../office-hours/09-decisions.md#adr-15)
+named: M3 tested `consolidate_series` directly, where nothing extends the series between runs, so
+both sides were individually correct and the defect lived between them.
+
 **Rejected alternatives**
 
 | Alternative | Why rejected |
@@ -619,6 +643,17 @@ places the marker where the claim's evidence ends — correct for the timeline s
 evidence rather than from the score keeps `confidence` meaning the same thing across both memory
 tiers, which is what the glass box's confidence column asserts.
 
+**Amended 2026-08-04 (M4) — the payload also carries `pre_value` and `post_value`, typed.** §4.14's
+direction-only retraction condition measures counterexamples "relative to the insight's post-shift
+level", and that value was computed at derivation, consumed by the fingerprint, and then discarded —
+leaving the variant unevaluatable. They are **typed fields, not `extra="allow"` extras**, because the
+evaluator branches on `post_value`, which is the definition of a hot field under ADR-13.6; an untyped
+extra could arrive as a string and make the comparison non-deterministic. They also make an insight
+self-describing: without them the numbers exist only inside `hypothesis`, which no deterministic code
+may parse (**I-8**). *(Rejected: reading the post-side value out of `evidence_ids` ordering — an
+undocumented internal detail of `Finding`; re-deriving the claim — unavailable exactly when
+retraction matters most, which is when the detector now refuses.)*
+
 **Rejected alternatives:** `event_time = created_at` (puts a claim about May in August on the
 timeline); `event_time = window_start` (a marker before most of its own evidence); `confidence =
 pattern_strength` (conflates "how sure are we of the inputs" with "how strong is the pattern" — two
@@ -675,10 +710,13 @@ the engine does not have.)*
 **Why "specificity" replaces "lag consistency".** ADR-13.12's third factor assumed a lag-correlation
 detector that §4.3 removes. Specificity generalises it honestly: it asks *how uniquely this claim's
 evidence points at one explanation*, and it is the factor that keeps `intervention_outcome` from
-reading as causal — when seven things changed at once it drops to ~0.14 and the insight openly says
-so. Worked example, from the real data: the Vitamin D recovery scores `effect 1.0 × coverage ≈0.97
-× specificity ≈0.14 ≈ 0.14` — a strong observation with weak attribution, which is exactly what a
-careful clinician would say. The live body-scan beat scores high because exactly one intervention
+reading as causal — when several things changed at once it collapses and the insight openly says
+so. **Worked example, measured against the real data (M2):** the Vitamin D recovery scores
+`effect 1.000 × coverage 0.970 × specificity 0.250 = 0.242` — a strong observation with weak
+attribution, which is exactly what a careful clinician would say. *(This paragraph originally
+estimated specificity at ≈0.14 from seven raw interventions. The merge rule below is what the
+implementation applies, and those eight interventions cluster into **four**, giving 0.25. The
+formula behaved as written; the illustration predated the merge.)* The live body-scan beat scores high because exactly one intervention
 falls in its interval.
 
 **Rejected alternatives:** per-kind unrelated formulas (two scales the UI cannot compare); a
@@ -724,6 +762,27 @@ are load-bearing for a *deterministic* evaluator, which is the entire point of t
 Making `threshold` optional resolves the ambiguity without choosing one of the two readings: the
 comparator exists when there is something to compare against, and direction alone otherwise.
 
+**Clarified at M4 — counterexamples are counted as distinct local days.** Two contradicting meals
+on one day are one counterexample. That is what makes the count mean the same thing as the sentence
+the user was shown ("on 3 or more **days** in any 30-day window"), and ADR-13.11's whole premise is
+that the displayed rule and the evaluated rule are one rule. This is the single place the pass counts
+days where the *detectors* count assertions (**I-4**), and the distinction is intentional: I-4
+protects effect size from over-weighted evidence, while a retraction asks how many days reality
+disagreed — and an assertion covering thirty days really does assert about each of them.
+
+**The write primitive is `mark_retracted`, deliberately not `mark_superseded`.** Nothing *replaces* a
+retracted claim, so `superseded_by` stays NULL and the two mechanisms [ADR-9](../office-hours/09-decisions.md)
+distinguishes stay distinguishable in the data. It is a single scoped UPDATE touching `status` on
+active rows only — so the payload is never rewritten (**I-20**) and a second pass is a no-op rather
+than a second flip. This is not a third *ingestion* transaction shape (**I-11**): it writes no
+memory, and I-11 governs claim replacement, which §4.6 already handles with insert+supersede.
+
+`now` is injected rather than read inside, so a trailing window is never anchored to a hidden clock;
+the counting primitive itself takes no clock at all, since the window is applied by the query.
+Conditions that cannot be evaluated — a missing `post_value`, a metric the engine cannot read — are
+**skipped with a reason and leave the insight active**. Guessing a reference would retract a claim on
+arithmetic the user never agreed to.
+
 **Rejected alternatives:** LLM-evaluated prose conditions (ADR-13.11 already rejected these:
 nondeterministic and budget-hostile); a general expression language (an interpreter below the
 tool-call boundary).
@@ -746,6 +805,8 @@ insight and a logged refusal reason (which is itself useful glass-box material l
 | `MIN_INTERVAL_DAYS` | 14 | `intervention_outcome` |
 | `MIN_MEASUREMENTS` | 2 | `intervention_outcome` |
 | `MIN_INTERVENTIONS` | 1 | `intervention_outcome` |
+| `CONCURRENCY_DAYS` | 3 | `level_shift` specificity |
+| `MIN_INTERVENTION_GAP_DAYS` | **3** *(set at M2 — §4.13 named the constant without a value; matched to `CONCURRENCY_DAYS` so "the same moment" means the same span on both detectors)* | `intervention_outcome` specificity |
 
 **Why.** With one historical body scan, a second scan creates a two-point series — and a product
 that emits "a pattern" from two adjacent points in front of judges has fabricated one. A refusal is
@@ -1104,7 +1165,75 @@ by construction. **Not a trigger:** a desire to say "changepoint detection" in t
 
 ---
 
-## 11. Maintenance notes
+## 11. Implementation record (M0 → M5a)
+
+> Decisions and findings that came out of *building* this, not out of designing it. §4 says what
+> the architecture is; this section says what implementation taught, so a future agent can tell a
+> deliberate choice from an accident. Everything here was approved before it landed.
+
+### 11.1 Choices §4 left open, settled in code
+
+| # | Decision | Where | Why |
+|---|---|---|---|
+| a | **`intervention_outcome` compares the two most recent measurements**, not first-to-last | M2, `engine/analytics.py` | §4.1 says a claim arises when a marker "gains a second (or later) measurement". Comparing each new measurement against its predecessor keeps the interval — and so the intervention set inside it — local and defensible. First-to-last would sweep every intervention an account ever saw into one claim and drive specificity toward zero as history grows: the wrong answer getting more wrong over time. |
+| b | **`MIN_INTERVENTION_GAP_DAYS = 3`** | M2 | §4.13 named the constant without a value; matched to `CONCURRENCY_DAYS` so "the same moment" spans the same window on both detectors. |
+| c | **`level_shift` specificity is scoped to its own series** — other shifts found in the same run, within `CONCURRENCY_DAYS` | M2 | A single-series detector cannot see other series. Cross-series attribution is `intervention_outcome`'s question, and is exactly where the score correctly collapses. |
+| d | **One finding kept per series** (the most recent boundary) | M3, `_detect` | Identity is `(user, kind, series)`, so a series holds one active claim. Earlier shifts are not lost — each remains available as an *intervention* for the outcome detector. |
+| e | **`ONSET_SOURCES = {supplement: by exact name, workout: first-ever}`** | M3 | §4.4 defines onsets structurally but names no types. These are the two the data has. Exact-name matching is where §4.18's canonicalization deferral is felt: two spellings read as two onsets — bounded and documented. |
+| f | **`BEHAVIOURAL_TYPES = (meal, workout, sleep, supplement)`** for coverage | M3 | §4.13's coverage asks "was the engine watching"; a second blood panel is not evidence anyone was logging behaviour. |
+| g | **`source='consolidation'`** on every derived row | M3 | Lets the glass box, and any later audit, tell a claim the engine made from a fact the user reported. |
+| h | **A surplus of active insights is reconciled and logged**, never silently resolved by picking a winner | M3, `_apply` | A duplicate nothing complains about is how the count drifts. |
+| i | **`engine/insights.py` must not import `engine/retrieval.py`** | M1 | `CONSOLIDATION_SERIES` is a subset of `METRICS` (**I-9**), but importing it would invert the layering the moment M5b's insight builder family makes `retrieval` need these contracts — a cycle created by one line and paid for two milestones later. I-9 is enforced by a test that imports both, the same posture as the payload registry's drift canary. |
+| j | **`pattern_strength` must *equal* its components**, checked at the payload boundary within `STRENGTH_TOLERANCE` | M1, `engine/types.py` | A strengthening of **I-19** beyond "published with". A score its components cannot explain is the unfalsifiable number ADR-13.12 exists to prevent, and the payload boundary is the only place no code path can route around. |
+| k | **`consolidation` is an optional dependency of `IngestionService`** | M5a | Every pre-Phase-5 caller and test constructs the write path without one and behaves identically — which is what keeps 600+ existing tests meaningful. |
+| l | **The receipt keeps the two tiers apart** (`created` vs `insights`); the API key is additive | M5a | `created` is what the user reported; an insight is a claim *about* it. One list would let a receipt imply the user logged something they never said. |
+
+### 11.2 Consequences worth knowing before you touch this
+
+- **`level_shift` structurally cannot fire on live daily logging.** A one-day observation has no
+  *level*, so `MIN_SPAN_DAYS` refuses it and day-to-day noise can never become a claim. The live
+  path is `intervention_outcome` (§4.1), which is what the demo beat uses. Discovered while writing
+  M3's provenance test; intended behaviour, not a gap.
+- **Refusals are emitted to a `logging` debug channel, not returned.** §4.3 pins the detector
+  signature as `-> list[Finding]`, and §4.15 says a refusal is "logged". I-7's "no I/O" means no
+  network, database, or filesystem — observability is not what it protects.
+- **A JSON `null` is not SQL `NULL`.** The retractable-insight query filters
+  `jsonb_typeof(payload -> 'retraction_condition') = 'object'`, not `IS NOT NULL`. Production rows
+  omit the key entirely (`payload_to_json` drops `None`) so both agreed there, but a hand-repaired
+  payload is exactly where they would not, and "no condition" must mean one thing however written.
+- **No schema change was needed.** The existing inverted JSONB index serves the active-insight
+  lookup; `engine/schema.sql` is untouched by Phase 5 so far.
+
+### 11.3 Measured findings
+
+| Measurement | Value | Consequence |
+|---|---|---|
+| Consolidation cost per series, app → CockroachDB Cloud **ap-south-1** | **~635 ms** | ADR-13.1's provisional 300 ms budget completes **exactly one series** and defers the rest. The mechanism behaves correctly — clean deferral, nothing partial, no error — and the *number* is T12's to re-derive, as that amendment anticipated. |
+| Full 9-series pass, same path | ~5.7 s | Why M3/M5a tests that assert *coverage* rather than speed lift the budget explicitly. |
+| Real protein series → level shifts | effect 0.167 / 0.300 / 1.000 at 2026-04-25, 06-15, 06-23 | Pinned in `test_analytics.py`; a change to §4.13's arithmetic fails a test before it fails a walkthrough. |
+| Real Vitamin D pair → `intervention_outcome` | effect 1.000 · coverage 0.970 · specificity 0.250 · **strength 0.242** | The money question, as arithmetic. |
+| Test-suite residue per full run after M0 | `memories` 0, `users` 0, `sessions` 0 | Was +1,455 / +146 / +135. |
+| Remaining residue: LangGraph checkpoint rows | **281 per run** | Agent tests use raw thread ids, so the prefix purge cannot see them. Recorded in TODOS.md, deliberately outside M0. |
+
+### 11.4 Milestone status
+
+| | Milestone | Status |
+|---|---|---|
+| M0 | Decisions locked + fixture hygiene | ✅ `ce4d961` |
+| M1 | Insight contracts | ✅ `f2d109b` |
+| — | EffectScale amendment (§4.13) | ✅ `0343958` |
+| M2 | Analytics kernel | ✅ `b2d5b25` |
+| M3 | Consolidation service + identity | ✅ `7385769` |
+| M4 | Retraction evaluator | ✅ `d45ca8b` |
+| — | `claim_dates` identity fix (§4.6) | ✅ `7c49123` |
+| M5a | Stage (F₀) ingestion hook | ✅ `489f1cc` |
+| M5b | Insight builder family + trace lineage | ⏳ |
+| M5c | `analyze_series` graph dispatch | ⏳ |
+| M5d | `cli/consolidate.py` | ⏳ |
+| M6 | Latency profile (T12) | ⏳ |
+| M7 | Photo ingestion | ⏳ (first to cut) |
+
+## 12. Maintenance notes
 
 - **Do not let a detector read text.** Every intervention must reduce to exact equality or
   arithmetic (I-8). This is the invariant most likely to be eroded by a well-meaning improvement,
@@ -1128,7 +1257,7 @@ by construction. **Not a trigger:** a desire to say "changepoint detection" in t
 
 ---
 
-## 12. Related files
+## 13. Related files
 
 | File | Relationship |
 |---|---|

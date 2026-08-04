@@ -84,12 +84,25 @@ live moment is where "flagged the moment it happened" language belongs; insights
 over reconstructed history use event-time framing with truthful `created_at`.
 
 **Analytics = labeled heuristic pattern flags** ([ADR-13.12](09-decisions.md#adr-13)):
-daily bucketing (gaps stay missing — health data is never interpolated), `ruptures` PELT
-for changepoints, bounded lag scan (7–35 days) over whitelisted series pairs, and a
-documented "pattern strength" score (effect size × coverage × lag consistency). Presented
-as hypothesis, never probability or causal inference. Retraction conditions are **typed
-objects** ({metric, comparator/direction, window_days, min_count}) in InsightPayload,
-evaluated deterministically; UI prose is rendered from the object
+daily bucketing (gaps stay missing — health data is never interpolated) and a documented
+"pattern strength" score, presented as hypothesis, never probability or causal inference.
+
+**Amended in Phase 5 — the detector set.** `ruptures` PELT and the bounded 7–35 day lag scan
+were removed: measured against the data the Phase 4 replay actually committed, neither had
+anything it could honestly run on (the account's one daily series is a four-level step function
+written by period expansion, and no valid series *pair* exists). They are replaced by two
+deterministic detectors — **`level_shift`** (a metric's level moved between adjacent observations)
+and **`intervention_outcome`** (a sparsely measured marker changed, with the structurally detected
+changes inside that interval as its lineage). Consolidation observes **assertions, not materialized
+period days**, and the strength formula's third factor is **specificity** (1 / competing changes)
+rather than lag consistency. `effect` is measured against a **per-series scale in the metric's own
+units**, because one relative floor cannot serve both a marker that moves 5× and a body-fat
+percentage that never will. Full rationale, rejected alternatives, and the measured numbers:
+[../engineering/consolidation-architecture.md](../engineering/consolidation-architecture.md).
+
+Retraction conditions are **typed objects** (`{metric, direction, threshold?, window_days,
+min_count}`) in InsightPayload, evaluated deterministically over distinct days; UI prose is
+rendered **from** the object so the displayed rule and the evaluated rule cannot disagree
 ([ADR-13.11](09-decisions.md#adr-13)).
 
 ### 5. Context assembly + ranking

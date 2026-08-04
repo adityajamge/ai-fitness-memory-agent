@@ -24,7 +24,8 @@ CREATE TABLE memories (
   tz            TEXT NOT NULL,          -- user's timezone at event time
   type          TEXT NOT NULL,          -- 'meal' | 'workout' | 'sleep' | 'body_scan' | 'weight'
                                         -- | 'blood_report' | 'supplement' | 'note' | 'insight' | ...
-  source        TEXT NOT NULL,          -- 'chat' | 'photo_upload' | 'file_upload' | 'replay' | ...
+  source        TEXT NOT NULL,          -- 'chat' | 'photo_upload' | 'file_upload' | 'replay'
+                                        -- | 'consolidation' (derived rows) | ...
   provenance    TEXT NOT NULL,          -- 'live' | 'reconstructed'
   confidence    FLOAT NOT NULL,         -- 0..1; 1.0 for directly observed live data
   status        TEXT NOT NULL DEFAULT 'active',  -- 'active' | 'retracted' | 'superseded'
@@ -65,13 +66,24 @@ Graphiti's temporal model — see [09-decisions.md → ADR-5](09-decisions.md#ad
 // type='body_scan'
 { "body_fat_pct": 21.4, "weight_kg": 71.2, "method": "scale_scan" }
 
-// type='insight'  (derived — tier 2)
-{ "hypothesis": "protein ↑ + sleep ≥7.5h preceded body-fat decline (lag ≈ 3 wk)",
-  "evidence_ids": ["mem_4102", "mem_4788", "mem_8842", "..."],
-  "trigger": "on_ingest:body_scan",
-  "pattern_strength": 0.82,            // documented heuristic (ADR-13.12), not a probability
+// type='insight'  (derived — tier 2).  As implemented in Phase 5; source='consolidation'.
+// event_time = window_end (what the claim is about); created_at stays truthful (ADR-13.10).
+{ "kind": "level_shift",               // closed vocabulary (I-1): level_shift | intervention_outcome
+  "hypothesis": "protein rose from ~45 to ~83 g/day starting 2026-06-23",
+  "series_metric": "protein_g", "series_kind": "behavioural",
+  "window_start": "2026-06-15T00:00:00+05:30",   // extent of the evidence, NOT the identity
+  "window_end":   "2026-06-30T00:00:00+05:30",
+  "pre_value": 45.0, "post_value": 83.0,          // the claim's values; post_value is the
+                                                  // reference a direction-only retraction uses
+  "evidence_ids": ["…"],               // boundary-anchored, capped at 24 (I-5)
+  "evidence_count": 16,                // the TRUE total — what keeps the cap honest
+  "effect": 0.844, "coverage": 1.0, "specificity": 1.0,
+  "pattern_strength": 0.844,           // = effect × coverage × specificity, enforced (I-19);
+                                       // a documented heuristic (ADR-13.12), never a probability
+  "fingerprint": "…",                  // identity of the CLAIM (kind, series, claim dates,
+                                       // values, interventions) — not of its evidence window
   "retraction_condition": {            // typed object (ADR-13.11), evaluated deterministically
-    "metric": "body_fat_pct", "direction": "rising",
+    "metric": "protein_g", "direction": "falling", "threshold": 45.0,
     "window_days": 30, "min_count": 3 } }
 ```
 
@@ -85,7 +97,12 @@ New nutrient tomorrow? Add a key inside `payload.nutrition`. No migration.
 - Mechanics (who evaluates retraction conditions, on-ingest vs. on-read) were settled by
   [ADR-13.11](09-decisions.md#adr-13) (typed conditions, deterministic evaluator) and
   [ADR-13.1](09-decisions.md#adr-13) (evaluated in the sync consolidation pass that rides
-  ingestion); [OQ7](10-open-questions.md) is closed. Implementation is T5/T6, Phase 5.
+  ingestion); [OQ7](10-open-questions.md) is closed. Implemented in Phase 5 (T5/T6).
+- **Retraction and supersession are different writes, and stay distinguishable in the data.**
+  Retraction flips `status='retracted'` and leaves `superseded_by` NULL — nothing replaced the
+  claim, the evidence was simply against it. Supersession sets both, because a replacement exists.
+  Neither ever rewrites a payload, so what the engine claimed and the rule it agreed to be judged
+  by both survive (Phase 5 invariants I-13/I-20).
 - Default reads filter `status='active'`; the glass-box UI can surface retracted insights
   deliberately.
 

@@ -115,11 +115,17 @@ one**. Insight payloads carry the series/metric identifiers they are about (metr
 series pair, lag window), so `analyze_series(metric="body_fat_pct")` first runs an indexed
 query: `status='active'` insights whose payload references that metric (inverted index).
 
-The match passes a **freshness rule**: insights carry `last_evaluated_at`, maintained by the
-consolidation pass — and since every relevant ingest re-touches affected insights
-synchronously ([ADR-13.1](09-decisions.md#adr-13)), insights are current *by construction*
-in normal operation. If the series has events newer than `last_evaluated_at` (possible after
-a budget-overflow deferral), the engine recomputes on demand; otherwise it returns the
+The match passes a **freshness rule**. **Amended in Phase 5 (§4.7): freshness is *derived*, never
+stored.** There is no `last_evaluated_at` field — an insight is stale iff its series holds a memory
+whose `created_at` is later than the insight's own. `created_at` already means "when we learned it"
+(04's bi-temporal model), so this is the schema's own reading of the question; it needs no column
+and no migration, and it keeps `memories` append-only apart from
+`status`/`superseded_by`/`embedding` (invariant I-13). A stored field would be a second source of
+truth for a derivable fact, and the two could disagree.
+
+Since every relevant ingest re-touches affected series synchronously
+([ADR-13.1](09-decisions.md#adr-13)), insights are current in normal operation. If the series has been added to since the claim was derived (possible
+after a budget-overflow deferral), the engine recomputes on demand; otherwise it returns the
 existing insight with its lineage.
 
 Semantic recall over insight embeddings (insights are ordinary memories with embedded
