@@ -31,24 +31,31 @@ class IngestBody(BaseModel):
         return v
 
 
+def _ref_json(ref) -> dict:
+    return {
+        "id": str(ref.id),
+        "type": ref.type,
+        "summary": ref.summary,
+        "embedding_pending": ref.embedding_pending,
+    }
+
+
 def receipt_json(receipt: Receipt) -> dict:
     """The wire shape of an ingestion receipt. Public because ``/api/chat`` returns the same
-    shape for the memories a turn created — one receipt contract, two entry points."""
+    shape for the memories a turn created — one receipt contract, two entry points.
+
+    ``insights`` is a **separate key**, not folded into ``created`` (Phase 5 §4.8): the user
+    reported what is in ``created``, while an insight is a claim the engine made about it, and
+    a UI that showed them as one list would imply the user logged something they never said.
+    Additive — a client that ignores the key sees exactly the Phase 2 shape."""
     return {
         "parse_status": receipt.parse_status,
         "message": receipt.message,
         "superseded_note_id": str(receipt.superseded_note_id)
         if receipt.superseded_note_id
         else None,
-        "created": [
-            {
-                "id": str(ref.id),
-                "type": ref.type,
-                "summary": ref.summary,
-                "embedding_pending": ref.embedding_pending,
-            }
-            for ref in receipt.created
-        ],
+        "created": [_ref_json(ref) for ref in receipt.created],
+        "insights": [_ref_json(ref) for ref in receipt.insights],
     }
 
 

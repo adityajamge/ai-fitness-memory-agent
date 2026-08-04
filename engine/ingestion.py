@@ -10,16 +10,18 @@ embeddings are a nullable enrichment backfilled later.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
 
+from engine.consolidation import ConsolidationService
 from engine.db import Database
 from engine.memory import Memory
 from engine.model import EmbeddingError, ExtractedEvent, ExtractionError, ModelProvider
 from engine.repository import (
     fetch_unembedded,
+    get_memory,
     get_note,
     insert_memories,
     mark_superseded,
@@ -53,6 +55,11 @@ class Receipt:
     message: str = _MSG_OK
     superseded_note_id: UUID | None = None
     superseded_ids: list[UUID] = field(default_factory=list)
+    #: Insights stage (F₀) derived from this turn (Phase 5 §4.8). Separate from ``created``
+    #: because they are a different tier of memory: the user reported the events in
+    #: ``created``, while these are claims the engine made *about* them. Collapsing the two
+    #: would let a receipt imply the user logged something they never said.
+    insights: list[MemoryRef] = field(default_factory=list)
 
 
 class IngestionService:
@@ -63,11 +70,15 @@ class IngestionService:
         *,
         default_tz: str,
         backfill_batch: int = 32,
+        consolidation: ConsolidationService | None = None,
     ) -> None:
         self.db = db
         self.model = model
         self.default_tz = default_tz
         self.backfill_batch = backfill_batch
+        #: Stage (F₀). Optional so the write path stands alone — every pre-Phase-5 caller and
+        #: test constructs this service without one and behaves exactly as before.
+        self.consolidation = consolidation
 
     # ── public API ────────────────────────────────────────────────────────────────────
     def ingest_text(
@@ -295,8 +306,9 @@ class IngestionService:
         for m, mid in zip(memories, ids, strict=True):
             m.id = mid
 
-        # (E) receipt from committed rows, then (F) opportunistic backfill
+        # (E) receipt from committed rows, (F₀) consolidation, then (F₁) backfill
         receipt = Receipt(created=self._refs(memories), parse_status="ok", message=_MSG_OK)
+        receipt = self._consolidate(user_id, memories, receipt)
         self._opportunistic_backfill(user_id)
         return receipt
 
@@ -337,6 +349,55 @@ class IngestionService:
         )
         self._opportunistic_backfill(user_id)
         return receipt
+
+    def _consolidate(self, user_id: UUID, memories: list[Memory], receipt: Receipt) -> Receipt:
+        """Stage (F₀) — derive insights from what this turn just committed (§4.8).
+
+        **Post-commit, best-effort, budgeted.** It runs after (D) has committed and after the
+        receipt has been built from committed rows, in its own transactions. Three consequences,
+        each deliberate:
+
+        * It can never roll back the user's input. Running it before the commit would let a
+          *derived*-data failure lose a fact the user reported — inverting never-lose-input for
+          the sake of a hypothesis.
+        * It is outside the turn's write transaction (**I-14**), so transaction-boundaries
+          rule 1 still holds: no network call happens while a transaction is open.
+        * A failure here **never fails the turn** (**I-15**) — the same posture as backfill.
+          An insight lost to an error costs one re-derivation, because the next ingest touching
+          the series recomputes it and the identity rule makes that idempotent.
+
+        Returns the receipt, extended with any insights created, so the caller sees one
+        artifact rather than having to ask twice.
+        """
+        if self.consolidation is None:
+            return receipt
+        try:
+            outcome = self.consolidation.consolidate_touched(user_id, memories)
+        except Exception:  # noqa: BLE001 — consolidation must never break a committed turn
+            logger.exception("consolidation failed for user %s (swallowed)", user_id)
+            return receipt
+        if not outcome.created_ids:
+            return receipt
+        return replace(receipt, insights=self._insight_refs(user_id, outcome.created_ids))
+
+    def _insight_refs(self, user_id: UUID, insight_ids: list[UUID]) -> list[MemoryRef]:
+        """Read back the insights just written so the receipt describes committed rows, not
+        what the service intended to write (transaction-boundaries rule 4)."""
+        refs: list[MemoryRef] = []
+        with self.db.transaction() as cur:
+            for insight_id in insight_ids:
+                row = get_memory(cur, user_id, insight_id)
+                if row is None:  # pragma: no cover — it was committed a moment ago
+                    continue
+                refs.append(
+                    MemoryRef(
+                        id=row["id"],
+                        type=row["type"],
+                        summary=row["summary"],
+                        embedding_pending=not row["has_embedding"],
+                    )
+                )
+        return refs
 
     def _opportunistic_backfill(self, user_id: UUID) -> None:
         """Best-effort: a backfill failure never surfaces as a turn failure (doc §7)."""
