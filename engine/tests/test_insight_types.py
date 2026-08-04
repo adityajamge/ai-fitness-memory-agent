@@ -159,8 +159,7 @@ def _fp(**overrides) -> str:
     base = {
         "kind": "level_shift",
         "series_metric": "protein_g",
-        "window_start": W_START,
-        "window_end": W_END,
+        "dates": [W_START, W_END],
         "values": [45.0, 83.0],
         "intervention_ids": [],
     }
@@ -198,11 +197,19 @@ def test_fingerprint_normalizes_negative_zero():
 def test_fingerprint_is_timezone_normalized():
     """The same instant in two zones is one claim, not two."""
     ist = W_START.astimezone(timezone(timedelta(hours=5, minutes=30)))
-    assert _fp(window_start=ist) == _fp(window_start=W_START)
+    assert _fp(dates=[ist, W_END]) == _fp(dates=[W_START, W_END])
 
 
-def test_fingerprint_changes_on_a_window_change():
-    assert _fp() != _fp(window_end=W_END + timedelta(days=1))
+def test_fingerprint_changes_when_the_claim_moves_in_time():
+    assert _fp() != _fp(dates=[W_START, W_END + timedelta(days=1)])
+
+
+def test_fingerprint_keys_on_claim_dates_not_evidence_extent():
+    """The M5 finding: a level shift is identified by its boundary, so accumulating another
+    day of evidence at the same level must not mint a new claim (see
+    ``analytics.Finding.claim_dates``)."""
+    assert _fp(dates=[W_START]) == _fp(dates=[W_START])
+    assert _fp(dates=[W_START]) != _fp(dates=[W_START, W_END])
 
 
 def test_fingerprint_ignores_intervention_order_but_not_membership():
@@ -213,7 +220,7 @@ def test_fingerprint_ignores_intervention_order_but_not_membership():
 
 def test_fingerprint_rejects_naive_timestamps_and_unknown_kinds():
     with pytest.raises(ValueError, match="timezone-aware"):
-        _fp(window_start=W_START.replace(tzinfo=None))
+        _fp(dates=[W_START.replace(tzinfo=None)])
     with pytest.raises(ValueError, match="unknown insight kind"):
         _fp(kind="vibes")
 

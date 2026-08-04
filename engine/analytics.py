@@ -199,6 +199,22 @@ class Finding:
         """The value pair a fingerprint is taken over (§4.6)."""
         return (self.pre_value, self.post_value)
 
+    @property
+    def claim_dates(self) -> tuple[datetime, ...]:
+        """The dates that identify the *claim*, as opposed to the extent of its evidence (§4.6).
+
+        For a ``level_shift`` that is the boundary alone: the claim is "moved from A to B
+        starting here", and ``window_start``/``window_end`` merely bound the observations that
+        support it — they grow every time another day at the same level is logged, which would
+        otherwise make an unchanged claim supersede itself daily.
+
+        For an ``intervention_outcome`` the window *is* the claim ("went from A to B between
+        these two measurements"), and it moves only when a genuinely new measurement arrives.
+        """
+        if self.kind == "level_shift":
+            return (self.boundary,)
+        return (self.window_start, self.window_end)
+
 
 # ── helpers ────────────────────────────────────────────────────────────────────────────
 def _zone(tz: str) -> ZoneInfo:

@@ -251,18 +251,22 @@ def fingerprint(
     *,
     kind: str,
     series_metric: str,
-    window_start: datetime,
-    window_end: datetime,
+    dates: Sequence[datetime],
     values: Sequence[float],
     intervention_ids: Iterable[str] = (),
 ) -> str:
     """The deterministic identity of a *claim* (§4.6).
 
-    Over the claim's defining content only: what kind of claim it is, which series, the window
-    it spans, the values that make it, and which interventions it attributes to. **Not** over
-    the hypothesis prose — rewording a sentence must not supersede a claim that has not
-    changed, which is the same failure mode content-keyed ``record_id``s had in Phase 4
+    Over the claim's defining content only: what kind of claim it is, which series, the dates
+    that identify it, the values that make it, and which interventions it attributes to.
+    **Not** over the hypothesis prose — rewording a sentence must not supersede a claim that has
+    not changed, which is the same failure mode content-keyed ``record_id``s had in Phase 4
     (replay-architecture §4.3), one layer up.
+
+    ``dates`` is the claim's identity, **not the extent of its evidence** — see
+    ``analytics.Finding.claim_dates``. Keying on the evidence window instead made an unchanged
+    level shift supersede itself once per logged day, which is I-12's failure mode wearing
+    supersession's clothes; it was found by the M5 ingestion hook and fixed here.
 
     Interventions are sorted, so the order a detector happened to find them in is not part of
     the claim's identity.
@@ -273,8 +277,7 @@ def fingerprint(
         FINGERPRINT_VERSION,
         kind,
         series_metric,
-        _canonical_time(window_start),
-        _canonical_time(window_end),
+        ",".join(_canonical_time(d) for d in dates),
         ",".join(_canonical_value(v) for v in values),
         ",".join(sorted(str(i) for i in intervention_ids)),
     ]

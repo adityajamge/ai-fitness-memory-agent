@@ -4,11 +4,14 @@ Locked architecture: ``docs/engineering/consolidation-architecture.md`` §4.4 (s
 interventions), §4.6 (identity by fingerprint), §4.7 (derived freshness), §4.8 (the budget and
 where this runs), §4.12 (an insight's own metadata).
 
-This is the first Phase 5 module that touches the database. It reads a user-scoped series,
-hands it to the pure kernel (``engine/analytics.py``), and decides what — if anything — to
-write. **It is deliberately not wired to anything yet**: ingestion's stage (F₀) hook, the
-``analyze_series`` tool, and the retroactive CLI are all M5, so this module is reachable only
-from tests until then. That is what makes it reviewable on its own.
+It reads a user-scoped series, hands it to the pure kernel (``engine/analytics.py``), and
+decides what — if anything — to write.
+
+**One implementation, three callers** (M5): ingestion's stage (F₀) hook
+(``consolidate_touched``), the ``analyze_series`` tool, and the retroactive
+``python -m cli.consolidate`` sweep all enter through this class. The CLI deliberately does not
+reimplement any of it — a second copy of the identity rule is a second place for duplicate
+insights to be born, and the whole point of I-12 is that there is exactly one such place.
 
 **The rule that matters (§4.6, I-12).** The engine has no write-side deduplication by design
 (ADR-15.1/15.3 — correct for live chat), and consolidation runs on *every* ingest touching a
@@ -210,6 +213,27 @@ class ConsolidationService:
             )
         return result
 
+    def consolidate_touched(
+        self,
+        user_id: UUID,
+        memories: Sequence[Memory],
+        *,
+        tz: str | None = None,
+        budget_ms: int | None = None,
+    ) -> ConsolidationOutcome:
+        """Consolidate only the series the just-committed memories actually touch (§4.4, §4.8).
+
+        This is what stage (F₀) calls. Scoping to touched series is the *primary* structural
+        defence of the time budget: a meal payload carries protein, carbs, fat and kcal, but
+        only ``protein_g`` is consolidatable, so logging lunch costs one series scan rather
+        than nine. A turn that touches nothing consolidatable does no work at all and opens no
+        connection.
+        """
+        keys = series_touched_by(memories)
+        if not keys:
+            return ConsolidationOutcome()
+        return self.consolidate(user_id, keys, tz=tz, budget_ms=budget_ms)
+
     def consolidate_series(
         self, user_id: UUID, key: SeriesKey, *, tz: str | None = None
     ) -> SeriesOutcome:
@@ -409,8 +433,7 @@ class ConsolidationService:
         claim = fingerprint(
             kind=finding.kind,
             series_metric=finding.series_metric,
-            window_start=finding.window_start,
-            window_end=finding.window_end,
+            dates=finding.claim_dates,
             values=finding.values,
             intervention_ids=finding.intervention_ids,
         )
@@ -507,6 +530,39 @@ class ConsolidationService:
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────────────
+def series_touched_by(memories: Sequence[Memory]) -> list[SeriesKey]:
+    """Which consolidatable series a set of just-written memories affects (§4.4).
+
+    Pure, and deliberately narrow: a memory touches a series only when its type matches and
+    the metric's JSONB path actually resolves to a value. A meal logged without macros touches
+    nothing, so it triggers nothing — the alternative, scanning every series on every ingest,
+    is what the budget cannot afford.
+
+    Order is deterministic (metric name) so a turn's consolidation is reproducible.
+    """
+    touched: set[str] = set()
+    for memory in memories:
+        for metric in CONSOLIDATION_SERIES:
+            spec = METRICS[metric]
+            if spec.memory_type != memory.type:
+                continue
+            if _payload_value(memory.payload, spec.path) is not None:
+                touched.add(metric)
+    return [SeriesKey.for_metric(metric) for metric in sorted(touched)]
+
+
+def _payload_value(payload: dict, path: tuple[str, ...]) -> object | None:
+    """Walk a metric's JSONB path in Python — the same path the SQL builders bind."""
+    node: object = payload
+    for segment in path:
+        if not isinstance(node, dict):
+            return None
+        node = node.get(segment)
+        if node is None:
+            return None
+    return node
+
+
 def _samples(rows: Sequence[dict]) -> list[MetricSample]:
     """Repository rows → the kernel's prose-free input type (I-8)."""
     return [
