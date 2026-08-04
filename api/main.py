@@ -24,6 +24,7 @@ from api.routers import auth as auth_router
 from api.routers import chat as chat_router
 from api.routers import ingest as ingest_router
 from engine.config import Settings, load_settings
+from engine.consolidation import ConsolidationService
 from engine.db import Database
 from engine.ingestion import IngestionService
 from engine.model import ModelProvider
@@ -74,12 +75,21 @@ def create_app(
         except psycopg.OperationalError:
             logger.warning("schema setup skipped: database unreachable at startup", exc_info=True)
         model = provider or build_default_provider(settings)
+        # ONE consolidation service, shared by both callers (Phase 5 §4.9): the ingestion
+        # tail's stage (F₀) and the graph's analyze_series node. A second instance would be a
+        # second place the identity rule lives, which is exactly what I-12 exists to prevent.
+        consolidation = ConsolidationService(db, default_tz=settings.default_tz)
         ingestion = IngestionService(
-            db, model, default_tz=settings.default_tz, backfill_batch=settings.backfill_batch
+            db,
+            model,
+            default_tz=settings.default_tz,
+            backfill_batch=settings.backfill_batch,
+            consolidation=consolidation,
         )
         app.state.settings = settings
         app.state.db = db
         app.state.ingestion = ingestion
+        app.state.consolidation = consolidation
 
         # The checkpointer holds one long-lived connection for the app's lifetime and runs
         # its migrations once (ADR-13.14). Same tolerance as the schema apply: without it
@@ -97,6 +107,7 @@ def create_app(
                 ingestion=ingestion,
                 checkpointer=saver,
                 default_tz=settings.default_tz,
+                consolidation=consolidation,
             )
         except psycopg.OperationalError:
             logger.warning(

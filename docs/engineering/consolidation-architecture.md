@@ -1215,6 +1215,9 @@ by construction. **Not a trigger:** a desire to say "changepoint detection" in t
 | o | **On a duplicate, the lineage-carrying row wins** over the payload-free snapshot | M5b | 06: one memory is one candidate. Only the family's row carries `evidence_ids`. |
 | p | **`citable_ids()` gains insight ids but not their `evidence_ids`** | M5b | Q1 is T7's to answer; a surface is easier to widen than to narrow. Asserted by test so widening is deliberate. |
 | q | **The insight tool takes no date range** | M5b | An insight carries its own window; a planner range would filter by *when it was derived* rather than what it is about. |
+| r | **One `_STAGES` table drives every routing edge** (ingest → consolidate → retrieve) | M5c | A hand-written edge per predecessor pair lets a stage be reachable from one and unreachable from another. One table makes that impossible. |
+| s | **`WRITE_TOOLS = {log_memory, analyze_series}`**, disjoint from `RETRIEVAL_TOOLS` | M5c | I-17 becomes a structural fact — the read set is read-only because the writers are not in it — rather than a rule someone must remember. `prepare_call` refuses both. |
+| t | **One `ConsolidationService` instance, shared by stage (F₀) and the tool** | M5c | Constructed once in the composition root. A second instance would be a second place the identity rule lives, which is what I-12 exists to prevent. |
 
 ### 11.2 Consequences worth knowing before you touch this
 
@@ -1256,7 +1259,7 @@ by construction. **Not a trigger:** a desire to say "changepoint detection" in t
 | — | `claim_dates` identity fix (§4.6) | ✅ `7c49123` |
 | M5a | Stage (F₀) ingestion hook | ✅ `489f1cc` |
 | M5b | Insight builder family + trace lineage | ✅ `af9d4a2` |
-| M5c | `analyze_series` graph dispatch | ⏳ |
+| M5c | `analyze_series` graph dispatch | ✅ `f0e76a6` |
 | M5d | `cli/consolidate.py` | ⏳ |
 | M6 | Latency profile (T12) | ⏳ |
 | M7 | Photo ingestion | ⏳ (first to cut) |

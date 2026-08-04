@@ -34,18 +34,23 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
 from agent.tools import (
+    ANALYZE_SERIES,
     LOG_MEMORY,
     RETRIEVAL_TOOLS,
     ToolCallError,
+    analyze_series_metric,
     build_tool_specs,
     execute,
+    is_analyze_series,
     is_log_memory,
     log_memory_text,
     prepare_call,
 )
 from engine.assembly import ContextBlock, RetrievalOutcome, assemble
+from engine.consolidation import ConsolidationService, SeriesOutcome
 from engine.db import Database
 from engine.ingestion import IngestionService, Receipt
+from engine.insights import SeriesKey, UnknownSeries
 from engine.model import EmbeddingError, ModelProvider, ToolCall
 from engine.trace import EvidenceTrace
 
@@ -91,6 +96,9 @@ class TurnCarrier:
 
     outcomes: list[RetrievalOutcome] = field(default_factory=list)
     receipts: list[Receipt] = field(default_factory=list)
+    #: What ``analyze_series`` derived this turn. Turn-local like everything else here, so it
+    #: never enters checkpointed state (M5-1).
+    consolidation: list[SeriesOutcome] = field(default_factory=list)
     context: ContextBlock | None = None
     trace: EvidenceTrace | None = None
     errors: list[str] = field(default_factory=list)
@@ -104,6 +112,7 @@ class TurnResult:
     answer: str
     citations: list[str]
     receipts: list[Receipt]
+    consolidation: list[SeriesOutcome]
     context: ContextBlock | None
     trace: EvidenceTrace | None
     errors: list[str]
@@ -161,6 +170,7 @@ def build_graph(
     ingestion: IngestionService,
     checkpointer: Any,
     default_tz: str,
+    consolidation: ConsolidationService | None = None,
 ):
     """Compile the turn graph. Dependencies are injected (same composition-root style as
     ``api.main.create_app``), so tests drive a real database with a fake provider."""
@@ -193,6 +203,45 @@ def build_graph(
             carrier.receipts.append(
                 ingestion.ingest_text(user_id, text, tz=state.get("tz") or default_tz)
             )
+        return {}
+
+    def consolidate_node(state: GraphState, config: RunnableConfig) -> dict:
+        """Run every ``analyze_series`` call through the consolidation service (§4.9).
+
+        Dispatched here rather than through ``prepare_call``/``execute`` because it **writes**:
+        ``execute`` runs every retrieval tool inside one shared transaction, and a write there
+        would need a read, a compare and possibly an insert+supersede inside it — putting
+        several round trips, and the §4.8 budget, inside a transaction they must never enter.
+        ``log_memory`` is dispatched for the same reason, and this is the same animal.
+
+        Runs **before** retrieve (the ADR-14.3 ordering, applied to tier 2), so an insight
+        derived this turn is already committed when the same turn's ``lookup_insights`` scans
+        for it — otherwise the engine would derive a claim and then answer as though it had not.
+
+        A failure costs this tool, not the turn (ADR-14.12).
+        """
+        carrier = carrier_of(config)
+        user_id = UUID(state["user_id"])
+        tz = state.get("tz") or default_tz
+        for call in _calls_of(state):
+            if not is_analyze_series(call):
+                continue
+            if consolidation is None:
+                carrier.errors.append(f"{ANALYZE_SERIES}: consolidation is not configured")
+                continue
+            try:
+                key = SeriesKey.for_metric(analyze_series_metric(call))
+            except (ToolCallError, UnknownSeries) as exc:
+                logger.info("dropping %s call: %s", ANALYZE_SERIES, exc)
+                carrier.errors.append(f"{ANALYZE_SERIES}: {exc}")
+                continue
+            try:
+                carrier.consolidation.append(
+                    consolidation.consolidate_series(user_id, key, tz=tz)
+                )
+            except Exception as exc:  # noqa: BLE001 — one failed tool, not a failed turn
+                logger.exception("analyze_series failed for %s", key)
+                carrier.errors.append(f"{ANALYZE_SERIES}: {exc}")
         return {}
 
     def retrieve_node(state: GraphState, config: RunnableConfig) -> dict:
@@ -246,6 +295,7 @@ def build_graph(
     for name, node in (
         ("plan", plan_node),
         ("ingest", ingest_node),
+        ("consolidate", consolidate_node),
         ("retrieve", retrieve_node),
         ("assemble", assemble_node),
         ("narrate", narrate_node),
@@ -253,14 +303,15 @@ def build_graph(
         builder.add_node(name, _checked(name, node))
 
     builder.add_edge(START, "plan")
-    builder.add_conditional_edges(
-        "plan",
-        _route_after_plan,
-        {"ingest": "ingest", "retrieve": "retrieve", "assemble": "assemble"},
-    )
-    builder.add_conditional_edges(
-        "ingest", _route_after_ingest, {"retrieve": "retrieve", "assemble": "assemble"}
-    )
+    stages = {
+        "ingest": "ingest",
+        "consolidate": "consolidate",
+        "retrieve": "retrieve",
+        "assemble": "assemble",
+    }
+    builder.add_conditional_edges("plan", _route_after_plan, stages)
+    builder.add_conditional_edges("ingest", _route_after_ingest, stages)
+    builder.add_conditional_edges("consolidate", _route_after_consolidate, stages)
     builder.add_edge("retrieve", "assemble")
     builder.add_edge("assemble", "narrate")
     builder.add_edge("narrate", END)
@@ -268,18 +319,47 @@ def build_graph(
 
 
 # ── routing: derived entirely from which tools the planner selected (M4-1) ─────────────
-def _route_after_plan(state: GraphState) -> str:
+#: The turn's stages, in the only order that is correct: write, then write, then read.
+#: Ingest first so this turn's *memories* are queryable; consolidate next so this turn's
+#: *insights* are too; retrieve last. Reversing either would let a turn answer as though work
+#: it just did had not happened — a wrong answer that looks right, which is the worst failure
+#: class for a glass box (ADR-14.3, extended to tier 2 in §4.9).
+_STAGES: tuple[tuple[str, frozenset[str]], ...] = (
+    ("ingest", frozenset({LOG_MEMORY})),
+    ("consolidate", frozenset({ANALYZE_SERIES})),
+    ("retrieve", RETRIEVAL_TOOLS),
+)
+
+
+def _next_stage(state: GraphState, *, after: str | None) -> str:
+    """The first stage after ``after`` whose tools the planner actually selected.
+
+    One table drives every edge, so a stage cannot be reachable from one predecessor and
+    unreachable from another — the bug class a hand-written edge per pair invites. An empty
+    plan (M4-2) falls through to ``assemble``: a conversational turn, answered without
+    inventing a retrieval."""
     names = {c["tool"] for c in state.get("tool_calls") or []}
-    if LOG_MEMORY in names:
-        return "ingest"  # ingest first, so this turn's memories are queryable
-    if names & RETRIEVAL_TOOLS:
-        return "retrieve"
-    return "assemble"  # empty plan (M4-2): conversational turn, nothing to retrieve
+    reached = after is None
+    for stage, tools in _STAGES:
+        if not reached:
+            reached = stage == after
+            continue
+        if names & tools:
+            return stage
+    return "assemble"
+
+
+def _route_after_plan(state: GraphState) -> str:
+    """The turn's shape, read entirely off which tools the planner selected (M4-1)."""
+    return _next_stage(state, after=None)
 
 
 def _route_after_ingest(state: GraphState) -> str:
-    names = {c["tool"] for c in state.get("tool_calls") or []}
-    return "retrieve" if names & RETRIEVAL_TOOLS else "assemble"
+    return _next_stage(state, after="ingest")
+
+
+def _route_after_consolidate(state: GraphState) -> str:
+    return _next_stage(state, after="consolidate")
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────────────
@@ -343,6 +423,7 @@ def run_turn(
         answer=state.get("answer", ""),
         citations=list(state.get("citations") or []),
         receipts=list(carrier.receipts),
+        consolidation=list(carrier.consolidation),
         context=carrier.context,
         trace=carrier.trace,
         errors=list(carrier.errors),

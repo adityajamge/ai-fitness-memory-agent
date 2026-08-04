@@ -68,12 +68,18 @@ GET_TIMELINE = "get_timeline"
 LOOKUP_EVENTS = "lookup_events"
 COUNT_EVENTS = "count_events"
 LOOKUP_INSIGHTS = "lookup_insights"
+ANALYZE_SERIES = "analyze_series"
 
 RETRIEVAL_TOOLS = frozenset(
     {AGGREGATE_MEMORIES, RECALL_MEMORIES, GET_TIMELINE, LOOKUP_EVENTS, COUNT_EVENTS,
      LOOKUP_INSIGHTS}
 )
-TOOL_NAMES = RETRIEVAL_TOOLS | {LOG_MEMORY}
+#: The two **write** tools. Neither is in ``RETRIEVAL_TOOLS`` and neither goes through
+#: ``prepare_call``/``execute``: the graph dispatches both to a service (M4-1, §4.9). Keeping
+#: them out of the builder set is what makes "the closed retrieval set is read-only" (**I-17**)
+#: a structural fact rather than a convention someone has to remember.
+WRITE_TOOLS = frozenset({LOG_MEMORY, ANALYZE_SERIES})
+TOOL_NAMES = RETRIEVAL_TOOLS | WRITE_TOOLS
 
 
 class ToolCallError(ValueError):
@@ -250,6 +256,26 @@ def build_tool_specs() -> list[ToolSpec]:
             ),
         ),
         ToolSpec(
+            name=ANALYZE_SERIES,
+            description=(
+                "Analyse one series NOW and derive a fresh pattern from it — use only when the "
+                "user asks for new analysis ('analyse my protein', 'what does my latest scan "
+                "show?'). This does work and may record a new insight. To read patterns that "
+                "already exist, use lookup_insights instead, which is cheaper and does not "
+                "re-derive anything."
+            ),
+            input_schema=_schema(
+                {
+                    "metric": {
+                        "type": "string",
+                        "enum": sorted(CONSOLIDATION_SERIES),
+                        "description": "Which series to analyse.",
+                    }
+                },
+                ["metric"],
+            ),
+        ),
+        ToolSpec(
             name=LOOKUP_INSIGHTS,
             description=(
                 "Look up patterns the engine has ALREADY derived from this user's data — "
@@ -330,6 +356,29 @@ def is_log_memory(call: ToolCall) -> bool:
     return call.tool == LOG_MEMORY
 
 
+def is_analyze_series(call: ToolCall) -> bool:
+    """True for the consolidation tool, which the graph dispatches to ConsolidationService.
+
+    It is a *verb*, not a query: it may write an insight, and a write cannot ride the shared
+    read transaction ``execute`` runs inside (§4.9). Same treatment as ``log_memory`` for the
+    same reason."""
+    return call.tool == ANALYZE_SERIES
+
+
+def analyze_series_metric(call: ToolCall) -> str:
+    """Extract and validate the ``metric`` slot of an analyze_series call.
+
+    Strict, like every other slot (ADR-14.11): an unknown or missing series is rejected rather
+    than defaulted to "analyse everything", which would be a different — and far more
+    expensive — request than the one the planner made."""
+    metric = _args(call).get("metric")
+    if not isinstance(metric, str) or metric not in CONSOLIDATION_SERIES:
+        raise ToolCallError(
+            f"analyze_series requires a known 'metric'; known: {sorted(CONSOLIDATION_SERIES)}"
+        )
+    return metric
+
+
 def log_memory_text(call: ToolCall) -> str:
     """Extract and validate the ``text`` slot of a log_memory call."""
     text = _args(call).get("text")
@@ -352,8 +401,8 @@ def prepare_call(call: ToolCall, *, model: ModelProvider, tz: str) -> PreparedCa
     ``ToolCallError`` for anything malformed; the underlying ``RetrievalSpecError`` is
     chained so the real reason survives.
     """
-    if is_log_memory(call):
-        raise ToolCallError("log_memory is dispatched by the graph, not prepare_call")
+    if call.tool in WRITE_TOOLS:
+        raise ToolCallError(f"{call.tool} is dispatched by the graph, not prepare_call")
     if call.tool not in RETRIEVAL_TOOLS:
         raise ToolCallError(f"unknown tool {call.tool!r}; known: {sorted(TOOL_NAMES)}")
 

@@ -173,7 +173,8 @@ doing in May" queries.
 | `get_timeline` | Ordered event slice for a date range | 3 |
 | `lookup_events` | Newest/oldest event of a type, optional exact item containment | 3 |
 | `count_events` | How many events of a type in a range ([ADR-14.4](09-decisions.md#adr-14)) | 3 |
-| `analyze_series` | On-demand consolidation: changepoint/correlation scan → may write new derived insights | 5 |
+| `lookup_insights` | Read derived insights **with their lineage**, by series/kind/status — read-only | 5 ✅ |
+| `analyze_series` | On-demand consolidation for one series → may write a new derived insight. **Graph-dispatched like `log_memory`, not a query builder** (§4.9): it writes, and a write cannot ride the shared read transaction | 5 ✅ |
 
 The LangGraph agent never issues raw SQL; the engine owns all query construction
 (parameterized — judges will poke the sandbox).

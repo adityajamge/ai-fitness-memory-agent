@@ -18,7 +18,9 @@
 flowchart LR
     IN["User turn<br/>(text / photo / file)"] --> PLAN["PLAN — the ONLY NL-understanding layer<br/>selects tools + fills typed slots<br/>(routing IS tool selection)"]
     PLAN -->|"log_memory selected"| LOG["log_memory<br/>(engine ingestion)"]
-    PLAN -->|"retrieval tools selected"| RETRIEVE["aggregate_memories · recall_memories<br/>get_timeline · lookup_events · count_events<br/>(analyze_series — Phase 5)"]
+    PLAN -->|"analyze_series selected"| CONSOLIDATE["analyze_series<br/>(engine consolidation — WRITES)"]
+    PLAN -->|"retrieval tools selected"| RETRIEVE["aggregate_memories · recall_memories<br/>get_timeline · lookup_events · count_events<br/>lookup_insights (read-only set)"]
+    CONSOLIDATE -->|"consolidate BEFORE retrieve"| RETRIEVE
     PLAN -->|"no tools selected"| ASSEMBLE
     LOG -->|"ingest ALWAYS precedes retrieve"| RETRIEVE
     LOG --> RECEIPT["Memory receipt"]
@@ -42,6 +44,13 @@ Notes:
 - **Ingest always precedes retrieve** on a "both" turn ([ADR-14.3](09-decisions.md#adr-14)),
   so a memory logged this turn is already committed when the same turn's aggregation scans
   for it ("logged my run — am I improving?").
+- **The turn has two write stages, and both precede retrieval** (Phase 5 §4.9): `log_memory`
+  → `analyze_series` → retrieval. The second ordering is the first one applied to tier 2 — an
+  insight derived this turn must be visible to the same turn's `lookup_insights`, or the
+  engine would derive a claim and then answer as though it had not.
+- **The two write tools are dispatched by the graph, never by the tool layer.** `log_memory`
+  and `analyze_series` go to a service; the closed retrieval builder set stays **read-only**
+  (invariant I-17) because the writers are not members of it. `prepare_call` refuses both.
 - **Assembly runs on every turn that narrates**, so a trace always exists — honestly empty
   (zero retrieval steps) on an ingest-only or conversational turn. That keeps ADR-12's
   by-construction property uniform rather than special-cased.
