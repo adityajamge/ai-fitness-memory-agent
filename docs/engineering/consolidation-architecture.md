@@ -588,6 +588,29 @@ function** (ADR-14.7) — it maps what the retrieval outcome brought, and perfor
 precedent above says surface the conflict instead); hydrating lineage inside `assemble()` (breaks
 ADR-14.7 purity, the mechanism behind ADR-14.8).
 
+**Implemented at M5b.** Four points settled while building it:
+
+- **The family is read-only (I-17), and freshness is deliberately not its job.** Deciding a claim
+  is stale and recomputing it is a *write*; a question must not write. That belongs to
+  `analyze_series` (M5c), which the graph dispatches outside the retrieve transaction precisely
+  because it does.
+- **Insights bypass the raw-event budget**, like aggregates and counts. An insight that already
+  answers the question is the last thing that should be crowded out by the events it summarises —
+  06's tier axis applied at the budget, not only at the score.
+- **The richer representation wins on a tie.** The same insight can arrive as a payload-free
+  snapshot through recall *and* as a full row through this family. 06's "one memory is one
+  candidate" rule resolves it in favour of the row that carries lineage; the snapshot is dropped
+  from the ranked candidates and from `trace.evidence`.
+- **No date-range slot.** An insight already carries the window it is about, so a planner-supplied
+  range would filter claims by *when they were derived* rather than what they are about — a subtly
+  wrong answer that looks right.
+
+**Q1 is preserved, not pre-empted.** `citable_ids()` gains each participating insight's **own id**
+and deliberately **not** its `evidence_ids`. Whether the narrator may cite the rows underneath a
+claim is T7's call alongside ADR-14.8, and a citable surface is far easier to widen later than to
+narrow. A test asserts the lineage is absent from the surface, so widening it has to be a
+deliberate act.
+
 **Long-term consequences.** The trace's `insights` array becomes real, which unblocks Phase 6's
 lineage graph. The citable surface (`ContextBlock.citable_ids`) must gain insight IDs; whether an
 insight's *cited* `evidence_ids` are themselves citable is a T7 decision that this phase must not
@@ -1187,6 +1210,11 @@ by construction. **Not a trigger:** a desire to say "changepoint detection" in t
 | j | **`pattern_strength` must *equal* its components**, checked at the payload boundary within `STRENGTH_TOLERANCE` | M1, `engine/types.py` | A strengthening of **I-19** beyond "published with". A score its components cannot explain is the unfalsifiable number ADR-13.12 exists to prevent, and the payload boundary is the only place no code path can route around. |
 | k | **`consolidation` is an optional dependency of `IngestionService`** | M5a | Every pre-Phase-5 caller and test constructs the write path without one and behaves identically — which is what keeps 600+ existing tests meaningful. |
 | l | **The receipt keeps the two tiers apart** (`created` vs `insights`); the API key is additive | M5a | `created` is what the user reported; an insight is a claim *about* it. One list would let a receipt imply the user logged something they never said. |
+| m | **The insight family is read-only and does no freshness check** | M5b | Recomputing a stale claim is a write; `analyze_series` owns it (I-17). |
+| n | **Insights bypass the raw-event budget**, and carry a `ContextBlock.insights` field | M5b | 06's tier axis applied at the budget: the claim that answers the question must not be crowded out by the events it summarises. The field is also what lets the narrator see — and therefore cite — them. |
+| o | **On a duplicate, the lineage-carrying row wins** over the payload-free snapshot | M5b | 06: one memory is one candidate. Only the family's row carries `evidence_ids`. |
+| p | **`citable_ids()` gains insight ids but not their `evidence_ids`** | M5b | Q1 is T7's to answer; a surface is easier to widen than to narrow. Asserted by test so widening is deliberate. |
+| q | **The insight tool takes no date range** | M5b | An insight carries its own window; a planner range would filter by *when it was derived* rather than what it is about. |
 
 ### 11.2 Consequences worth knowing before you touch this
 
@@ -1227,7 +1255,7 @@ by construction. **Not a trigger:** a desire to say "changepoint detection" in t
 | M4 | Retraction evaluator | ✅ `d45ca8b` |
 | — | `claim_dates` identity fix (§4.6) | ✅ `7c49123` |
 | M5a | Stage (F₀) ingestion hook | ✅ `489f1cc` |
-| M5b | Insight builder family + trace lineage | ⏳ |
+| M5b | Insight builder family + trace lineage | ✅ `af9d4a2` |
 | M5c | `analyze_series` graph dispatch | ⏳ |
 | M5d | `cli/consolidate.py` | ⏳ |
 | M6 | Latency profile (T12) | ⏳ |

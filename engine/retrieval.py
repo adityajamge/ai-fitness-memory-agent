@@ -37,10 +37,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import psycopg
 from psycopg.types.json import Jsonb
 
+from engine.insights import CONSOLIDATION_SERIES
 from engine.memory import vector_literal
 from engine.model import ModelProvider
 from engine.trace import EvidenceSnapshot, RetrievalStep
-from engine.types import MEMORY_TYPE_REGISTRY
+from engine.types import INSIGHT_KINDS, MEMORY_TYPE_REGISTRY
 
 
 class RetrievalSpecError(ValueError):
@@ -623,6 +624,173 @@ def lookup_events(
     display["n"] = spec.n
     step = RetrievalStep(family="lookup", sql=sql, params=display, row_count=len(entries))
     return LookupResult(spec=spec, entries=entries), step
+
+
+# ── insight lookup: the sixth family (06 "insight reuse", Phase 5 §4.10) ──────────────
+#
+# **Read-only, like every other builder** (I-17). "Has this been flagged before?" is a
+# question, not a request to think: deriving a *new* insight is `analyze_series`, which the
+# graph dispatches outside this transaction precisely because it writes. Nothing in this
+# family inserts, updates, or triggers consolidation.
+#
+# Why this family exists at all, rather than letting insights arrive as EvidenceSnapshots
+# through recall/timeline: a snapshot is **deliberately payload-free** (ADR-12 — a trace
+# references memories, it never copies payloads), and an insight's lineage lives *in* its
+# payload. Retrieving insights through the snapshot-shaped families would either lose the
+# lineage or force a payload copy into the snapshot. A dedicated result type resolves it with
+# nothing bent: `InsightRef` is a distinct trace type that already carries lineage (§4.10).
+
+_MAX_INSIGHTS = 20
+_INSIGHT_STATUSES = frozenset({"active", "retracted", "superseded"})
+
+
+@dataclass(frozen=True, slots=True)
+class InsightSpec:
+    """Validated slots for one insight lookup.
+
+    ``status`` defaults to ``active``, matching every other builder — a retracted claim must
+    not reappear in an answer by accident. It is settable because the glass box is *supposed*
+    to be able to show what the engine used to think (ADR-9), and that has to be a deliberate
+    request rather than a default.
+    """
+
+    metric: str | None = None
+    kind: str | None = None
+    status: str = "active"
+    limit: int = 10
+
+    def __post_init__(self) -> None:
+        if self.metric is not None and self.metric not in CONSOLIDATION_SERIES:
+            raise RetrievalSpecError(
+                f"unknown insight series {self.metric!r}; known: {sorted(CONSOLIDATION_SERIES)}"
+            )
+        if self.kind is not None and self.kind not in INSIGHT_KINDS:
+            raise RetrievalSpecError(
+                f"unknown insight kind {self.kind!r}; known: {sorted(INSIGHT_KINDS)}"
+            )
+        if self.status not in _INSIGHT_STATUSES:
+            raise RetrievalSpecError(
+                f"unknown status {self.status!r}; known: {sorted(_INSIGHT_STATUSES)}"
+            )
+        if not 1 <= self.limit <= _MAX_INSIGHTS:
+            raise RetrievalSpecError(f"limit must be in 1..{_MAX_INSIGHTS}, got {self.limit}")
+
+
+@dataclass(frozen=True, slots=True)
+class InsightRow:
+    """One derived insight, with the lineage a snapshot cannot carry.
+
+    ``evidence_ids`` is the boundary-anchored, capped lineage (§4.2) and ``evidence_count`` the
+    true total — rendering the first without the second would quietly under-report the evidence.
+    """
+
+    id: UUID
+    kind: str
+    series_metric: str
+    hypothesis: str
+    evidence_ids: tuple[UUID, ...]
+    evidence_count: int
+    pattern_strength: float
+    effect: float
+    coverage: float
+    specificity: float
+    window_start: datetime
+    window_end: datetime
+    event_time: datetime
+    confidence: float
+    provenance: str
+    status: str
+
+
+@dataclass(frozen=True, slots=True)
+class InsightResult:
+    spec: InsightSpec
+    entries: tuple[InsightRow, ...]
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.entries
+
+
+_SQL_INSIGHTS_HEAD = """
+SELECT id, event_time, confidence, provenance, status, payload
+FROM memories
+WHERE user_id = %(user_id)s
+  AND type = 'insight'
+  AND status = %(status)s
+"""
+_FRAG_INSIGHT_METRIC = "  AND payload ->> 'series_metric' = %(metric)s\n"
+_FRAG_INSIGHT_KIND = "  AND payload ->> 'kind' = %(kind)s\n"
+_SQL_INSIGHTS_TAIL = "ORDER BY event_time DESC, id\nLIMIT %(limit)s"
+
+
+def lookup_insights(
+    cur: psycopg.Cursor, user_id: UUID, spec: InsightSpec
+) -> tuple[InsightResult, RetrievalStep]:
+    """Derived insights for a user, newest first — the structured half of 06's insight reuse.
+
+    Freshness is deliberately **not** checked here. Deciding that a claim is stale and
+    recomputing it is a write, and a read-only builder must not do it (I-17); that is
+    ``analyze_series``'s job, dispatched by the graph outside this transaction.
+    """
+    sql = _SQL_INSIGHTS_HEAD
+    params: dict[str, object] = {
+        "user_id": user_id,
+        "status": spec.status,
+        "limit": spec.limit,
+    }
+    if spec.metric is not None:
+        sql += _FRAG_INSIGHT_METRIC
+        params["metric"] = spec.metric
+    if spec.kind is not None:
+        sql += _FRAG_INSIGHT_KIND
+        params["kind"] = spec.kind
+    sql = (sql + _SQL_INSIGHTS_TAIL).strip()
+
+    cur.execute(sql, params)
+    entries = tuple(_insight_row(row) for row in cur.fetchall())
+
+    step = RetrievalStep(
+        family="insight", sql=sql, params=_display_params(params), row_count=len(entries)
+    )
+    return InsightResult(spec=spec, entries=entries), step
+
+
+def _insight_row(row: dict) -> InsightRow:
+    """Project a stored insight into its typed read model.
+
+    Tolerant of missing optional keys so a row written by an older Phase 5 milestone still
+    reads — the payload registry's ``extra="allow"`` posture applied to the read side."""
+    payload = row["payload"]
+    return InsightRow(
+        id=row["id"],
+        kind=payload.get("kind", ""),
+        series_metric=payload.get("series_metric", ""),
+        hypothesis=payload.get("hypothesis", ""),
+        evidence_ids=tuple(UUID(i) for i in payload.get("evidence_ids", [])),
+        evidence_count=int(payload.get("evidence_count", 0)),
+        pattern_strength=float(payload.get("pattern_strength", 0.0)),
+        effect=float(payload.get("effect", 0.0)),
+        coverage=float(payload.get("coverage", 0.0)),
+        specificity=float(payload.get("specificity", 0.0)),
+        window_start=_parse_moment(payload.get("window_start")) or row["event_time"],
+        window_end=_parse_moment(payload.get("window_end")) or row["event_time"],
+        event_time=row["event_time"],
+        confidence=row["confidence"],
+        provenance=row["provenance"],
+        status=row["status"],
+    )
+
+
+def _parse_moment(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:  # pragma: no cover — payloads are written by payload_to_json
+            return None
+    return None
 
 
 @dataclass(frozen=True, slots=True)

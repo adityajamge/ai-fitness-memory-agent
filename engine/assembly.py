@@ -20,11 +20,13 @@ Two views of the retrieved evidence, deliberately separated:
   * ``ContextBlock.memories`` — the budget-limited, diversity-capped subset actually handed
     to the narrator. Context optimization lives here; the trace stays complete.
 
-Aggregates and counts are computed facts, compact by nature (06): they always pass into
-the context and are never subject to the raw-event budget. Their contributing memory IDs
-are preserved for citation (``ContextBlock.citable_ids``). Assembly is a **pure function**
-of its inputs — it never touches the database; hydrating an aggregate's contributing rows
-into full snapshots is Phase 6's batch-fetch (T16), not M3's job.
+Aggregates, counts, and derived insights are computed facts, compact by nature (06): they always
+pass into the context and are never subject to the raw-event budget. An insight that already
+answers the question is the last thing that should be crowded out by the events it summarises —
+that is 06's tier axis, applied at the budget rather than only at the score. Their contributing
+memory IDs are preserved for citation (``ContextBlock.citable_ids``). Assembly is a **pure
+function** of its inputs — it never touches the database; hydrating an aggregate's contributing
+rows into full snapshots is Phase 6's batch-fetch (T16), not M3's job.
 """
 
 from __future__ import annotations
@@ -36,11 +38,19 @@ from uuid import UUID, uuid4
 from engine.retrieval import (
     AggregateResult,
     CountResult,
+    InsightResult,
+    InsightRow,
     LookupResult,
     RecallResult,
     TimelineResult,
 )
-from engine.trace import EvidenceSnapshot, EvidenceTrace, RankingEntry, RetrievalStep
+from engine.trace import (
+    EvidenceSnapshot,
+    EvidenceTrace,
+    InsightRef,
+    RankingEntry,
+    RetrievalStep,
+)
 
 # ── ranking model (documented heuristic — exact weights are impl detail per 06; the axes
 # and their directions are the architectural commitment) ───────────────────────────────
@@ -76,21 +86,34 @@ class ContextBlock:
     counts: tuple[CountResult, ...]
     memories: tuple[EvidenceSnapshot, ...]  # ranked desc, diversity-capped, budget-limited
     omitted_count: int  # retrieved rows that ranking/budget kept out of the narration view
+    #: Derived tier-2 memories the insight family returned, with their lineage (§4.10). Like
+    #: aggregates and counts they are compact computed facts, so they always pass through and
+    #: are never subject to the raw-event budget — an insight that answers the question is the
+    #: last thing that should be crowded out by the events it summarises (06, tier axis).
+    insights: tuple[InsightRow, ...] = ()
 
     @property
     def is_empty(self) -> bool:
-        return not (self.aggregates or self.counts or self.memories)
+        return not (self.aggregates or self.counts or self.memories or self.insights)
 
     def citable_ids(self) -> frozenset[UUID]:
         """Every memory ID the narrator is allowed to cite from this context: the budgeted
-        memories plus the contributing IDs of every aggregate/count. Phase 6 (T7) citation
-        validation checks the answer's markers against this set (honest scope, ADR-13.13)."""
+        memories, the contributing IDs of every aggregate/count, and each participating
+        insight. Phase 6 (T7) citation validation checks the answer's markers against this set
+        (honest scope, ADR-13.13).
+
+        An insight's **own** ``evidence_ids`` are deliberately **not** added. Whether the
+        narrator may cite the rows underneath a claim it is citing is open question Q1, handed
+        to T7 alongside ADR-14.8; widening the surface here would pre-empt that decision, and a
+        surface is far easier to widen later than to narrow.
+        """
         ids: set[UUID] = {m.id for m in self.memories}
         for agg in self.aggregates:
             for bucket in agg.buckets:
                 ids.update(bucket.evidence_ids)
         for cnt in self.counts:
             ids.update(cnt.evidence_ids)
+        ids.update(insight.id for insight in self.insights)
         return frozenset(ids)
 
 
@@ -99,7 +122,10 @@ class RetrievalOutcome:
     """One executed tool call: its typed result plus the RetrievalStep it emitted. The M5
     graph builds these from planner tool calls; assembly merges a list of them."""
 
-    result: AggregateResult | RecallResult | TimelineResult | LookupResult | CountResult
+    result: (
+        AggregateResult | RecallResult | TimelineResult | LookupResult | CountResult
+        | InsightResult
+    )
     step: RetrievalStep
 
 
@@ -129,6 +155,7 @@ def assemble(
     """
     aggregates: list[AggregateResult] = []
     counts: list[CountResult] = []
+    insights: list[InsightRow] = []
     timeline_entries: list[EvidenceSnapshot] = []
     candidates: dict[UUID, _Candidate] = {}
     steps: list[RetrievalStep] = [o.step for o in outcomes]
@@ -139,6 +166,9 @@ def assemble(
             aggregates.append(result)
         elif isinstance(result, CountResult):
             counts.append(result)
+        elif isinstance(result, InsightResult):
+            for insight in result.entries:
+                _dedup_insight(insights, insight)
         elif isinstance(result, RecallResult):
             for hit in result.hits:
                 _offer(candidates, _hit_snapshot(hit), _relevance_from_distance(hit.distance))
@@ -151,6 +181,12 @@ def assemble(
                 _offer(candidates, snap, _STRUCTURED_RELEVANCE)
         else:  # pragma: no cover — the union is closed; a new result type must be handled
             raise TypeError(f"unrankable retrieval result: {type(result).__name__}")
+
+    # The same insight can arrive twice: as a payload-free snapshot through recall/timeline,
+    # and as a full row through the insight family. 06's rule is that one memory is one
+    # candidate; here the richer representation wins, because only it carries lineage.
+    for insight in insights:
+        candidates.pop(insight.id, None)
 
     ranked = _rank(list(candidates.values()))
     ranking = tuple(
@@ -173,13 +209,21 @@ def assemble(
         counts=tuple(counts),
         memories=tuple(c.snapshot for c in included),
         omitted_count=len(ranked) - len(included),
+        insights=tuple(insights),
     )
     trace = EvidenceTrace(
         trace_id=trace_id or uuid4(),
         question=question,
         retrieval_steps=tuple(steps),
         evidence=tuple(c.snapshot for c in ranked),  # complete: everything retrieved
-        insights=(),  # Phase 5 (T5/T6) — an empty tuple is honest, not a gap
+        insights=tuple(
+            InsightRef(
+                id=i.id,
+                hypothesis=i.hypothesis,
+                evidence_ids=i.evidence_ids,
+            )
+            for i in insights
+        ),
         timeline=tuple(timeline_entries),
         ranking=ranking,
         assembled_at=assembled_at or datetime.now(timezone.utc),
@@ -263,6 +307,11 @@ def _offer(candidates: dict[UUID, _Candidate], snap: EvidenceSnapshot, relevance
         candidates[snap.id] = _Candidate(snapshot=snap, relevance=relevance)
     elif relevance > existing.relevance:
         existing.relevance = relevance
+
+
+def _dedup_insight(entries: list[InsightRow], insight: InsightRow) -> None:
+    if all(e.id != insight.id for e in entries):
+        entries.append(insight)
 
 
 def _dedup_append(entries: list[EvidenceSnapshot], snap: EvidenceSnapshot) -> None:

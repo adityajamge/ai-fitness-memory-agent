@@ -75,7 +75,7 @@ The families, as implemented ([ADR-14.4](09-decisions.md#adr-14)):
 | **timeline** | "what was I doing in May?" | ordered typed slice of a date range |
 | **lookup** | "when did I last eat chicken?" | newest/oldest event of a type, optional exact item containment |
 | **count** | "how many workouts in June?" | counts *events of a type*, regardless of which metrics they carry |
-| **insight lookup** | "has this been flagged before?" | Phase 5 — structured, freshness-checked ([below](#insight-reuse)) |
+| **insight lookup** | "has this been flagged before?" | Phase 5 ✅ — returns derived claims *with their lineage*, filterable by series/kind/status. **Read-only**: freshness-checking and recomputation are `analyze_series`, not this family ([below](#insight-reuse)) |
 
 Two rules govern the slots themselves:
 

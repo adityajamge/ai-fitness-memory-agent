@@ -23,6 +23,7 @@ from agent.tools import (
     GET_TIMELINE,
     LOG_MEMORY,
     LOOKUP_EVENTS,
+    LOOKUP_INSIGHTS,
     RECALL_MEMORIES,
     RETRIEVAL_TOOLS,
     TOOL_NAMES,
@@ -327,6 +328,7 @@ def test_every_retrieval_tool_is_executable(db, user_id) -> None:
         (GET_TIMELINE, {"start": START, "end": END}),
         (LOOKUP_EVENTS, {"type": "meal"}),
         (COUNT_EVENTS, {"type": "meal", "start": START, "end": END}),
+        (LOOKUP_INSIGHTS, {}),  # every slot optional: "have you noticed anything?"
     ]:
         prepared = _prepare(_call(tool, **args))
         with db.transaction() as cur:

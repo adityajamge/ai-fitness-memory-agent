@@ -310,6 +310,21 @@ def render_context(question: str, context: ContextBlock) -> str:
             )
         lines.append("")
 
+    if context.insights:
+        lines.append("Patterns the engine has already derived (cite by id):")
+        for insight in context.insights:
+            lines.append(
+                f"- [{insight.id}] {insight.hypothesis} "
+                f"(pattern strength {insight.pattern_strength:.2f} = effect "
+                f"{insight.effect:.2f} x coverage {insight.coverage:.2f} x specificity "
+                f"{insight.specificity:.2f}; {insight.evidence_count} supporting memories)"
+            )
+        lines.append(
+            "  These are labeled heuristic observations, never proof of cause. Present them"
+            " as patterns, and do not upgrade a low pattern strength into a confident claim."
+        )
+        lines.append("")
+
     if context.memories:
         lines.append("Relevant memories (most relevant first):")
         for memory in context.memories:

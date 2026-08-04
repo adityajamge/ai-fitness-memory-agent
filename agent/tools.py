@@ -38,11 +38,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import psycopg
 
 from engine.assembly import RetrievalOutcome
+from engine.insights import CONSOLIDATION_SERIES
 from engine.model import ModelProvider, ToolCall, ToolSpec
 from engine.retrieval import (
     METRICS,
     AggregateSpec,
     CountSpec,
+    InsightSpec,
     LookupSpec,
     RecallSpec,
     RetrievalSpecError,
@@ -52,9 +54,10 @@ from engine.retrieval import (
     embed_query,
     get_timeline,
     lookup_events,
+    lookup_insights,
     recall_memories,
 )
-from engine.types import MEMORY_TYPE_REGISTRY
+from engine.types import INSIGHT_KINDS, MEMORY_TYPE_REGISTRY
 
 # Tool names — the planner's vocabulary. Kept identical to the doc-canonical names in
 # 03-memory-engine.md so code and design read as the same system.
@@ -64,9 +67,11 @@ RECALL_MEMORIES = "recall_memories"
 GET_TIMELINE = "get_timeline"
 LOOKUP_EVENTS = "lookup_events"
 COUNT_EVENTS = "count_events"
+LOOKUP_INSIGHTS = "lookup_insights"
 
 RETRIEVAL_TOOLS = frozenset(
-    {AGGREGATE_MEMORIES, RECALL_MEMORIES, GET_TIMELINE, LOOKUP_EVENTS, COUNT_EVENTS}
+    {AGGREGATE_MEMORIES, RECALL_MEMORIES, GET_TIMELINE, LOOKUP_EVENTS, COUNT_EVENTS,
+     LOOKUP_INSIGHTS}
 )
 TOOL_NAMES = RETRIEVAL_TOOLS | {LOG_MEMORY}
 
@@ -245,6 +250,39 @@ def build_tool_specs() -> list[ToolSpec]:
             ),
         ),
         ToolSpec(
+            name=LOOKUP_INSIGHTS,
+            description=(
+                "Look up patterns the engine has ALREADY derived from this user's data — "
+                "'have you noticed anything?', 'has this been flagged before?', 'what have you "
+                "learned about my protein?'. Returns existing hypotheses with their evidence "
+                "and pattern strength. It only reads what has been derived; it never derives "
+                "anything new."
+            ),
+            input_schema=_schema(
+                {
+                    "metric": {
+                        "type": "string",
+                        "enum": sorted(CONSOLIDATION_SERIES),
+                        "description": "Optional: only insights about this series.",
+                    },
+                    "kind": {
+                        "type": "string",
+                        "enum": sorted(INSIGHT_KINDS),
+                        "description": (
+                            "Optional: 'level_shift' (a metric's level moved) or "
+                            "'intervention_outcome' (a measured marker changed, with the "
+                            "logged changes in between)."
+                        ),
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "How many insights to return (1-20, default 10).",
+                    },
+                },
+                [],
+            ),
+        ),
+        ToolSpec(
             name=COUNT_EVENTS,
             description=(
                 "Count how many events of a type the user logged in a date range ('how many "
@@ -271,7 +309,9 @@ def build_tool_specs() -> list[ToolSpec]:
 
 
 # ── 2. validation ──────────────────────────────────────────────────────────────────────
-RetrievalSpec = AggregateSpec | RecallSpec | TimelineSpec | LookupSpec | CountSpec
+RetrievalSpec = (
+    AggregateSpec | RecallSpec | TimelineSpec | LookupSpec | CountSpec | InsightSpec
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -369,6 +409,15 @@ def _build_spec(tool: str, args: dict, *, tz: str) -> RetrievalSpec:
             type=_req_str(args, "type", tool),
             item=_opt_str(args, "item"),
             **_omit_none(direction=_opt_str(args, "direction"), n=_opt_int(args, "n")),
+        )
+    if tool == LOOKUP_INSIGHTS:
+        # Deliberately no date range: an insight already carries the window it is about, and a
+        # planner-chosen range would filter claims by *when they were derived* rather than what
+        # they are about — a subtly wrong answer that looks right.
+        return InsightSpec(
+            metric=_opt_str(args, "metric"),
+            kind=_opt_str(args, "kind"),
+            **_omit_none(limit=_opt_int(args, "limit")),
         )
     if tool == COUNT_EVENTS:
         return CountSpec(
@@ -474,6 +523,8 @@ def execute(cur: psycopg.Cursor, user_id: UUID, prepared: PreparedCall) -> Retri
         result, step = lookup_events(cur, user_id, spec)
     elif prepared.tool == COUNT_EVENTS:
         result, step = count_events(cur, user_id, spec)
+    elif prepared.tool == LOOKUP_INSIGHTS:
+        result, step = lookup_insights(cur, user_id, spec)
     else:  # pragma: no cover — prepare_call already rejected unknown tools
         raise ToolCallError(f"unexecutable tool {prepared.tool!r}")
     return RetrievalOutcome(result=result, step=step)
