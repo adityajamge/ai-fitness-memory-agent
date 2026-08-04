@@ -55,6 +55,8 @@ def _insight(**overrides) -> dict:
         "series_kind": "behavioural",
         "window_start": W_START,
         "window_end": W_END,
+        "pre_value": 45.0,
+        "post_value": 83.0,
         "evidence_ids": [str(uuid4())],
         "evidence_count": 30,
         "effect": 0.5,
@@ -302,6 +304,22 @@ def test_insight_is_registered_and_validates():
     insight = validate_payload("insight", _insight())
     assert isinstance(insight, InsightPayload)
     assert insight.kind == "level_shift"
+
+
+def test_the_claim_values_are_typed_and_required():
+    """The retraction evaluator branches on ``post_value`` (§4.14), so it may not be an untyped
+    extra that could arrive as a string — and the numbers must live somewhere a deterministic
+    reader can reach, since ``hypothesis`` is prose no engine code may parse (I-8)."""
+    insight = validate_payload("insight", _insight())
+    assert (insight.pre_value, insight.post_value) == (45.0, 83.0)
+
+    missing = _insight()
+    del missing["post_value"]
+    with pytest.raises(ValidationError):
+        validate_payload("insight", missing)
+
+    with pytest.raises(ValidationError):
+        validate_payload("insight", _insight(post_value="eighty-three"))
 
 
 def test_unregistered_kind_is_rejected():

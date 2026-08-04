@@ -242,6 +242,77 @@ def series_learned_at(
     return row["learned_at"] if row else None
 
 
+# ── retraction (Phase 5 M4, T5) ───────────────────────────────────────────────────────
+
+_SQL_SERIES_WINDOW = _SQL_SERIES.replace(
+    "ORDER BY event_time, id",
+    "  AND event_time > %(start)s\n  AND event_time <= %(end)s\nORDER BY event_time, id",
+)
+
+
+def fetch_series_window(
+    cur: psycopg.Cursor,
+    user_id: UUID,
+    memory_type: str,
+    path: tuple[str, ...],
+    start: datetime,
+    end: datetime,
+    ) -> list[dict]:
+    """``fetch_series`` bounded to ``(start, end]`` — a retraction condition only ever looks at
+    a trailing window, so it must not drag a lifetime of rows across the wire to examine a
+    month. Derived from the same statement so the two cannot drift apart."""
+    cur.execute(
+        _SQL_SERIES_WINDOW,
+        {"user_id": user_id, "type": memory_type, "path": list(path),
+         "start": start, "end": end},
+    )
+    return cur.fetchall()
+
+
+_SQL_RETRACTABLE = """
+SELECT id, created_at, payload
+FROM memories
+WHERE user_id = %(user_id)s
+  AND type = 'insight'
+  AND status = 'active'
+  AND jsonb_typeof(payload -> 'retraction_condition') = 'object'
+ORDER BY created_at, id
+"""
+
+
+def fetch_retractable_insights(cur: psycopg.Cursor, user_id: UUID) -> list[dict]:
+    """Active insights that carry a retraction condition — the only rows M4 may act on.
+
+    An insight without a condition is not "safe", it is simply *unfalsifiable by this
+    mechanism*, and must be left alone rather than judged by some default rule.
+
+    The filter tests ``jsonb_typeof(...) = 'object'`` rather than ``IS NOT NULL``: a JSON
+    ``null`` is not SQL ``NULL``, so the simpler predicate lets an explicitly-null condition
+    through to be rejected later as unreadable. ``payload_to_json`` drops ``None`` fields, so
+    production rows omit the key entirely and both predicates agree — but a hand-written or
+    hand-repaired payload is exactly where the difference would show up, and "no condition"
+    must mean the same thing however it was written."""
+    cur.execute(_SQL_RETRACTABLE, {"user_id": user_id})
+    return cur.fetchall()
+
+
+def mark_retracted(cur: psycopg.Cursor, user_id: UUID, memory_id: UUID) -> None:
+    """Flip an insight to ``status='retracted'`` (ADR-9, **I-20**).
+
+    Retraction is **not** supersession, and this is deliberately not ``mark_superseded``:
+    nothing replaces a retracted claim, so ``superseded_by`` stays NULL and the two mechanisms
+    04's model distinguishes stay distinguishable in the data. The statement touches ``status``
+    and nothing else — the payload is never rewritten, so what the engine claimed, and the
+    condition it agreed to be judged by, remain exactly as written. Scoped, and only active
+    rows, so re-running it is a no-op rather than a second flip.
+    """
+    cur.execute(
+        "UPDATE memories SET status = 'retracted' "
+        "WHERE id = %s AND user_id = %s AND status = 'active'",
+        [memory_id, user_id],
+    )
+
+
 def get_note(cur: psycopg.Cursor, user_id: UUID, note_id: UUID) -> dict | None:
     """Return an active note's raw text **and its origin** (``source``, ``provenance``) for
     reprocessing, or None if not an eligible active note owned by this user.

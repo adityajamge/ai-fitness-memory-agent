@@ -245,6 +245,15 @@ class InsightPayload(MemoryPayload):
     series_kind: Literal["behavioural", "outcome"]
     window_start: datetime
     window_end: datetime
+    #: The values the claim is *about* — the level before and after, or the earlier and later
+    #: measurement. Typed rather than left to ``extra="allow"`` because the retraction evaluator
+    #: **branches on** ``post_value`` (it is the reference a direction-only condition compares
+    #: against, §4.14), and a hot field a deterministic evaluator reads cannot be an untyped
+    #: extra that might arrive as a string. They are also what makes an insight self-describing:
+    #: without them the numbers exist only inside ``hypothesis``, which no deterministic code
+    #: may parse (**I-8**).
+    pre_value: float
+    post_value: float
     #: Boundary-anchored and capped (§4.2). Never the complete set for an expanded period —
     #: ``evidence_count`` is.
     evidence_ids: list[str] = Field(min_length=1)

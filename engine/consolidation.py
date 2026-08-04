@@ -33,7 +33,7 @@ import logging
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -50,10 +50,13 @@ from engine.insights import CONSOLIDATION_SERIES, SeriesKey, fingerprint
 from engine.memory import Memory
 from engine.repository import (
     fetch_behavioural_times,
+    fetch_retractable_insights,
     fetch_series,
+    fetch_series_window,
     fetch_type_rows,
     find_active_insights,
     insert_memories,
+    mark_retracted,
     mark_superseded,
     series_learned_at,
 )
@@ -66,6 +69,8 @@ __all__ = [
     "ConsolidationService",
     "ConsolidationOutcome",
     "SeriesOutcome",
+    "RetractionOutcome",
+    "count_counterexample_days",
     "DEFAULT_BUDGET_MS",
     "INSIGHT_SOURCE",
     "ONSET_SOURCES",
@@ -108,6 +113,23 @@ class SeriesOutcome:
     unchanged: UUID | None = None
     #: Set when the detector cleared nothing (**I-22**) — silence with a reason, not a gap.
     refused: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RetractionOutcome:
+    """The verdict on one insight's retraction condition, whether or not it fired.
+
+    Non-retractions are returned too, with their counts: "2 of the 3 required" is the
+    observable that makes a condition auditable instead of a black box, and it is what the
+    glass box will eventually render beside the rendered prose."""
+
+    insight_id: UUID
+    series: str
+    retracted: bool
+    counterexample_days: int = 0
+    required: int = 0
+    #: Set when the condition could not be evaluated at all — never a silent pass.
+    skipped: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,6 +234,76 @@ class ConsolidationService:
         with self.db.transaction() as cur:
             learned_at = series_learned_at(cur, user_id, metric.memory_type, metric.path)
         return learned_at is not None and learned_at > insight_created_at
+
+    # ── retraction (§4.14, T5) ────────────────────────────────────────────────────────
+    def evaluate_retractions(
+        self, user_id: UUID, *, now: datetime | None = None, tz: str | None = None
+    ) -> list[RetractionOutcome]:
+        """Judge every active insight against the condition it agreed to be judged by (§4.14).
+
+        Rides the same (F₀) pass as consolidation in M5; here it is a standalone entry point.
+        ``now`` is injected rather than read inside, so the whole evaluation is a function of
+        its inputs — a trailing window silently anchored to a hidden clock is not something a
+        test can pin, and ADR-13.11's entire premise is that this is deterministic.
+
+        **No model, no language, no prose** (**I-21**): the decision is a comparison of typed
+        floats against a typed condition. The insight's own ``hypothesis`` is never read, and
+        neither is any note.
+        """
+        now = now or datetime.now(timezone.utc)
+        tz = tz or self.default_tz
+        zone = ZoneInfo(tz)
+
+        with self.db.transaction() as cur:
+            candidates = fetch_retractable_insights(cur, user_id)
+
+        results: list[RetractionOutcome] = []
+        for row in candidates:
+            outcome = self._judge(user_id, row, now=now, zone=zone)
+            results.append(outcome)
+            if outcome.retracted:
+                with self.db.transaction() as cur:
+                    mark_retracted(cur, user_id, row["id"])
+                logger.info(
+                    "retracted insight %s: %d counterexample day(s) >= %d",
+                    row["id"], outcome.counterexample_days, outcome.required,
+                )
+        return results
+
+    def _judge(
+        self, user_id: UUID, row: dict, *, now: datetime, zone: ZoneInfo
+    ) -> RetractionOutcome:
+        payload = row["payload"]
+        condition = payload.get("retraction_condition") or {}
+        series = payload.get("series_metric", "?")
+
+        metric = METRICS.get(condition.get("metric"))
+        if metric is None:
+            return _skip(row, series, "condition names a metric the engine cannot read")
+
+        reference, missing = _reference(payload, condition)
+        if missing:
+            return _skip(row, series, missing)
+
+        window_days = int(condition["window_days"])
+        required = int(condition["min_count"])
+        start = now - timedelta(days=window_days)
+
+        with self.db.transaction() as cur:
+            rows = fetch_series_window(
+                cur, user_id, metric.memory_type, metric.path, start, now
+            )
+
+        days = count_counterexample_days(
+            rows, reference=reference, direction=condition["direction"], zone=zone
+        )
+        return RetractionOutcome(
+            insight_id=row["id"],
+            series=series,
+            retracted=days >= required,
+            counterexample_days=days,
+            required=required,
+        )
 
     # ── detection ─────────────────────────────────────────────────────────────────────
     def _detect(
@@ -384,6 +476,8 @@ class ConsolidationService:
             "series_kind": key.kind,
             "window_start": finding.window_start,
             "window_end": finding.window_end,
+            "pre_value": finding.pre_value,
+            "post_value": finding.post_value,
             "evidence_ids": [str(i) for i in finding.evidence_ids[:MAX_EVIDENCE_IDS]],
             "evidence_count": finding.evidence_count,
             "effect": finding.effect,
@@ -425,6 +519,62 @@ def _samples(rows: Sequence[dict]) -> list[MetricSample]:
         )
         for row in rows
     ]
+
+
+def count_counterexample_days(
+    rows: Sequence[dict], *, reference: float, direction: str, zone: ZoneInfo
+) -> int:
+    """Distinct local days in the window on which the metric contradicted a claim (§4.14).
+
+    A counterexample is a value that moved in ``direction`` past ``reference`` — below it for
+    ``falling``, above it for ``rising``. ``reference`` is the condition's ``threshold`` when it
+    has one and the insight's ``post_value`` otherwise; both arrive as typed floats, so this is
+    arithmetic and nothing else (**I-21**).
+
+    **Days, not rows.** Two meals on one day are one counterexample, which is what makes the
+    count mean the same thing as the sentence the user was shown ("on 3 or more days in any
+    30-day window") — ADR-13.11 requires the displayed rule and the evaluated rule to be the
+    same rule. It also reads correctly for a materialized period: an assertion covering thirty
+    days really does assert about each of them, which is the one place this deliberately counts
+    days where the *detectors* count assertions (I-4). The distinction is intentional: I-4
+    protects effect size from over-weighted evidence, while a retraction is asking how many
+    days reality disagreed.
+
+    Pure: no clock (the window is already applied by the caller's query), no I/O, no prose.
+    """
+    contradicts = (
+        (lambda value: value < reference)
+        if direction == "falling"
+        else (lambda value: value > reference)
+    )
+    return len({
+        row["event_time"].astimezone(zone).date()
+        for row in rows
+        if row["value"] is not None and contradicts(float(row["value"]))
+    })
+
+
+def _reference(payload: dict, condition: dict) -> tuple[float, str | None]:
+    """The value a counterexample is measured against (§4.14).
+
+    An explicit ``threshold`` wins; otherwise the claim's own ``post_value`` — the level it
+    asserted the series had reached. A missing ``post_value`` is reported as unevaluatable
+    rather than defaulted: guessing a reference would let the engine retract a claim on
+    arithmetic the user never agreed to."""
+    threshold = condition.get("threshold")
+    if threshold is not None:
+        return float(threshold), None
+    post = payload.get("post_value")
+    if post is None:
+        return 0.0, "insight predates post_value; a direction-only condition needs it"
+    return float(post), None
+
+
+def _skip(row: dict, series: str, reason: str) -> RetractionOutcome:
+    logger.info("retraction check skipped for insight %s: %s", row["id"], reason)
+    return RetractionOutcome(
+        insight_id=row["id"], series=series, retracted=False, skipped=reason
+    )
 
 
 def _slug(name: str) -> str:
