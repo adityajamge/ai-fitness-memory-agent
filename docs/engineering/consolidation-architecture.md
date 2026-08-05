@@ -1218,6 +1218,9 @@ by construction. **Not a trigger:** a desire to say "changepoint detection" in t
 | r | **One `_STAGES` table drives every routing edge** (ingest → consolidate → retrieve) | M5c | A hand-written edge per predecessor pair lets a stage be reachable from one and unreachable from another. One table makes that impossible. |
 | s | **`WRITE_TOOLS = {log_memory, analyze_series}`**, disjoint from `RETRIEVAL_TOOLS` | M5c | I-17 becomes a structural fact — the read set is read-only because the writers are not in it — rather than a rule someone must remember. `prepare_call` refuses both. |
 | t | **One `ConsolidationService` instance, shared by stage (F₀) and the tool** | M5c | Constructed once in the composition root. A second instance would be a second place the identity rule lives, which is what I-12 exists to prevent. |
+| u | **`--dry-run` is `ConsolidationService.analyze()`** — the same path stopped one step before the insert, not a parallel algorithm | M5d | A dry run that could disagree with the real run would be worse than none, because an operator would trust it. It even builds and validates the payload, so it cannot promise a claim the real run would reject. |
+| v | **The sweep lifts the (F₀) budget** (`SWEEP_BUDGET_MS`, 10 min) | M5d | The ~300 ms budget exists to protect an interactive turn; an operator command has nobody waiting, and deferring series there would just mean an incomplete pass to run again. Bounded rather than unbounded so a stuck series still ends. |
+| w | **`users_with_memories` excludes insight-only accounts** | M5d | Otherwise `--all` would grow with its own output. |
 
 ### 11.2 Consequences worth knowing before you touch this
 
@@ -1234,6 +1237,17 @@ by construction. **Not a trigger:** a desire to say "changepoint detection" in t
   payload is exactly where they would not, and "no condition" must mean one thing however written.
 - **No schema change was needed.** The existing inverted JSONB index serves the active-insight
   lookup; `engine/schema.sql` is untouched by Phase 5 so far.
+- **Never let a test invoke a cluster-wide sweep.** `cli/consolidate.py --all` is correct for an
+  operator command, but a *test* that runs it sweeps every account the suite has accumulated —
+  during a full run that measured ~150 accounts × 9 series, roughly fourteen minutes inside one
+  test, and it took the suite from 8 to 36 minutes. `test_all_sweeps_every_discovered_account`
+  therefore stubs discovery and tests the loop; discovery gets its own single-query test. This
+  is the same unbounded-sweep trap TODOS.md already records against `test_backfill.py`.
+- **`SerializationFailure` has no retry path** (TODOS.md). CockroachDB's retryable error class
+  reaches callers unhandled, which shows up as 1–2 non-reproducible full-suite failures per run
+  at Phase 5's transaction volume. Deferred deliberately: the obvious fix is impossible (a
+  `@contextmanager` cannot re-execute its caller's block), so a real fix changes the seam's
+  shape and belongs in its own infrastructure change.
 
 ### 11.3 Measured findings
 
@@ -1260,7 +1274,7 @@ by construction. **Not a trigger:** a desire to say "changepoint detection" in t
 | M5a | Stage (F₀) ingestion hook | ✅ `489f1cc` |
 | M5b | Insight builder family + trace lineage | ✅ `af9d4a2` |
 | M5c | `analyze_series` graph dispatch | ✅ `f0e76a6` |
-| M5d | `cli/consolidate.py` | ⏳ |
+| M5d | `cli/consolidate.py` | ✅ `748f418` |
 | M6 | Latency profile (T12) | ⏳ |
 | M7 | Photo ingestion | ⏳ (first to cut) |
 

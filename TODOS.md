@@ -167,6 +167,49 @@
 
 </details>
 
+## CockroachDB `SerializationFailure` has no retry path (surfaced 2026-08-05, Phase 5 M5d)
+
+- **What:** `engine/db.py`'s `Database.transaction()` propagates
+  `psycopg.errors.SerializationFailure` (`RETRY_SERIALIZABLE`) straight to the caller. That is
+  CockroachDB's **retryable** error class — the database is explicitly saying "re-run this
+  transaction", and its documentation states clients must implement retry logic for it. We
+  never have.
+- **Why it surfaced now:** the gap has existed since Phase 1 and never mattered, because the
+  workload was light. Phase 5 changed the arithmetic — one consolidation pass opens ~6
+  transactions per series, and a full sweep does that across 9 — so the suite began generating
+  enough transaction volume for the cluster to push one occasionally. Observed rate: **1–2
+  tests per full-suite run (~718 tests)**, never the same test twice, never reproducible in
+  isolation. Every occurrence is at **COMMIT** (`_commit_gen` → `_exec_command(b"COMMIT")`),
+  after the body has already run.
+- **Why it was deferred, deliberately:** the obvious fix — "wrap `transaction()`'s body in a
+  retry loop" — **is not implementable**. `transaction()` is a `@contextmanager`; it can catch
+  an exception thrown in at the `yield`, but it cannot re-execute the caller's `with` block,
+  which lives in a frame it has no access to. Retrying a transaction means re-running the
+  statements, and that is structurally impossible from inside a context manager. Any real fix
+  therefore changes the *shape* of the seam, not just its body:
+  - **Option A (smallest):** add `Database.run(work: Callable[[Cursor], T], *, attempts=3)`
+    beside `transaction()`, retrying with exponential backoff, and migrate only the hot call
+    sites. Additive; existing callers untouched. Consolidation is the natural first migration —
+    its reads are pure and its write is governed by the identity rule (I-12), so a re-run
+    re-derives the same claim and writes nothing extra, which makes retry unambiguously safe
+    there.
+  - **Option B:** migrate every call site to the retrying helper. Removes the class of flake
+    entirely; touches ~50 sites and all 718 tests' worth of behaviour.
+  - **Rejected:** `SAVEPOINT cockroach_restart` — more machinery, and CockroachDB now
+    recommends client-side retry instead.
+- **Pros of fixing:** removes the last source of non-deterministic full-suite failures, and is
+  a genuine production-readiness item — a real deployment under concurrent load will hit this
+  far more often than a sequential test suite does.
+- **Cons:** it is a database-layer change touching the seam every module depends on. Doing it
+  mid-milestone would have meant redesigning infrastructure inside a feature commit, which is
+  why it was split out (builder decision, 2026-08-05).
+- **Not a correctness risk today:** the failure is loud, not silent — the transaction has
+  already rolled back when it surfaces, so nothing is half-written. It costs a failed run, not
+  bad data.
+- **Depends on / blocked by:** nothing. Worth doing as its own infrastructure change, ideally
+  before Phase 7's production-readiness write-up, since "what happens under contention" is a
+  question that section has to answer honestly.
+
 ## Drop embedding normalization when CockroachDB ships cosine distance
 
 - **What:** When CockroachDB vector indexes support cosine (or inner-product) distance,

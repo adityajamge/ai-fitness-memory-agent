@@ -116,6 +116,9 @@ class SeriesOutcome:
     unchanged: UUID | None = None
     #: Set when the detector cleared nothing (**I-22**) — silence with a reason, not a gap.
     refused: str | None = None
+    #: A dry run reached the point of writing and stopped. There is no id because nothing was
+    #: inserted — which is precisely what makes the flag trustworthy rather than decorative.
+    would_create: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +153,11 @@ class ConsolidationOutcome:
     @property
     def superseded_ids(self) -> list[UUID]:
         return [o.superseded for o in self.outcomes if o.superseded]
+
+    @property
+    def would_create_count(self) -> int:
+        """Insights a dry run would have written (§4.11)."""
+        return sum(1 for o in self.outcomes if o.would_create)
 
     @property
     def wrote_nothing(self) -> bool:
@@ -192,6 +200,35 @@ class ConsolidationService:
         run cannot distinguish from a fresh one. Stopping on a whole-series boundary keeps
         every outcome complete and the remainder honestly reported as deferred.
         """
+        return self._pass(user_id, series, tz=tz, budget_ms=budget_ms, write=True)
+
+    def analyze(
+        self,
+        user_id: UUID,
+        series: Sequence[SeriesKey] | None = None,
+        *,
+        tz: str | None = None,
+        budget_ms: int | None = None,
+    ) -> ConsolidationOutcome:
+        """What ``consolidate`` *would* do, without writing anything (§4.11's ``--dry-run``).
+
+        The identical read → collapse → detect → identity-compare path, stopped one step before
+        the insert. It is deliberately not a separate algorithm with a printing branch: a dry
+        run that could disagree with the real run would be worse than no dry run at all, since
+        an operator would trust it. ``SeriesOutcome.would_create`` carries the verdict, and
+        carries no id, because nothing was written to have one.
+        """
+        return self._pass(user_id, series, tz=tz, budget_ms=budget_ms, write=False)
+
+    def _pass(
+        self,
+        user_id: UUID,
+        series: Sequence[SeriesKey] | None,
+        *,
+        tz: str | None,
+        budget_ms: int | None,
+        write: bool,
+    ) -> ConsolidationOutcome:
         tz = tz or self.default_tz
         keys = list(series) if series is not None else [
             SeriesKey.for_metric(metric) for metric in sorted(CONSOLIDATION_SERIES)
@@ -204,7 +241,7 @@ class ConsolidationService:
             if self.clock() >= deadline:
                 result.deferred.append(str(key))
                 continue
-            result.outcomes.append(self.consolidate_series(user_id, key, tz=tz))
+            result.outcomes.append(self.consolidate_series(user_id, key, tz=tz, write=write))
 
         if result.deferred:
             logger.info(
@@ -235,9 +272,12 @@ class ConsolidationService:
         return self.consolidate(user_id, keys, tz=tz, budget_ms=budget_ms)
 
     def consolidate_series(
-        self, user_id: UUID, key: SeriesKey, *, tz: str | None = None
+        self, user_id: UUID, key: SeriesKey, *, tz: str | None = None, write: bool = True
     ) -> SeriesOutcome:
-        """Consolidate exactly one series and apply the identity rule to the result."""
+        """Consolidate exactly one series and apply the identity rule to the result.
+
+        ``write=False`` reports the verdict without inserting — the single switch behind
+        ``analyze``/``--dry-run``, placed here so both paths share every step above it."""
         tz = tz or self.default_tz
         finding, row_meta = self._detect(user_id, key, tz=tz)
         if finding is None:
@@ -246,7 +286,7 @@ class ConsolidationService:
             # retraction condition is for (M4), and conflating the two would let a quiet week
             # withdraw a claim the data still supports.
             return SeriesOutcome(series=str(key), refused="detector emitted nothing")
-        return self._apply(user_id, key, finding, row_meta, tz=tz)
+        return self._apply(user_id, key, finding, row_meta, tz=tz, write=write)
 
     def is_stale(self, user_id: UUID, key: SeriesKey, insight_created_at: datetime) -> bool:
         """Whether the series has been added to since a claim was derived (§4.7).
@@ -429,6 +469,7 @@ class ConsolidationService:
         row_meta: dict[UUID, dict],
         *,
         tz: str,
+        write: bool = True,
     ) -> SeriesOutcome:
         claim = fingerprint(
             kind=finding.kind,
@@ -452,8 +493,13 @@ class ConsolidationService:
         if active and active[0]["payload"].get("fingerprint") == claim and len(active) == 1:
             return SeriesOutcome(series=str(key), unchanged=active[0]["id"])
 
+        # Build unconditionally: a dry run that skipped validation could report a claim the
+        # real run would then reject, which is the one way this flag could mislead.
         memory = self._build(user_id, key, finding, claim, row_meta, tz=tz)
         superseded = [row["id"] for row in active]
+
+        if not write:
+            return SeriesOutcome(series=str(key), would_create=True)
 
         with self.db.transaction() as cur:
             (new_id,) = insert_memories(cur, [memory])
