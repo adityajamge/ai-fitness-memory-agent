@@ -56,6 +56,14 @@ _emails: set[str] = set()
 #: reference ``users``). ``memories`` has no FK at all, which is exactly why it needs this.
 _USER_SCOPED = ("memories", "sessions", "user_profile")
 
+#: Users deleted per statement. Small on purpose: one ``ANY(...)`` over every id the run
+#: minted produced a **21½-minute** DELETE against the cross-region cluster on 2026-08-05, which
+#: was almost certainly the source of the ``SerializationFailure`` flakes — a write transaction
+#: open that long gets its timestamp pushed and cannot refresh its read set at COMMIT. Teardown
+#: must never be the longest transaction in the run. Full write-up:
+#: ``docs/engineering/cockroachdb-lessons-learned.md``.
+PURGE_BATCH = 50
+
 #: LangGraph checkpoint tables. Their ``thread_id`` is namespaced ``"<user_id>:<client id>"``
 #: by ``api/routers/chat.py::thread_key`` (ADR-14.13), so user-scoped threads are purgeable by
 #: prefix. Threads created by agent tests that drive the graph directly use raw ids
@@ -130,6 +138,10 @@ def purge(database_url: str) -> dict[str, int]:
     registered: it opens no connection. An unreachable database is **not** an error — the
     suite skips database tests in that case, so there is nothing to clean.
 
+    **Deletes in bounded batches** (``PURGE_BATCH``). A single statement covering every id the
+    run minted grows without limit as the suite does, and a long-running teardown transaction is
+    both slow and a contention source in its own right — see the constant's note.
+
     Checkpoint rows are purged by ``thread_id`` prefix for registered users only. Threads that
     agent tests create with raw ids (``m5-…``/``guard-…``/``canary-…``) are a **known
     remainder, measured at 281 rows per full run** (70 checkpoints + 61 blobs + 150 writes on
@@ -151,30 +163,46 @@ def purge(database_url: str) -> dict[str, int]:
                 user_ids = _all_user_ids(cur)
                 if not user_ids:
                     return {}
-                patterns = [f"{uid}:%" for uid in user_ids]
 
                 for table in _CHECKPOINT:
                     if not _table_exists(cur, table):
                         continue
-                    cur.execute(
-                        f"DELETE FROM {table} WHERE thread_id LIKE ANY(%s)", [patterns]
+                    deleted[table] = _delete_batched(
+                        cur,
+                        f"DELETE FROM {table} WHERE thread_id LIKE ANY(%s)",
+                        [f"{uid}:%" for uid in user_ids],
                     )
-                    deleted[table] = cur.rowcount
 
                 for table in _USER_SCOPED:
                     if not _table_exists(cur, table):
                         continue
-                    cur.execute(f"DELETE FROM {table} WHERE user_id = ANY(%s)", [user_ids])
-                    deleted[table] = cur.rowcount
+                    deleted[table] = _delete_batched(
+                        cur, f"DELETE FROM {table} WHERE user_id = ANY(%s)", user_ids
+                    )
 
                 # Last: sessions/user_profile reference users.
                 if _table_exists(cur, "users"):
-                    cur.execute("DELETE FROM users WHERE id = ANY(%s)", [user_ids])
-                    deleted["users"] = cur.rowcount
+                    deleted["users"] = _delete_batched(
+                        cur, "DELETE FROM users WHERE id = ANY(%s)", user_ids
+                    )
     except psycopg.OperationalError:
         return {}  # no database this run; nothing was written, nothing to clean
 
     return {table: n for table, n in deleted.items() if n}
+
+
+def _delete_batched(cur: psycopg.Cursor, sql: str, values: list) -> int:
+    """Run one parameterized DELETE per ``PURGE_BATCH`` slice, returning the total deleted.
+
+    Each statement is its own implicit transaction (the connection is autocommit), so a slow
+    slice cannot hold locks while the rest run — which is the whole point. Batching also keeps
+    the statement's parameter array a fixed size regardless of how large the suite grows.
+    """
+    total = 0
+    for start in range(0, len(values), PURGE_BATCH):
+        cur.execute(sql, [values[start : start + PURGE_BATCH]])
+        total += cur.rowcount
+    return total
 
 
 def residue(database_url: str) -> dict[str, int]:
