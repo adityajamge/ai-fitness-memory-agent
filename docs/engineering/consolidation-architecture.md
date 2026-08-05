@@ -1272,11 +1272,16 @@ by construction. **Not a trigger:** a desire to say "changepoint detection" in t
 | M4 | Retraction evaluator | ✅ `d45ca8b` |
 | — | `claim_dates` identity fix (§4.6) | ✅ `7c49123` |
 | M5a | Stage (F₀) ingestion hook | ✅ `489f1cc` |
-| M5b | Insight builder family + trace lineage | ✅ `af9d4a2` |
-| M5c | `analyze_series` graph dispatch | ✅ `f0e76a6` |
-| M5d | `cli/consolidate.py` | ✅ `748f418` |
+| M5b | Insight builder family + trace lineage | ✅ `43d1f9b` |
+| M5c | `analyze_series` graph dispatch | ✅ `8e6f635` |
+| M5d | `cli/consolidate.py` | ✅ `2dfb854` |
 | M6 | Latency profile (T12) | ⏳ |
 | M7 | Photo ingestion | ⏳ (first to cut) |
+| — | Teardown fix + CockroachDB engineering record | ✅ `6d02f15` |
+
+*Hashes are the **post-amend** ones on `main`. Three entries previously cited pre-amend
+objects — writing a hash into the doc and then amending the commit changes it. Record the
+hash after the final amend, not before.*
 
 ## 12. Maintenance notes
 
