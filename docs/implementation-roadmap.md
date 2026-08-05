@@ -225,12 +225,17 @@
 
 ## Phase 5 — Insight Engine *(~5–6 days)*
 
-> **Status 2026-08-04: M0–M5a complete, 656 tests green.** M0 decisions + fixture hygiene
+> **Status 2026-08-05: M0–M5c complete, 697 tests green.** M0 decisions + fixture hygiene
 > (`ce4d961`) · M1 insight contracts (`f2d109b`) · EffectScale amendment (`0343958`) · M2
 > analytics kernel (`b2d5b25`) · M3 consolidation service + identity (`7385769`) · M4 typed
 > retraction (`d45ca8b`) · claim_dates identity fix (`7c49123`) · M5a stage (F₀) hook
-> (`489f1cc`). **Remaining:** M5b insight builder family + trace lineage · M5c `analyze_series`
-> dispatch · M5d `cli/consolidate.py` · M6 latency (T12) · M7 photo ingestion (first to cut).
+> (`489f1cc`) · docs sync (`78f61b1`) · M5b insight family + trace lineage (`43d1f9b`) ·
+> M5c `analyze_series` graph dispatch (`8e6f635`). **Remaining:** M5d `cli/consolidate.py` ·
+> M6 latency (T12) · M7 photo ingestion (first to cut).
+>
+> **Consolidation is live in the deployed app as of M5c**: the composition root now builds one
+> `ConsolidationService` and shares it between the ingestion tail's stage (F₀) and the graph's
+> `analyze_series` node. Before that commit the hook existed but was inert outside tests.
 >
 > Three approved amendments came out of implementation and are recorded in the architecture
 > doc's §11 implementation record: **per-series `EffectScale`** (a single relative effect floor
