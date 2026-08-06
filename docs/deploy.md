@@ -55,8 +55,12 @@ reproducibility (e.g. recreating the stack in another region):
      "Resource": "*" },
    { "Effect": "Allow",
      "Action": "iam:PassRole",
-     "Resource": ["<EXECUTION_ROLE_ARN>", "<INFRASTRUCTURE_ROLE_ARN>"] }
+     "Resource": ["<EXECUTION_ROLE_ARN>", "<INFRASTRUCTURE_ROLE_ARN>", "<TASK_ROLE_ARN>"] }
    ```
+
+   > The task role ARN was added on 2026-08-06 when the deploy became declarative.
+   > Without it, `ecs:RegisterTaskDefinition` fails with an `iam:PassRole` denial the
+   > moment the workflow starts passing `task-role-arn`.
 
 2. **First image into ECR** — push to `main` with the `AWS_DEPLOY_ENABLED`
    variable still unset: the deploy job is skipped, but you can then run
@@ -74,9 +78,9 @@ reproducibility (e.g. recreating the stack in another region):
    - Additional configurations: service name `ai-fitness-memory-agent`,
      container port **8080**, health check path **/healthz**,
      CPU **0.25 vCPU** / memory **0.5 GB** (smallest — see budget line-item),
-     environment variables: none were set in Phase 1 — Phase 2's `DATABASE_URL` +
-     Bedrock config are still outstanding (see
-     [Runtime configuration](#runtime-configuration-phase-2-onward) below)
+     environment variables: **leave empty** — they are supplied by the deploy
+     workflow on every run and console values do not survive a redeploy (see
+     [Runtime configuration](#runtime-configuration-declarative) below)
    - Note the two role ARNs it created and the service URL
      (`…ecs.us-east-1.on.aws`).
 
@@ -90,15 +94,96 @@ reproducibility (e.g. recreating the stack in another region):
    renders at the service URL and `/healthz` returns `{"status":"ok"}`. Save
    the URL in the README (hackathon compliance table) when Milestone 1 lands.
 
-## Runtime configuration (Phase 2 onward)
+## Runtime configuration (declarative)
 
-Phase 1 needed no environment variables — the hello page and `/healthz` have no
-dependencies. **The Phase 2 write path does.** The container reads its config through
-[`engine/config.py`](../engine/config.py); the deployed service must have at least:
+**Configuration lives in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), not in the
+ECS console.** Do not set environment variables by hand on the service — they will not
+survive the next deploy.
+
+### Why: the deploy action rebuilds the service config every run
+
+`aws-actions/amazon-ecs-deploy-express-service@v1` does **not** read your existing
+container configuration and merge into it. Reading its source (`index.js`):
+
+- it calls `DescribeServices` only to decide create-vs-update and to capture **tags**
+  (`index.js:295-328`) — nothing else about the live service is read back;
+- it builds `serviceConfig.primaryContainer` fresh from action inputs, starting from
+  `{ image }` and adding `environment` / `secrets` / `containerPort` **only if the
+  corresponding input is non-empty** (`index.js:341-375`);
+- on update it sends `UpdateExpressGatewayServiceCommand({ serviceArn, ...serviceConfig })`
+  (`index.js:505-516`).
+
+So any setting the workflow does not pass is a setting the deploy does not carry forward.
+This applies to more than the environment — `task-role-arn` (`index.js:415-417`) and
+`health-check-path` (`index.js:443-445`) are built the same way. A workflow that omits
+them can strip the container's Bedrock permissions and revert the ALB health check to
+Express Mode's `/ping` default, which fails against this app.
+
+The workflow therefore passes **all** of them explicitly, and a preflight step fails the
+job if any required repo variable is unset, so a half-configured deploy stops before it
+touches the running service.
+
+### What is set where
+
+Non-sensitive values are literals in the workflow (version-controlled, reviewable).
+Secrets are ECS `secrets` entries — ECS resolves them from Secrets Manager at task start,
+so the values never appear in the task definition, the workflow, or CI logs.
+
+| Variable | Kind | Source |
+|---|---|---|
+| `DATABASE_URL` | **secret** | Secrets Manager → `vars.DATABASE_URL_SECRET_ARN` |
+| `ANTHROPIC_API_KEY` | **secret** | Secrets Manager → `vars.ANTHROPIC_API_KEY_SECRET_ARN` |
+| `LLM_PROVIDER` = `claude_api` | env | workflow literal |
+| `EMBEDDING_PROVIDER` = `bedrock` | env | workflow literal |
+| `CLAUDE_API_MODEL_ID` = `claude-haiku-4-5-20251001` | env | workflow literal |
+| `CLAUDE_API_EFFORT` = `low` | env | workflow literal |
+| `DEFAULT_TZ` = `Asia/Kolkata` | env | workflow literal |
+| `AWS_REGION` | env | `vars.AWS_REGION`, default `us-east-1` |
+| `EMBED_DIMS` | **not set** | defaults to 512 in `engine/config.py`; a second source of truth could drift from `VECTOR(512)` in `schema.sql` |
+| AWS credentials | — | never env vars: the **task role** (`vars.ECS_TASK_ROLE_ARN`) grants `bedrock:InvokeModel` |
+
+### One-time AWS setup for the above
+
+Run once per account; after this every deploy is fully automatic.
+
+```bash
+# 1. Store the two secrets (reads from .env so the values never enter shell history)
+aws secretsmanager create-secret --name ai-fitness/DATABASE_URL \
+  --secret-string "$(grep -E '^DATABASE_URL=' .env | cut -d= -f2-)"
+aws secretsmanager create-secret --name ai-fitness/ANTHROPIC_API_KEY \
+  --secret-string "$(grep -E '^ANTHROPIC_API_KEY=' .env | cut -d= -f2-)"
+
+# 2. Let the EXECUTION role read them (it is what injects secrets at task start)
+aws iam put-role-policy --role-name <EXECUTION_ROLE_NAME> \
+  --policy-name read-app-secrets --policy-document '{"Version":"2012-10-17","Statement":[{
+    "Effect":"Allow","Action":"secretsmanager:GetSecretValue",
+    "Resource":["<DATABASE_URL_SECRET_ARN>","<ANTHROPIC_API_KEY_SECRET_ARN>"]}]}'
+
+# 3. Create the TASK role (what the container itself assumes) with Bedrock access
+aws iam create-role --role-name ai-fitness-task-role \
+  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{
+    "Effect":"Allow","Principal":{"Service":"ecs-tasks.amazonaws.com"},
+    "Action":"sts:AssumeRole"}]}'
+aws iam put-role-policy --role-name ai-fitness-task-role \
+  --policy-name invoke-bedrock --policy-document '{"Version":"2012-10-17","Statement":[{
+    "Effect":"Allow","Action":["bedrock:InvokeModel"],
+    "Resource":"arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0"}]}'
+```
+
+Then add three repo variables (`Settings → Secrets and variables → Actions → Variables`):
+`DATABASE_URL_SECRET_ARN`, `ANTHROPIC_API_KEY_SECRET_ARN`, `ECS_TASK_ROLE_ARN`.
+
+> Only the embedding role runs on Bedrock in the current configuration, so the task-role
+> policy above is scoped to the Titan model. Widen it to include the Claude inference
+> profile if `LLM_PROVIDER` ever moves back to `bedrock`.
+
+### Reference: every variable `engine/config.py` reads
+
+The container reads its config through [`engine/config.py`](../engine/config.py):
 
 | Variable | Purpose | Notes |
 |---|---|---|
-| `DATABASE_URL` | CockroachDB Cloud connection string | secret — set on the Express service, never baked into the image |
+| `DATABASE_URL` | CockroachDB Cloud connection string | **required in practice** — the default is `127.0.0.1`, so an unset value fails silently (see the status note below). Delivered as an ECS secret, never baked into the image |
 | `AWS_REGION` | Bedrock region | optional; defaults to `us-east-1` |
 | `EXTRACTION_MODEL_ID` / `EMBEDDING_MODEL_ID` | model overrides | optional; defaults in `engine/config.py` |
 | `EMBED_DIMS` | embedding dimensions | optional; defaults to `512` — **must match `VECTOR(512)`** in `engine/schema.sql` |
@@ -108,9 +193,10 @@ dependencies. **The Phase 2 write path does.** The container reads its config th
 | `MODEL_PROVIDER` | shorthand setting *both* roles at once | optional; defaults to `bedrock`. Retained for backward compatibility; the per-role variables above win when set |
 | `SESSION_TTL_SECONDS` / `BACKFILL_BATCH` | session lifetime, opportunistic backfill page size | optional; defaults in `engine/config.py` |
 
-Bedrock access comes from the task role, not from keys in env vars — the task execution /
-infrastructure roles created by the Express wizard need `bedrock:InvokeModel` added for
-ingestion to work.
+Bedrock access comes from the **task role** (`vars.ECS_TASK_ROLE_ARN`), not from keys in env
+vars. That is a different role from the execution role: the execution role pulls the image
+and resolves the ECS secrets, while the task role is what the running container assumes to
+call `bedrock:InvokeModel`.
 
 > **Provider roles ([ADR-13.2](office-hours/09-decisions.md#adr-13), amended 2026-08-02).**
 > The LLM and embedding roles are selected independently, because Bedrock model access is
@@ -130,19 +216,25 @@ ingestion to work.
 > re-embedding every row (`python -m cli.backfill`). Treat it as fixed once data is written.
 > `LLM_PROVIDER` carries no such constraint and can be changed freely.
 
-The full variable list, with which are required and what each defaults to, is
-[`.env.example`](../.env.example) at the repo root. That file is a **development** template:
-the deployed service has no `.env` (the `python-dotenv` loader is a dev-only dependency and is
-absent from the image), so every value above must be set as a real environment variable on the
-Express service.
+The same list, annotated for local development, is [`.env.example`](../.env.example) at the
+repo root. That file is a **development** template only: the deployed image has no `.env`
+(the `python-dotenv` loader is a dev-only dependency and is absent from the image), so
+production values reach the container solely as real environment variables — which is
+exactly what the workflow's `environment-variables` and `secrets` inputs supply.
 
-> **Status: not yet verified on the deployed service.** As of 2026-07-21 there is no record
-> that these were configured in ECS, and the app deliberately tolerates an unreachable
+> **Status: configuration is now declarative but NOT yet verified on the running service.**
+> As of 2026-08-06 the workflow supplies everything above, but the AWS-side prerequisites
+> (the two Secrets Manager secrets, `secretsmanager:GetSecretValue` on the execution role,
+> the task role, and the three repo variables) still have to be created, and no deploy has
+> run since. Until a deploy completes and a real signup + ingest succeeds against the
+> deployed URL, treat the write path as unverified.
+>
+> The failure mode to watch for: the app deliberately tolerates an unreachable
 > database at startup so the ALB health check stays green
 > ([`api/main.py`](../api/main.py) lifespan). That means **`/healthz` can report ok while
 > every `/api/*` route fails** — do not treat a green health check as proof the write path
-> is live. Verify with a real signup + ingest against the deployed URL before the Phase 2
-> demo checkpoint, and update this line with the result.
+> is live. Verify with a real signup + ingest against the deployed URL, and update this
+> line with the result.
 
 ## Operational notes
 

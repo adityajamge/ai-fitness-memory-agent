@@ -91,6 +91,38 @@ jobs:
           docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
           docker push --all-tags "$IMAGE"
 
+      # Fail before touching the service rather than deploying a half-configured one.
+      # Every value below is required for the write path; a missing one used to
+      # surface as a green /healthz with every /api/* route broken (docs/deploy.md).
+      - name: Verify deploy configuration is complete
+        env:
+          ECS_EXECUTION_ROLE_ARN: ${{ vars.ECS_EXECUTION_ROLE_ARN }}
+          ECS_INFRASTRUCTURE_ROLE_ARN: ${{ vars.ECS_INFRASTRUCTURE_ROLE_ARN }}
+          ECS_TASK_ROLE_ARN: ${{ vars.ECS_TASK_ROLE_ARN }}
+          DATABASE_URL_SECRET_ARN: ${{ vars.DATABASE_URL_SECRET_ARN }}
+          ANTHROPIC_API_KEY_SECRET_ARN: ${{ vars.ANTHROPIC_API_KEY_SECRET_ARN }}
+        run: |
+          missing=""
+          for v in ECS_EXECUTION_ROLE_ARN ECS_INFRASTRUCTURE_ROLE_ARN ECS_TASK_ROLE_ARN \
+                   DATABASE_URL_SECRET_ARN ANTHROPIC_API_KEY_SECRET_ARN; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required repo variables:$missing"
+            echo "::error::See docs/deploy.md -> Runtime configuration (declarative)."
+            exit 1
+          fi
+
+      # RUNTIME CONFIGURATION LIVES HERE, IN VERSION CONTROL — not in the console.
+      #
+      # The action rebuilds the whole service config from these inputs on every run:
+      # it calls DescribeServices only to decide create-vs-update and to read tags,
+      # then sends UpdateExpressGatewayService with a freshly built primaryContainer
+      # (index.js:341-352, 496-517). Nothing configured by hand is read back, so any
+      # input omitted here is an input the deploy does not carry forward. That is why
+      # task-role-arn and health-check-path are passed explicitly too — they are the
+      # same risk class as the environment, and losing them breaks Bedrock access and
+      # the ALB health check respectively.
       - name: Deploy to ECS Express Mode
         id: deploy
         uses: aws-actions/amazon-ecs-deploy-express-service@v1
@@ -99,9 +131,34 @@ jobs:
           image: ${{ steps.ecr.outputs.registry }}/ai-fitness-memory-agent:${{ github.sha }}
           execution-role-arn: ${{ vars.ECS_EXECUTION_ROLE_ARN }}
           infrastructure-role-arn: ${{ vars.ECS_INFRASTRUCTURE_ROLE_ARN }}
+          # Grants the *container* bedrock:InvokeModel (embeddings). Distinct from the
+          # execution role, which only pulls the image and reads the secrets below.
+          task-role-arn: ${{ vars.ECS_TASK_ROLE_ARN }}
           container-port: "8080"
+          health-check-path: /healthz
           cpu: "256"
           memory: "512"
+          # Non-sensitive runtime settings. Mixed-provider deployment (ADR-13.2 as
+          # amended 2026-08-02): Claude API for the LLM roles, Bedrock for embeddings.
+          # EMBED_DIMS is deliberately NOT set — engine/config.py already defaults to
+          # 512 and a second source of truth could drift from VECTOR(512) in schema.sql.
+          environment-variables: |
+            [
+              {"name": "AWS_REGION",          "value": "${{ vars.AWS_REGION || 'us-east-1' }}"},
+              {"name": "LLM_PROVIDER",        "value": "claude_api"},
+              {"name": "EMBEDDING_PROVIDER",  "value": "bedrock"},
+              {"name": "CLAUDE_API_MODEL_ID", "value": "claude-haiku-4-5-20251001"},
+              {"name": "CLAUDE_API_EFFORT",   "value": "low"},
+              {"name": "DEFAULT_TZ",          "value": "Asia/Kolkata"}
+            ]
+          # Injected by ECS from Secrets Manager at task start, so the values never
+          # appear in the task definition, the workflow, or CI logs. The execution
+          # role needs secretsmanager:GetSecretValue on both ARNs.
+          secrets: |
+            [
+              {"name": "DATABASE_URL",      "valueFrom": "${{ vars.DATABASE_URL_SECRET_ARN }}"},
+              {"name": "ANTHROPIC_API_KEY", "valueFrom": "${{ vars.ANTHROPIC_API_KEY_SECRET_ARN }}"}
+            ]
 
       - name: Service URL
         run: echo "Deployed to ${{ steps.deploy.outputs.endpoint }}"
