@@ -244,3 +244,53 @@ def test_persist_failure_costs_the_glass_box_not_the_turn(make_graph, monkeypatc
 
     memories = _rows("SELECT id FROM memories WHERE user_id = %(u)s", {"u": user_id})
     assert len(memories) == 1, "stage (D) committed before (G) ran and is unaffected"
+
+
+# ── M2: citation validation reaches the turn result ────────────────────────────────────
+def test_hallucinated_citation_is_flagged_on_a_real_turn(make_graph) -> None:
+    """T7b end to end: the narrator cites an id that was never retrieved, and the engine
+    catches it mechanically — the property ADR-12 calls "enforced, not requested"."""
+    user_id = register_user(uuid.uuid4())
+    invented = uuid.uuid4()
+    provider = FakeModelProvider(
+        plan_calls=[ToolCall(tool=AGGREGATE_MEMORIES, arguments={"metric": "protein_g", **RANGE})],
+        narration=f"You averaged 46g [{invented}].",
+    )
+    graph = make_graph(provider)
+
+    result = run_turn(
+        graph,
+        user_id=user_id,
+        question="how much protein?",
+        thread_id=str(uuid.uuid4()),
+        now=NOW,
+        tz=IST,
+    )
+
+    assert result.citation_report is not None
+    assert result.citation_report.status == "invalid"
+    assert str(invented) in result.citation_report.invalid
+    assert result.citations == [], "an unresolvable marker is never reported as cited"
+
+
+def test_honest_empty_answer_is_not_flagged(make_graph) -> None:
+    """A new account's first question retrieves nothing. Citing nothing is correct there,
+    and must not read as a citation defect (see engine/tests/test_citations.py)."""
+    user_id = register_user(uuid.uuid4())
+    provider = FakeModelProvider(
+        plan_calls=[ToolCall(tool=AGGREGATE_MEMORIES, arguments={"metric": "protein_g", **RANGE})],
+        narration="I don't have anything logged for that window yet.",
+    )
+    graph = make_graph(provider)
+
+    result = run_turn(
+        graph,
+        user_id=user_id,
+        question="how much protein?",
+        thread_id=str(uuid.uuid4()),
+        now=NOW,
+        tz=IST,
+    )
+
+    assert result.citation_report.status == "valid"
+    assert result.citation_report.citable_count == 0

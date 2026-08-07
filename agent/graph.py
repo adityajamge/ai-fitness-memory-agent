@@ -22,7 +22,6 @@ module changes.
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Annotated, Any, TypedDict
@@ -47,6 +46,7 @@ from agent.tools import (
     prepare_call,
 )
 from engine.assembly import ContextBlock, RetrievalOutcome, assemble
+from engine.citations import CitationReport, validate_citations
 from engine.consolidation import ConsolidationService, SeriesOutcome
 from engine.db import Database
 from engine.ingestion import IngestionService, Receipt
@@ -58,13 +58,6 @@ from engine.turns import TurnRecord, persist_turn
 logger = logging.getLogger(__name__)
 
 CARRIER_KEY = "turn_carrier"
-
-# Every `[<uuid>]` marker the narrator emitted. Extraction only — validating and flagging
-# citations is T7 (Phase 6); here we simply report which allowed ids were actually cited.
-_CITATION_RE = re.compile(
-    r"\[([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\]"
-)
-
 
 # ── state: the checkpointed channels, deliberately small (M5-1 L1) ─────────────────────
 class GraphState(TypedDict, total=False):
@@ -103,6 +96,8 @@ class TurnCarrier:
     context: ContextBlock | None = None
     trace: EvidenceTrace | None = None
     errors: list[str] = field(default_factory=list)
+    #: T7b's verdict on the answer's citations. ``None`` until ``narrate`` has run.
+    citations: CitationReport | None = None
     #: What stage (G) persisted, once it has run. ``None`` means the turn was not recorded —
     #: either (G) has not reached this turn yet, or it failed and said so in ``errors``.
     turn_record: TurnRecord | None = None
@@ -120,6 +115,8 @@ class TurnResult:
     context: ContextBlock | None
     trace: EvidenceTrace | None
     errors: list[str]
+    #: T7b's citation verdict — what the UI flags invalid citations from.
+    citation_report: CitationReport | None = None
     #: Stage (G)'s handles, or ``None`` if the turn was not persisted. The UI reads the glass
     #: box by ``turn_record.assistant_turn_id``; a ``None`` here is exactly the case where the
     #: answer stands but that turn has no glass box (glass-box-architecture.md §4.3).
@@ -291,9 +288,16 @@ def build_graph(
         carrier = carrier_of(config)
         context = carrier.context
         answer = model.narrate(state["question"], context)
+        # T7b: validate against the *trace's* citable set, not the context's. They are the
+        # same set (assembly copies it), but the trace is what gets persisted and what the
+        # UI reads, so validating against it keeps runtime and rendered verdicts identical.
+        citable = carrier.trace.citable_ids if carrier.trace else frozenset()
+        carrier.citations = validate_citations(answer, citable)
         return {
             "answer": answer,
-            "citations": _cited_ids(answer, context),
+            # The checkpointed channel stays a plain list of id strings (small, serde-safe,
+            # M5-1); the full report rides the carrier like every other rich turn artifact.
+            "citations": [str(i) for i in carrier.citations.cited],
             "messages": [AIMessage(content=answer)],
         }
 
@@ -423,23 +427,6 @@ def _now_of(state: GraphState) -> datetime:
     return datetime.fromisoformat(raw) if raw else datetime.now(timezone.utc)
 
 
-def _cited_ids(answer: str, context: ContextBlock | None) -> list[str]:
-    """The ids the narrator actually cited, kept to those it was allowed to cite.
-
-    ``citable_ids`` — budgeted memories plus every aggregate/count contributing id — is the
-    correct surface per decision A3 (an aggregate's rows are citable but are not in
-    ``trace.evidence``). Mechanical validation and flagging of *invalid* citations is T7.
-    """
-    if context is None:
-        return []
-    allowed = {str(i) for i in context.citable_ids()}
-    seen: list[str] = []
-    for match in _CITATION_RE.findall(answer):
-        if match in allowed and match not in seen:
-            seen.append(match)
-    return seen
-
-
 def run_turn(
     graph,
     *,
@@ -475,5 +462,6 @@ def run_turn(
         context=carrier.context,
         trace=carrier.trace,
         errors=list(carrier.errors),
+        citation_report=carrier.citations,
         turn_record=carrier.turn_record,
     )

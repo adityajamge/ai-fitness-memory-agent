@@ -78,12 +78,33 @@ def test_query_turn_returns_answer_citations_and_trace(client, app_provider) -> 
 
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert set(payload) == {"thread_id", "answer", "citations", "receipts", "trace", "errors"}
+    # The response key set is a deliberate gate: adding a field means widening this on
+    # purpose. `citation_report` and `turn_id` joined in Phase 6 M2 — both *additive*, so
+    # `citations` keeps the shape every existing consumer already reads.
+    assert set(payload) == {
+        "thread_id",
+        "answer",
+        "citations",
+        "citation_report",
+        "receipts",
+        "trace",
+        "turn_id",
+        "errors",
+    }
     assert payload["answer"]
     assert payload["trace"] is not None
     assert [s["family"] for s in payload["trace"]["retrieval_steps"]] == ["lookup"]
     assert payload["receipts"] == []
     assert payload["errors"] == []
+
+    # T7b: the verdict rides the response, and the trace carries the set it was judged
+    # against (ADR-14.8) so the UI can render both without a second call.
+    assert payload["citation_report"]["status"] in {"valid", "invalid", "uncited"}
+    assert payload["citation_report"]["cited"] == payload["citations"]
+    assert "citable_ids" in payload["trace"]
+
+    # Stage (G) recorded the turn, and this is the handle the glass-box read API fetches by.
+    assert payload["turn_id"] is not None
 
 
 def test_logged_memory_is_returned_as_a_receipt_and_is_readable(client, app_provider) -> None:

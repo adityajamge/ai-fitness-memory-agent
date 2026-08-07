@@ -167,6 +167,21 @@ Three outcomes, mirroring the extraction contract's shape:
 is the citation eval's job, not the validator's. Phase 7 documentation must not overstate this,
 and the UI must not imply "verified" when it means "resolvable".
 
+**A fourth case, added in M2: no markers and nothing citable is `valid`, not `uncited`.**
+"I don't have anything logged for that window yet" is the *correct* answer to an empty context,
+and it is the single most common thing a brand-new account sees. Classifying it as a citation
+defect would make the UI cry wolf on every judge's first question. `uncited` is therefore
+reserved for the genuinely suspicious case: evidence was retrieved and the answer cited none of
+it. `CitationReport.citable_count` carries the distinction so the UI never has to inspect prose
+to make it.
+
+**The report is not persisted, and does not need to be (M2 decision).** It is a pure function
+of two things that *are* persisted — the answer on the `turns` row and `citable_ids` in the
+trace — so M3 recomputes it on read and gets a bit-identical verdict. This does not conflict
+with I-29: that invariant forbids re-deriving the **trace**, whose content depends on query
+results that no longer exist at read time. The report has no such dependency. Persisting it
+would add a second source of truth for a value that cannot drift from its inputs.
+
 ### 4.5 The read API is thin, and the trace is served verbatim
 
 **Decision.** Glass-box endpoints are read-only, user-scoped, and return the persisted trace
@@ -242,9 +257,9 @@ count, not content size.
 
 | | Milestone | Objective | Commit |
 |---|---|---|---|
-| M0 | Design lock | this document | `docs(phase6): lock the glass-box architecture` |
-| M1 | Trace persistence (T7a) | stage (G); `citable_ids` in the trace; ADR amendments | `feat(engine): persist turns and evidence traces at stage (G)` |
-| M2 | Citation validation (T7b) | deterministic validator, honest scope | `feat(agent): mechanical citation validation` |
+| M0 | Design lock | this document | ✅ `5aef6f5` |
+| M1 | Trace persistence (T7a) | stage (G); `citable_ids` in the trace; ADR amendments | ✅ `32e2e1b` |
+| M2 | Citation validation (T7b) | deterministic validator, honest scope | ✅ *this milestone* |
 | M3 | Read API + hydration (T16) | trace/memory/timeline/stats endpoints, batch fetch | `feat(api): glass-box read API` |
 | M4 | SPA foundation | toolchain, design system, shell, state primitives | *awaiting the design system* |
 | M5 | Chat + chips + receipts | build-order 1–3 | |

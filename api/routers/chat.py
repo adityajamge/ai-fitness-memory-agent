@@ -73,9 +73,21 @@ def _turn_json(client_thread_id: str, result: TurnResult) -> dict:
         "thread_id": client_thread_id,
         "answer": result.answer,
         "citations": result.citations,
+        # T7b's verdict (Phase 6 M2). `citations` above stays the plain list of resolved ids
+        # it has always been, so nothing that already consumes it breaks; this adds the
+        # *invalid* markers the UI flags in place, and the honest-scope distinction that goes
+        # with them — "resolvable", never "verified" (ADR-13.13).
+        "citation_report": (
+            result.citation_report.to_json() if result.citation_report else None
+        ),
         "receipts": [receipt_json(r) for r in result.receipts],
         # Inline for Phase 3; Phase 6 (T7) persists it and the UI fetches by trace_id.
         "trace": result.trace.to_json() if result.trace else None,
+        # Stage (G)'s handle: what the glass-box read API (M3) fetches this turn by. Null
+        # means the turn was not recorded — the answer stands, the glass box does not.
+        "turn_id": (
+            str(result.turn_record.assistant_turn_id) if result.turn_record else None
+        ),
         # Retrieval calls the engine refused (e.g. an unknown metric). Surfaced rather than
         # swallowed: the answer may be partial and the caller deserves to know.
         "errors": result.errors,
