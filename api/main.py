@@ -5,7 +5,10 @@ Phase 1 deploy-early spine (T10, ADR-11).
 with no arguments and gets the Bedrock provider. Startup applies the schema idempotently
 (D4) and opens the LangGraph checkpointer (``.setup()`` once — ADR-13.14 footgun), then
 compiles the turn graph. Both tolerate an unreachable database so the ECS health check stays
-green; ``/api/chat`` reports 503 until the cluster is back. SSE and the SPA arrive in Phase 6.
+green; ``/api/chat`` reports 503 until the cluster is back.
+
+The built Vite SPA is served from this same app when ``web/dist`` exists (``api/spa.py``), so one
+container answers both the UI and the API on one origin. SSE arrives with the live engine pane.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ from api.routers import auth as auth_router
 from api.routers import chat as chat_router
 from api.routers import glassbox as glassbox_router
 from api.routers import ingest as ingest_router
+from api.spa import mount_spa
 from engine.config import Settings, load_settings
 from engine.consolidation import ConsolidationService
 from engine.db import Database
@@ -131,9 +135,15 @@ def create_app(
         """ALB health check target (ECS Express Mode)."""
         return {"status": "ok"}
 
-    @app.get("/", response_class=HTMLResponse)
-    def root() -> str:
-        return _HELLO
+    # The SPA claims "/" and every unrouted path, so it must be mounted *after* the routers
+    # above or its catch-all would shadow the entire API. When `web/dist` is absent — the
+    # Python test suite, a fresh clone, `vite dev` alongside uvicorn — this is a no-op and the
+    # placeholder below answers instead.
+    if not mount_spa(app):
+
+        @app.get("/", response_class=HTMLResponse)
+        def root() -> str:
+            return _HELLO
 
     return app
 

@@ -4,6 +4,19 @@ CockroachDB × AWS Agentic Memory Hackathon project (deadline 2026-08-19). An AI
 
 **Source of truth: [docs/office-hours/README.md](docs/office-hours/README.md)** — read it (and its doc map) before designing, planning, or building anything. All architectural decisions live in [docs/office-hours/09-decisions.md](docs/office-hours/09-decisions.md) (ADR-1..13) — do not re-litigate them silently. **Day-to-day execution: [docs/implementation-roadmap.md](docs/implementation-roadmap.md)** (8 phases, demo checkpoints, commit milestones). Engineering backlog: [docs/office-hours/11-implementation-tasks.md](docs/office-hours/11-implementation-tasks.md) (T1–T18 details). Test obligations: [docs/office-hours/12-test-plan.md](docs/office-hours/12-test-plan.md). Deferred work: [TODOS.md](TODOS.md).
 
+## Design System
+
+**Always read [DESIGN.md](DESIGN.md) before making any visual or UI decision.** It is the locked
+visual contract for Phase 6 (M4–M8): typography, color tokens, spacing, radius, elevation, motion,
+responsive behavior, accessibility standards, the component language, the landing-page spec, and
+the twenty design rules every component must obey. Font choices, colors, spacing, and aesthetic
+direction are defined there and nowhere else.
+
+Do not deviate without explicit user approval plus a Decisions Log entry in DESIGN.md. In review
+and QA, flag any code that does not match it. The three rules most often broken: mono is reserved
+for database-originated values (never for style), no hardcoded colors (tokens only), and every
+data-driven component ships empty, loading, and error states alongside the populated one.
+
 ## Skill routing
 
 When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.

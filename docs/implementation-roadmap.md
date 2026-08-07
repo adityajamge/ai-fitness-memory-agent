@@ -325,6 +325,21 @@
 
 ## Phase 6 — Evidence Traces & Glass-Box UI *(~5–7 days)* — **ACTIVE**
 
+> **Status 2026-08-07: frontend foundation (F0–F5) complete; M4 is next.** The design system is
+> locked in **[DESIGN.md](../DESIGN.md)** (approved as the M4–M8 visual contract) with the
+> engineering contract in
+> **[engineering/frontend-guidelines.md](engineering/frontend-guidelines.md)**. `web/` is
+> scaffolded on the approved stack — Vite 8 · React 19.2 · Tailwind v4 · Base UI 1.6 · Motion 13 ·
+> TanStack Query 5 · Zod 4 — with tokens live, the SPA served from the API container
+> ([api/spa.py](../api/spa.py), 12 tests), a Node 24 Docker stage, and a CI frontend lane.
+> A `/plan-design-review` pass took the plan 7/10 → 9/10 and added six decisions: the guided first
+> turn (§9.1), auth screens (§6.17), 401 draft preservation (§6.11.1), a 72ch conversation cap,
+> the `uncited` citation line, and mobile keyboard + timeline-rail behavior.
+>
+> **The review's sharpest finding:** ADR-13.4 gives every judge an empty account with no seed data,
+> so *signup → first message → first receipt* **is** the live product experience being scored, and
+> it was the least-specified surface in the plan. §9.1 now specifies it.
+>
 > **Status 2026-08-06: M0–M3 complete — the glass box's whole backend.** M0 design lock
 > (`5aef6f5`) · M1 trace persistence at stage (G) + `citable_ids` (T7a, `32e2e1b`) ·
 > M2 mechanical citation validation (T7b, `f652732`) · M3 glass-box read API + batch

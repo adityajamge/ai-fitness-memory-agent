@@ -11,5 +11,12 @@
 data/
 reconstruction/
 docs/
-web/
 **/tests/
+
+# web/ IS part of the context — stage 1 builds the SPA from it. Only its generated
+# directories are excluded: node_modules is reinstalled by `npm ci` inside the image (a host
+# copy would be the wrong platform), and dist is produced by the build itself.
+web/node_modules/
+web/dist/
+web/test-results/
+web/playwright-report/

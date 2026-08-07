@@ -16,6 +16,32 @@ env:
   CRDB_VERSION: v26.2.4 # matches the version the canaries were verified against
 
 jobs:
+  # Frontend gate. Runs in parallel with the backend job and needs no database, so a type or
+  # contract error in web/ fails in ~40s instead of behind a five-minute pytest run.
+  web:
+    name: Frontend (typecheck + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24" # react-router@8 requires >=22.22.0; matches the Dockerfile
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
   test:
     name: Lint + tests (real CockroachDB) + image build
     runs-on: ubuntu-latest
@@ -62,11 +88,21 @@ jobs:
             [ "$i" = 20 ] && { echo "app never became healthy"; docker logs app; exit 1; }
             sleep 1
           done
+          # The SPA is served from this same container (ADR-13.3): "/" must return the built
+          # shell, not the placeholder, or stage 1 silently produced nothing.
           curl -fsS http://localhost:8080/ | grep -i "Memory Agent"
+          curl -fsS http://localhost:8080/ | grep -q '<script type="module"' \
+            || { echo "'/' did not serve the built SPA shell"; docker logs app; exit 1; }
+          # A deep link must reach the shell so client-side routing survives a refresh...
+          curl -fsS http://localhost:8080/app | grep -q '<div id="root">' \
+            || { echo "SPA fallback did not answer a deep link"; exit 1; }
+          # ...but the fallback must never shadow the API.
+          [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/nope)" = "404" ] \
+            || { echo "SPA fallback swallowed an unknown /api path"; exit 1; }
 
   deploy:
     name: Push to ECR + deploy to ECS Express Mode
-    needs: test
+    needs: [test, web]
     # Gated on a repo variable so CI is green before the one-time AWS setup
     # (docs/deploy.md) is done. Flip AWS_DEPLOY_ENABLED to 'true' to activate.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_DEPLOY_ENABLED == 'true'

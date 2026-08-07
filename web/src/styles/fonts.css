@@ -1,0 +1,41 @@
+/* Satoshi — the sans voice. In this product a sans typeface is a claim:
+ * "a model wrote this". See DESIGN.md §4.1 and src/assets/fonts/README.md.
+ *
+ * Self-hosted, no CDN: the app ships as one Docker image (ADR-13.3/13.7) and
+ * a third-party font request is an availability dependency we do not accept. */
+
+@font-face {
+  font-family: "Satoshi";
+  src: url("../assets/fonts/satoshi-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Satoshi";
+  src: url("../assets/fonts/satoshi-500.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Satoshi";
+  src: url("../assets/fonts/satoshi-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Metric-adjusted fallback so the swap does not shift layout. The adjustments
+ * are tuned by eye against Satoshi's x-height, not derived from its metric
+ * tables — if you see a visible reflow on first paint, measure and correct
+ * these three numbers rather than removing the fallback. */
+@font-face {
+  font-family: "Satoshi Fallback";
+  src: local("Arial");
+  size-adjust: 96%;
+  ascent-override: 98%;
+  descent-override: 22%;
+}

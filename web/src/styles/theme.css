@@ -1,0 +1,227 @@
+/* ============================================================================
+ * theme.css — the design system, executable.
+ *
+ * This file IS DESIGN.md §5. Tailwind v4 generates every utility from the
+ * custom properties below, so there is no second copy of the tokens to drift.
+ * Change a value here and the whole product changes with it.
+ *
+ * Rule 6 of the design contract: no component may hardcode a color. If you
+ * find yourself typing a hex outside this file, the token is missing — add it
+ * here instead.
+ * ==========================================================================*/
+
+@import "tailwindcss";
+
+/* Engine typeface. Sans is loaded from ./fonts.css (self-hosted, see
+ * src/assets/fonts/README.md) — no font CDN, per ADR-13.3/13.7. */
+/* latin subsets only — the full-family import also pulls Cyrillic, Greek and Vietnamese,
+ * roughly 60 KB of glyphs this product never renders. */
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+@import "./fonts.css";
+
+@theme {
+  /* ── Type families ───────────────────────────────────────────────────────
+   * TWO faces, and the choice between them is semantic, not stylistic:
+   *   sans  = a model wrote this
+   *   mono  = the database produced this
+   * See DESIGN.md §4.1. Breaking this rule breaks the glass box. */
+  --font-sans: "Satoshi", "Satoshi Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* ── Type scale ──────────────────────────────────────────────────────────
+   * NOTE THE GAP: nothing exists between 24px and 40px, deliberately.
+   * Measured on Linear and Vercel — the hole IS the hierarchy. Adding a size
+   * in that range flattens every heading relationship in the product. */
+  --text-micro: 0.6875rem;                    /* 11px  mono badge labels */
+  --text-micro--line-height: 1.4;
+  --text-micro--letter-spacing: 0.08em;
+
+  --text-meta: 0.75rem;                       /* 12px  IDs, timestamps, trace */
+  --text-meta--line-height: 1.5;
+
+  --text-dense: 0.8125rem;                    /* 13px  evidence rows, tables */
+  --text-dense--line-height: 1.5;
+
+  --text-body: 0.9375rem;                     /* 15px  chat + body. NOT 16. */
+  --text-body--line-height: 1.6;
+
+  --text-lead: 1.0625rem;                     /* 17px  lead paragraphs */
+  --text-lead--line-height: 1.6;
+  --text-lead--letter-spacing: -0.005em;
+
+  --text-h3: 1.25rem;                         /* 20px  pane titles */
+  --text-h3--line-height: 1.4;
+  --text-h3--letter-spacing: -0.01em;
+  --text-h3--font-weight: 500;
+
+  --text-h2: 1.5rem;                          /* 24px  section headings */
+  --text-h2--line-height: 1.3;
+  --text-h2--letter-spacing: -0.015em;
+  --text-h2--font-weight: 500;
+
+  /* ───────────── no sizes may live between here ───────────── */
+
+  --text-display-s: 2.5rem;                   /* 40px */
+  --text-display-s--line-height: 1.1;
+  --text-display-s--letter-spacing: -0.025em;
+  --text-display-s--font-weight: 500;
+
+  --text-display-m: 3.5rem;                   /* 56px */
+  --text-display-m--line-height: 1.05;
+  --text-display-m--letter-spacing: -0.03em;
+  --text-display-m--font-weight: 500;
+
+  --text-display-l: 4.5rem;                   /* 72px  hero only */
+  --text-display-l--line-height: 1;
+  --text-display-l--letter-spacing: -0.035em;
+  --text-display-l--font-weight: 500;
+
+  /* ── Surfaces ────────────────────────────────────────────────────────────
+   * Cold, blue-shifted near-black. The whole ramp spans ~12 points of
+   * lightness: restraint, not contrast, is what reads as expensive.
+   * Elevation comes from THESE plus a hairline — not from shadows (§4.3).
+   *
+   * Names follow the shadcn/Tailwind idiom (background / foreground / border)
+   * so shadcn components paste in and work unmodified. The alternative
+   * (--color-text → `text-text-muted`) reads badly in every className and
+   * would need rewriting on every paste. */
+  --color-background: oklch(0.145 0.008 250);
+  --color-surface: oklch(0.185 0.010 250);
+  --color-surface-2: oklch(0.225 0.012 250);
+  --color-surface-3: oklch(0.265 0.012 250);
+  --color-border: oklch(0.310 0.012 250);
+  --color-border-strong: oklch(0.400 0.014 250);
+
+  /* ── Foreground ──────────────────────────────────────────────────────────
+   * Contrast vs --color-background: 17.4:1 / 8.3:1 / 4.9:1. `faint` is the
+   * floor — nothing lighter than it may carry text. */
+  --color-foreground: oklch(0.965 0.003 250);
+  --color-muted-foreground: oklch(0.720 0.012 250);
+  --color-faint: oklch(0.590 0.014 250);
+
+  /* ── Signal — the ONLY accent ────────────────────────────────────────────
+   * Means exactly one thing: "this is evidence you can open."
+   * Permitted on: citation chips, the receipt ✦, timeline insight caps, the
+   * subject series in a chart, focus rings. Nowhere else. Scarcity is the
+   * entire point — spend it elsewhere and it stops meaning anything. */
+  --color-signal: oklch(0.800 0.155 78);
+  --color-signal-dim: oklch(0.800 0.155 78 / 0.14);
+  --color-signal-active: oklch(0.800 0.155 78 / 0.28);
+
+  /* ── Invalid — retracted insights, unresolvable citations, destructive ── */
+  --color-invalid: oklch(0.650 0.190 25);
+  --color-invalid-dim: oklch(0.650 0.190 25 / 0.14);
+
+  /* ── Radius ──────────────────────────────────────────────────────────────
+   * Deliberately small (category norm is 12–16px). Calipers, not
+   * marshmallows. `full` is for the avatar and nothing else — a pill-shaped
+   * button is a bug. */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  /* ── Shadows ─────────────────────────────────────────────────────────────
+   * Depth 3 ONLY (dialog, popover, drawer). There is intentionally no
+   * shadow-sm/md and no hover-lift: on #0B0D10 a drop shadow is mud. Cards
+   * change surface instead. */
+  --shadow-overlay: 0 16px 48px -12px oklch(0 0 0 / 0.7), 0 0 0 1px var(--color-border);
+  --shadow-popover: 0 8px 24px -8px oklch(0 0 0 / 0.6), 0 0 0 1px var(--color-border);
+
+  /* ── Motion ──────────────────────────────────────────────────────────────
+   * Nothing exceeds 400ms (§5.6). The 400ms ceiling belongs to the one
+   * choreographed moment in the product: citation chip → evidence row. */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-move: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Durations are plain custom properties rather than @theme keys: Tailwind v4
+ * has no --duration-* namespace, and these are referenced directly in
+ * transition declarations. */
+:root {
+  --duration-instant: 0ms;
+  --duration-micro: 120ms;
+  --duration-short: 180ms;
+  --duration-medium: 240ms;
+  --duration-enter: 320ms;
+  --duration-slow: 400ms;
+
+  /* The graph rule — the system's one texture (§4.4). Chart paper, because
+   * this product plots things. Never above 4% opacity, never behind body
+   * copy, never animated. */
+  --graph-rule: repeating-linear-gradient(
+      to right,
+      oklch(1 0 0 / 0.04) 0 1px,
+      transparent 1px 24px
+    ),
+    repeating-linear-gradient(to bottom, oklch(1 0 0 / 0.04) 0 1px, transparent 1px 24px);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    color-scheme: dark;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Every numeral in a data context aligns. Rule 5. */
+  code,
+  kbd,
+  samp,
+  pre,
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Focus ring is the one other place --signal is allowed to appear.
+   * `outline: none` without a replacement is a contract violation (Rule 20). */
+  :focus-visible {
+    outline: 2px solid var(--color-signal);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+  }
+
+  ::selection {
+    background-color: var(--color-signal-active);
+    color: var(--color-foreground);
+  }
+
+  /* Headings balance rather than orphan. */
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────────────
+ * Not optional (§5.6). A glass box that slides, pulses and streams is hostile
+ * to users with vestibular sensitivity. Under reduce, movement is removed and
+ * NO information is lost — animations become instant state changes.
+ * Components must ALSO check useReducedMotion() for JS-driven motion; this
+ * block only covers CSS. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
