@@ -325,7 +325,13 @@
 
 ## Phase 6 — Evidence Traces & Glass-Box UI *(~5–7 days)* — **ACTIVE**
 
-> **Status 2026-08-07: frontend foundation (F0–F5) complete in `fa2dcd5`; M4 is next.**
+> **Status 2026-08-08: M4 complete — the SPA is live end to end.** Landing, auth, app shell,
+> guided first turn, engine pane and the design-system primitives all ship, verified with **8/8
+> Playwright E2E** (real API + real CockroachDB, axe assertion included), zero WCAG 2.2 AA
+> violations on all four routes, and a 106 KB gzip initial bundle. **M5 (chat + chips + receipts)
+> is next.**
+>
+> **Status 2026-08-07: frontend foundation (F0–F5) complete in `fa2dcd5`.**
 > Status table, verification evidence, and carried-forward risks:
 > **[DESIGN.md §0](../DESIGN.md#0-frontend-foundation-status)**. The design system is
 > locked in **[DESIGN.md](../DESIGN.md)** (approved as the M4–M8 visual contract) with the

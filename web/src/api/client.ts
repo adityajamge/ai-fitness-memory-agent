@@ -12,7 +12,9 @@
 
 import type { z } from "zod";
 import {
+  AuthResponse,
   BatchMemoriesResponse,
+  ChatResponse,
   StatsResponse,
   TimelineResponse,
   TraceResponse,
@@ -98,6 +100,44 @@ export const getMemoriesBatch = (ids: string[]) =>
     body: JSON.stringify({ ids }),
   });
 
+/**
+ * Top-bar stats — and the app's **session probe**.
+ *
+ * There is no `/api/auth/me`. This endpoint is user-scoped and 401s when logged out, and the app
+ * shell needs the numbers on load regardless, so one request answers both "am I signed in?" and
+ * "what do I show in the top bar?". Adding a dedicated endpoint would cost a round trip to learn
+ * something this one already tells us.
+ */
 export const getStats = () => request(`/api/stats`, StatsResponse);
 
 export const getTimeline = () => request(`/api/timeline`, TimelineResponse);
+
+/* ── auth ────────────────────────────────────────────────────────────────────────────────── */
+
+/** 409 when the email already has an account; 422 when the address or password fails validation. */
+export const signup = (email: string, password: string) =>
+  request(`/api/auth/signup`, AuthResponse, {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+
+/** 401 on bad credentials. The UI must not say *which* field was wrong (§6.17). */
+export const login = (email: string, password: string) =>
+  request(`/api/auth/login`, AuthResponse, {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+
+export const logout = async (): Promise<void> => {
+  await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+};
+
+/* ── conversation ────────────────────────────────────────────────────────────────────────── */
+
+/** One turn: plan → (ingest) → (retrieve) → assemble → narrate. Slow by nature; the UI shows
+ * staged progress (§6.10) rather than a spinner, and never blocks the composer. */
+export const sendMessage = (message: string, threadId?: string) =>
+  request(`/api/chat`, ChatResponse, {
+    method: "POST",
+    body: JSON.stringify(threadId ? { message, thread_id: threadId } : { message }),
+  });

@@ -180,7 +180,59 @@ export const TimelineDay = z.object({
 
 export const TimelineResponse = z.object({ days: z.array(TimelineDay) });
 
+/* ── auth (POST /api/auth/{signup,login,logout}) ─────────────────────────────────────────── */
+
+export const AuthResponse = z.object({
+  user_id: Uuid,
+  email: z.string(),
+});
+
+/* ── a conversational turn (POST /api/chat) ──────────────────────────────────────────────── */
+
+/** One memory a turn created. `embedding_pending` is honest: the row exists, the vector may not. */
+export const MemoryRef = z.object({
+  id: Uuid,
+  type: z.string(),
+  summary: z.string().nullable(),
+  embedding_pending: z.boolean(),
+});
+
+/**
+ * Proof that talking is logging (§6.7).
+ *
+ * `insights` is deliberately separate from `created`, not folded in: the user *reported* what is
+ * in `created`, while an insight is a claim the engine made about it. Rendering them as one list
+ * would imply the user logged something they never said.
+ */
+export const Receipt = z.object({
+  parse_status: z.string(),
+  message: z.string(),
+  superseded_note_id: Uuid.nullable(),
+  created: z.array(MemoryRef),
+  insights: z.array(MemoryRef),
+});
+
+export const ChatResponse = z.object({
+  thread_id: z.string(),
+  answer: z.string(),
+  citations: z.array(Uuid),
+  /** Null when the turn assembled no context (an ingest-only turn has nothing to cite). */
+  citation_report: CitationReport.nullable(),
+  receipts: z.array(Receipt),
+  trace: EvidenceTrace.nullable(),
+  /** Stage (G)'s handle. Null means the turn was not recorded — the answer stands, the glass
+   * box does not. The UI must treat this as "no glass box for this turn", never as an error. */
+  turn_id: Uuid.nullable(),
+  /** Retrieval the engine refused. Surfaced rather than swallowed: the answer may be partial. */
+  errors: z.array(z.string()),
+});
+
 /* ── inferred types — never hand-write these ─────────────────────────────────────────────── */
+
+export type AuthResponse = z.infer<typeof AuthResponse>;
+export type MemoryRef = z.infer<typeof MemoryRef>;
+export type Receipt = z.infer<typeof Receipt>;
+export type ChatResponse = z.infer<typeof ChatResponse>;
 
 export type MemoryRow = z.infer<typeof MemoryRow>;
 export type BatchMemoriesResponse = z.infer<typeof BatchMemoriesResponse>;

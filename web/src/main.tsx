@@ -8,14 +8,32 @@
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  MutationCache,
+  QueryCache,
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
 import { LazyMotion, domAnimation } from "motion/react";
 import { BrowserRouter } from "react-router";
 
 import App from "./App";
+import { isUnauthorized } from "./api/queries";
+import { markSessionExpired } from "./session/sessionStore";
 import "./styles/theme.css";
 
+/**
+ * Every 401 in the app funnels here, whether it came from a query or a mutation. Catching it
+ * centrally is what lets §6.11.1 hold: one notice, one re-auth dialog, and no component has to
+ * remember to handle expiry itself.
+ */
+const onAuthError = (error: unknown) => {
+  if (isUnauthorized(error)) markSessionExpired();
+};
+
 const queryClient = new QueryClient({
+  queryCache: new QueryCache({ onError: onAuthError }),
+  mutationCache: new MutationCache({ onError: onAuthError }),
   defaultOptions: {
     queries: {
       // Glass-box data is immutable once written: a persisted trace never changes (I-29), and a

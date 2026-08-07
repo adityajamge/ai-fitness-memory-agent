@@ -12,7 +12,7 @@
 
 ## 0. Frontend Foundation Status
 
-**As of 2026-08-07. Active milestone: M4 (SPA foundation → chat shell).**
+**As of 2026-08-08. M4 complete. Active milestone: M5 (chat + chips + receipts).**
 
 | Step | Delivered |
 |---|---|
@@ -21,7 +21,8 @@
 | **F2** | `web/` scaffolded on the approved stack; tokens live and verified in-browser |
 | **F3** | Wired into Docker (Node 24 stage), CI (`web` job), and FastAPI ([api/spa.py](api/spa.py), 12 tests) |
 | **F4** | [frontend-guidelines.md](docs/engineering/frontend-guidelines.md) — the engineering contract |
-| **F5** | `/plan-design-review`: 7/10 → 9/10, six decisions applied (§15), seven tasks queued (§16) |
+| **F5** | `/plan-design-review`: 7/10 → 9/10, six decisions applied (§16), seven tasks queued (§15) |
+| **M4** | SPA foundation → chat shell: F-T1…F-T4, landing, auth, app shell, engine pane, primitives |
 
 **Foundation commit: `fa2dcd5`** — `feat(web): frontend foundation — design system, scaffold, and serving`.
 Verified at that commit: 766 Python tests passed · ruff clean · `tsc -b` clean · production build
@@ -31,9 +32,19 @@ Verified at that commit: 766 Python tests passed · ruff clean · `tsc -b` clean
 the first real check. No visual mockups exist — the gstack designer needs an `OPENAI_API_KEY` that
 was not set.
 
-**Carried into M4 unresolved:** SSE through Express Mode's shared ALB is still unproven, and the
-live engine pane (M6) depends on it. Spike it before building that pane — the fallback is Query's
+**M4 shipped** (commit below): all four P1 tasks (F-T1…F-T4), the landing page, auth, the app
+shell, the engine pane with form-encoded provenance/confidence, and the design-system primitives.
+Verified against a real API and a real CockroachDB: **8/8 Playwright E2E green including an axe
+assertion**, zero WCAG 2.2 AA violations across all four routes, initial bundle **106 KB gzip**
+(budget 150).
+
+**Still unresolved, carried into M5–M6:** SSE through Express Mode's shared ALB. The live engine
+pane (M6) depends on it. Spike it before building that pane — the fallback is Query's
 `refetchInterval`, a three-line change if we learn early and a rewrite if we learn at M7.
+
+**Deferred from M4 by design:** the mobile evidence drawer (§5.8) lands with the full evidence
+pane in M6; below `lg` the engine pane is hidden rather than half-built. Citation chips, the
+retrieval-query display, and the timeline are M5–M7 per the milestone table.
 
 ---
 
@@ -1258,18 +1269,18 @@ from a wishlist. P1 blocks the phase; P2 lands in the same phase; P3 is a follow
 Numbered `F-T*` to stay clear of the T1–T18 backlog in
 [11-implementation-tasks.md](docs/office-hours/11-implementation-tasks.md).
 
-- [ ] **F-T1 (P1, human ~4h / CC ~45min)** — first-run — Build the guided first-turn sequence (§9.1)
+- [x] **F-T1 (P1, human ~4h / CC ~45min)** — first-run — Build the guided first-turn sequence (§9.1)
   - *Why:* ADR-13.4 gives judges an empty account with no seed data, so signup → first message →
     first receipt **is** the live product experience being scored. It was the least-specified
     surface in the plan.
   - *Verify:* E2E path 1 (signup → log → receipt → pane)
-- [ ] **F-T2 (P1, ~3h / ~30min)** — auth — Build `/login` and `/signup` to §6.17
+- [x] **F-T2 (P1, ~3h / ~30min)** — auth — Build `/login` and `/signup` to §6.17
   - *Why:* two of four routes had zero design; the default improvisation is a generic centered card,
     on the only screen between the landing page and the product.
-- [ ] **F-T3 (P1, ~15min / ~5min)** — layout — Cap conversation text at 72ch (§5.7)
+- [x] **F-T3 (P1, ~15min / ~5min)** — layout — Cap conversation text at 72ch (§5.7)
   - *Why:* `minmax(560px, 1fr)` yields ~2000px lines of 15px text on the wide monitor a reviewer
     actually uses.
-- [ ] **F-T4 (P1, ~2h / ~20min)** — auth — 401 inline notice, preserve the draft (§6.11.1)
+- [x] **F-T4 (P1, ~2h / ~20min)** — auth — 401 inline notice, preserve the draft (§6.11.1)
   - *Why:* nothing specified session expiry; a redirect would discard a typed message, which is the
     one thing this product promises never to do.
 - [ ] **F-T5 (P2, ~30min / ~10min)** — glassbox — Render `citation_report.status === "uncited"` (§6.6)
