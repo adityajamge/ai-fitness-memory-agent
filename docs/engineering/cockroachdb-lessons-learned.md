@@ -455,6 +455,19 @@ queries.
 6. **A retryable error is a symptom, not a diagnosis.** `RETRY_SERIALIZABLE` says *something* is
    contending. It does not say what. Adding retry without finding out would have hidden the real
    defect while it kept growing. (Part I §8)
+7. **Read the deploy action's source, not its README.** Our ECS task definition had no
+   environment variables, and the interesting part was *why they would not have survived if we
+   had added them by hand*: `amazon-ecs-deploy-express-service@v1` rebuilds the container
+   config from its inputs on every run and never reads the live service back, so console
+   configuration silently evaporates on the next deploy — and the same applies to the task role
+   and health-check path. The README does not document update semantics; 700 lines of
+   `index.js` do. Configuration is now declared in the workflow, secrets come from Secrets
+   Manager, and a preflight step fails the job rather than shipping a half-configured service.
+   Full write-up in [deploy.md](../deploy.md) → *Runtime configuration (declarative)*. The
+   failure mode this prevents is the CockroachDB-flavoured one: an unset `DATABASE_URL`
+   silently falls back to `127.0.0.1`, and because the app tolerates a dead database at
+   startup so the ALB check stays green, **`/healthz` reports healthy while every write
+   fails**. A green health check is not evidence of a working database.
 
 ### The honest summary
 
@@ -482,4 +495,5 @@ us — and in resisting the plausible fix long enough to find the real cause.
 | [cockroachdb-postgressaver.md](cockroachdb-postgressaver.md) | The LangGraph compatibility investigation (§12) |
 | [replay-architecture.md](replay-architecture.md) | Row-at-a-time batching rule (§11) |
 | [consolidation-architecture.md](consolidation-architecture.md) | Cross-region measurements, the sweep rule (§15, §17) |
-| [../../TODOS.md](../../TODOS.md) | Retry support; the corrected root-cause record |
+| [../deploy.md](../deploy.md) | Declarative ECS runtime configuration; why console-set env vars do not survive a redeploy (Part III §7) |
+| [../../TODOS.md](../../TODOS.md) | Retry support; the corrected root-cause record; the M6/T12 postponement and its resume point |

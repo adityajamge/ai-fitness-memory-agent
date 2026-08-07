@@ -1127,9 +1127,12 @@ live write path → measurement → orthogonal lane*, the same shape that made P
   that owns the logic; a 10-series smoke run before the full sweep.
 - **Rollback:** the (F₀) hook is one call site behind a config toggle; the CLI is a leaf.
 
-**M6 — Latency profile (T12)**
+**M6 — Latency profile (T12)** — ⏸ *postponed 2026-08-06; see §11.4 and TODOS.md*
 - **Objective:** measure ingest / query / both turns against the **deployed** cross-region topology;
   write `docs/latency.md`; confirm or amend ADR-13.1's budget honestly.
+- **Prerequisite (added 2026-08-06):** a production deploy whose *running task* is verified to
+  hold the Secrets Manager configuration, with CockroachDB Cloud and Bedrock connectivity
+  confirmed. `/healthz` is not evidence of this — the lifespan tolerates a dead database.
 - **Files:** `docs/latency.md` *(new)*, light timing instrumentation.
 - **Invariants:** no infrastructure built solely for completeness; measurement must not alter the
   measured path.
@@ -1275,9 +1278,17 @@ by construction. **Not a trigger:** a desire to say "changepoint detection" in t
 | M5b | Insight builder family + trace lineage | ✅ `43d1f9b` |
 | M5c | `analyze_series` graph dispatch | ✅ `8e6f635` |
 | M5d | `cli/consolidate.py` | ✅ `2dfb854` |
-| M6 | Latency profile (T12) | ⏳ |
-| M7 | Photo ingestion | ⏳ (first to cut) |
 | — | Teardown fix + CockroachDB engineering record | ✅ `6d02f15` |
+| — | Declarative ECS runtime configuration | ✅ `adb4598` |
+| M6 | Latency profile (T12) | ⏸ **POSTPONED 2026-08-06** — owed, not cut. Blocked on a verified production deploy; see [TODOS.md](../../TODOS.md) → *M6 — Latency profile (T12)* |
+| M7 | Photo ingestion | ⏳ (first to cut) |
+
+**On the M6 postponement.** Deferred deliberately rather than measured locally: the number's
+entire value is the `us-east-1` → `ap-south-1` hop, so a local figure would describe something
+other than production and would then be cited in an ADR-13.1 amendment. Phase 5 does **not**
+close without it. The blockers, the deliverables, and the resume point are recorded in TODOS.md
+so the work restarts cold without re-deriving context; nothing was started in code, so there is
+no partial state to reconcile.
 
 *Hashes are the **post-amend** ones on `main`. Three entries previously cited pre-amend
 objects — writing a hash into the doc and then amending the commit changes it. Record the
@@ -1303,7 +1314,9 @@ hash after the final amend, not before.*
   insights is the product.
 - **When M1–M7 land**, promote §4 into ADR-16 in
   [09-decisions.md](../office-hours/09-decisions.md), recording only what is architecturally binding
-  and what implementation actually validated — the ADR-15 discipline.
+  and what implementation actually validated — the ADR-15 discipline. **M6 is postponed, not
+  waived** (§11.4): the ADR-13.1 budget amendment it feeds cannot be written honestly until
+  T12's production measurement exists, so phase close waits on it even if M7 is cut.
 
 ---
 

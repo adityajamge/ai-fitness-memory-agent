@@ -225,13 +225,25 @@
 
 ## Phase 5 — Insight Engine *(~5–6 days)*
 
-> **Status 2026-08-05: M0–M5c complete, 697 tests green.** M0 decisions + fixture hygiene
+> **Status 2026-08-06: M0–M5d complete, 718 tests green.** M0 decisions + fixture hygiene
 > (`ce4d961`) · M1 insight contracts (`f2d109b`) · EffectScale amendment (`0343958`) · M2
 > analytics kernel (`b2d5b25`) · M3 consolidation service + identity (`7385769`) · M4 typed
 > retraction (`d45ca8b`) · claim_dates identity fix (`7c49123`) · M5a stage (F₀) hook
 > (`489f1cc`) · docs sync (`78f61b1`) · M5b insight family + trace lineage (`43d1f9b`) ·
-> M5c `analyze_series` graph dispatch (`8e6f635`). **Remaining:** M5d `cli/consolidate.py` ·
-> M6 latency (T12) · M7 photo ingestion (first to cut).
+> M5c `analyze_series` graph dispatch (`8e6f635`) · M5d `cli/consolidate.py` (`2dfb854`) ·
+> teardown fix + CockroachDB engineering record (`6d02f15`) · declarative ECS runtime
+> configuration (`adb4598`).
+>
+> **Remaining: M7 photo ingestion, then M6.**
+>
+> > ⏸ **M6 (latency profile / T12) is POSTPONED as of 2026-08-06 — owed, not skipped.**
+> > It measures the `us-east-1` app → `ap-south-1` CockroachDB hop, so it requires a
+> > **verified production deploy**: Secrets Manager configuration confirmed on the *running
+> > task*, with real CockroachDB Cloud and Bedrock connectivity. A local benchmark would
+> > measure something other than production and would then be cited in an ADR-13.1
+> > amendment — worse than having no number. Blockers, deliverables, and the resume point
+> > are in [TODOS.md](../TODOS.md) → *M6 — Latency profile (T12)*. **Phase 5 does not close
+> > without it**, even if M7 is cut.
 >
 > **Consolidation is live in the deployed app as of M5c**: the composition root now builds one
 > `ConsolidationService` and shares it between the ingestion tail's stage (F₀) and the graph's

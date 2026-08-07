@@ -1,5 +1,37 @@
 # TODOS
 
+## M6 — Latency profile (T12): POSTPONED 2026-08-06, not skipped
+
+- **Status:** intentionally deferred, still **owed**. Phase 5 is not complete without it, and
+  it is a scored deliverable (T12, `docs/latency.md`). This is a scheduling decision, not a
+  cut. The item to cut, if one must be cut, is M7 — see `consolidation-architecture.md` §7.
+- **Why deferred:** the whole value of T12 is the **cross-region hop** — the app runs on ECS
+  in `us-east-1`, the CockroachDB Cloud cluster is in `ap-south-1`. A local measurement would
+  not measure the thing the number exists to describe, so producing one now would be worse
+  than producing none: it would put a wrong figure into an ADR amendment.
+- **Blocked on (all three, in order):**
+  1. The AWS-side prerequisites in [docs/deploy.md](docs/deploy.md) → *One-time AWS setup for
+     the above*: two Secrets Manager secrets, `secretsmanager:GetSecretValue` on the execution
+     role, a task role with `bedrock:InvokeModel`, `iam:PassRole` on it for `ci-deploy`, and
+     three GitHub repo variables. Not done — the local AWS session was expired (`aws login`).
+  2. A completed deploy from `main` carrying commit `adb4598` (declarative config) or later.
+  3. Verification that the **running task** actually has the config, plus a real signup +
+     ingest proving CockroachDB Cloud and Bedrock connectivity. A green `/healthz` proves
+     nothing here — `api/main.py`'s lifespan tolerates an unreachable database by design.
+- **What M6 must produce when resumed:**
+  - `docs/latency.md` — ingest turn, query turn, and both, measured against the deployed URL.
+  - A confirm-or-amend verdict on **ADR-13.1's 300 ms** consolidation budget. It is already
+    known to be wrong in the right direction: §11.3 of `consolidation-architecture.md` records
+    a **measured ~635 ms per series** app→`ap-south-1`, meaning the 300 ms budget completes
+    exactly one series and cleanly defers the rest. The mechanism is correct; the number is
+    T12's to re-derive.
+  - An answer to open question **Q3** (§10): does the budget number change, and does the
+    deferral path need a catch-up trigger?
+- **Constraints carried forward:** no infrastructure built solely for completeness;
+  instrumentation must not alter the path it measures (`consolidation-architecture.md` §8, M6).
+- **Resume from:** this entry + §8 M6 + §11.3's measured table. Nothing was started in code,
+  so there is no partial work to reconcile — only the blockers above to clear.
+
 ## Production abuse & spend controls (deferred 2026-07-12, /plan-eng-review D14)
 
 - **What:** Layered abuse/spend protection for the public app: per-account daily model-call
