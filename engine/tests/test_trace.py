@@ -25,6 +25,11 @@ from engine.trace import (
 _NOW = datetime(2026, 7, 22, 10, 30, tzinfo=timezone.utc)
 
 # The ADR-12 contract, field-for-field (03-memory-engine.md §6).
+# The ADR-12 contract, field for field. This set is a deliberate gate: widening it means
+# amending the contract, so a new field must be added here consciously rather than absorbed.
+# `citable_ids` was added in Phase 6 M1 to resolve ADR-14.8 — the trace has to be
+# self-contained for a validator, and an aggregate's contributing IDs are citable while
+# never appearing in `evidence` (glass-box-architecture.md §4.2).
 _CONTRACT_FIELDS = {
     "trace_id",
     "question",
@@ -34,6 +39,7 @@ _CONTRACT_FIELDS = {
     "timeline",
     "ranking",
     "assembled_at",
+    "citable_ids",
 }
 
 
@@ -70,6 +76,7 @@ def _full_trace() -> EvidenceTrace:
             ),
         ),
         assembled_at=_NOW,
+        citable_ids=frozenset({mem_id}),
     )
 
 
@@ -155,6 +162,7 @@ def test_empty_collections_serialize_honestly() -> None:
         assembled_at=_NOW,
     )
     data = trace.to_json()
+    assert data["citable_ids"] == [], "nothing retrieved means nothing citable"
     assert data["retrieval_steps"] == []
     assert data["evidence"] == []
     assert data["insights"] == []

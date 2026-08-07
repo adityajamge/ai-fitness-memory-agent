@@ -133,6 +133,16 @@ class EvidenceTrace:
     timeline: tuple[EvidenceSnapshot, ...]
     ranking: tuple[RankingEntry, ...]
     assembled_at: datetime
+    #: Every memory ID the narrator was permitted to cite on this turn — the *same* set as
+    #: ``ContextBlock.citable_ids()``, carried here so the persisted trace is self-contained
+    #: (ADR-14.8, resolved in glass-box-architecture.md §4.2).
+    #:
+    #: It is deliberately **not** derivable from ``evidence``. An aggregate's contributing
+    #: memory IDs are citable but never appear as evidence snapshots — assembly is pure and
+    #: does not hydrate them (ADR-14.7) — so a validator reading ``evidence`` alone would flag
+    #: a *correct* citation of an aggregated meal as invalid. Serializing it sorted keeps the
+    #: stored JSONB byte-stable for a given turn, which makes trace diffs meaningful.
+    citable_ids: frozenset[UUID] = frozenset()
 
     def to_json(self) -> dict:
         return {
@@ -144,4 +154,5 @@ class EvidenceTrace:
             "timeline": [t.to_json() for t in self.timeline],
             "ranking": [r.to_json() for r in self.ranking],
             "assembled_at": self.assembled_at.isoformat(),
+            "citable_ids": sorted(str(i) for i in self.citable_ids),
         }

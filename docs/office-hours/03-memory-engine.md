@@ -141,6 +141,7 @@ the loop; the Glass-Box UI reads the trace via the app API.
 | `timeline` | The relevant reconstructed timeline slice |
 | `ranking` | Why these memories were selected (scores: relevance, confidence, recency, tier) |
 | `assembled_at` | Timestamp |
+| `citable_ids` | Every memory ID the narrator was permitted to cite this turn — **added Phase 6 M1** (ADR-14.8), so the persisted trace is self-contained |
 
 **Citation validation:** the narrator may only cite memory IDs present in the turn's citable
 set. After generation, the engine mechanically validates every citation in the answer;
@@ -148,13 +149,17 @@ invalid or unsupported citations are flagged to the UI. The honest-narrator cont
 ([05-agent-architecture.md](05-agent-architecture.md)) is an enforced property, not a prompt
 instruction.
 
-> **Open contract item for T7 ([ADR-14.8](09-decisions.md#adr-14)):** the citable set is
-> "budgeted memories ∪ every aggregate/count contributing ID" (`ContextBlock.citable_ids()`),
-> which is **wider** than `trace.evidence` — because assembly is pure, an aggregate's
-> contributing rows are IDs without metadata and do not appear there. Validating against
-> `trace.evidence` alone would reject valid citations of aggregated data. T7 must either
-> validate against the full citable set or carry those IDs into the persisted trace;
-> the latter is recommended, so "the UI reads the trace" stays literally true.
+> **✅ Resolved 2026-08-06, Phase 6 M1 ([ADR-14.8](09-decisions.md#adr-14)):** the citable set
+> is "budgeted memories ∪ every aggregate/count contributing ID ∪ each participating insight's
+> own ID" (`ContextBlock.citable_ids()`), which is **wider** than `trace.evidence` — because
+> assembly is pure, an aggregate's contributing rows are IDs without metadata and do not appear
+> there. Validating against `trace.evidence` alone would reject valid citations of aggregated
+> data. Resolved by **carrying the set into the persisted trace** as `citable_ids`, so "the UI
+> reads the trace" is literally true and a validator has exactly one source.
+>
+> An insight's own `evidence_ids` are deliberately **not** citable: that lineage is *rendered*,
+> not cited (open question Q1, resolved narrow — see
+> [glass-box-architecture.md §4.1](../engineering/glass-box-architecture.md)).
 
 **Ingestion receipts are the same artifact in miniature** — a trace of what was created
 rather than what was retrieved. One type, two renderings.

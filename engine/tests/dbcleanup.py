@@ -54,7 +54,16 @@ _emails: set[str] = set()
 
 #: Tables purged for a registered user, in FK-safe order (``sessions``/``user_profile``
 #: reference ``users``). ``memories`` has no FK at all, which is exactly why it needs this.
-_USER_SCOPED = ("memories", "sessions", "user_profile")
+#: Every user-scoped application table a test run can write. ``evidence_traces`` precedes
+#: ``turns`` so a trace is never briefly orphaned mid-purge.
+#:
+#: ``turns``/``evidence_traces`` joined this list in Phase 6 M1, when stage (G) started
+#: recording a turn and a trace for *every* graph-driven turn — which is most agent tests, not
+#: just the ones that look like they touch the UI. Left out, one full run leaked 168 turns and
+#: 84 traces, and this project has twice paid for exactly that (lessons-learned §14: a cluster
+#: that accumulated test data stopped passing the suite entirely, on a different random test
+#: each run). A new table written by tests belongs here the day it is written.
+_USER_SCOPED = ("memories", "sessions", "user_profile", "evidence_traces", "turns")
 
 #: Users deleted per statement. Small on purpose: one ``ANY(...)`` over every id the run
 #: minted produced a **21½-minute** DELETE against the cross-region cluster on 2026-08-05, which

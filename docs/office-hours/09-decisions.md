@@ -306,6 +306,15 @@ earlier ADRs or docs.
 14. **Conversation state:** LangGraph PostgresSaver checkpointer on CockroachDB holds graph
     execution state only; the app's own `turns` + `evidence_traces` tables (written in one
     transaction after a turn completes) are the **source of truth for UI rendering**.
+    **Amended 2026-08-06 (Phase 6 M1):** "one transaction" means **their own** transaction —
+    stage **(G)**, after narration — *not* the memories' transaction. The trace does not exist
+    until two graph nodes after the memories commit, and the citations not until after
+    narration, so the original reading would require holding the never-lose-input transaction
+    open across an LLM call. Turn and trace are atomic **with each other**, not with the
+    memories. Reasoning and rejected alternatives:
+    [glass-box-architecture.md §4.3](../engineering/glass-box-architecture.md);
+    [ingestion-transaction-boundaries.md §12](../engineering/ingestion-transaction-boundaries.md)
+    is amended to match.
 15. **Auth: simple email+password sessions.** Production abuse/spend controls (rate limits,
     per-account budgets, email verification, spend kill-switch) are **explicitly out of scope
     this iteration** (builder decision; TODOS). Accepted residual risk: unbounded Bedrock
@@ -406,6 +415,20 @@ full citable set (`trace.evidence` ∪ aggregate/count contributing IDs), or car
 into the persisted trace so "the UI reads the trace" stays literally true. **Recommended: the
 latter**, keeping the trace the single source of glass-box truth. *(Refines
 [ADR-12](#adr-12); tracked on T7 in [11](11-implementation-tasks.md).)*
+
+> ### ✅ RESOLVED 2026-08-06 (Phase 6 M1) — the recommendation was taken
+>
+> `EvidenceTrace` gains a `citable_ids` field, populated from `ContextBlock.citable_ids()` at
+> assembly and persisted in the trace JSONB. A stored trace is now self-contained: given it and
+> nothing else, a reader can decide whether any citation in the answer was legitimate.
+>
+> The defect this closes is covered by a dedicated regression test —
+> `engine/tests/test_trace_citable_ids.py::test_aggregated_citation_is_not_a_false_positive`
+> — which asserts both halves of the asymmetry: an aggregate's contributing IDs are absent
+> from `trace.evidence` **and** present in `trace.citable_ids`. Without that test the fix
+> would be unproven rather than tested.
+>
+> See [glass-box-architecture.md §4.2](../engineering/glass-box-architecture.md).
 
 ### 14.9 Graph-state durability boundary, and where it is enforced
 

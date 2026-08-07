@@ -227,6 +227,9 @@ def assemble(
         timeline=tuple(timeline_entries),
         ranking=ranking,
         assembled_at=assembled_at or datetime.now(timezone.utc),
+        # Read off the context rather than recomputed here: one definition of "citable",
+        # used by the narrator's prompt and the validator alike (ADR-14.8).
+        citable_ids=context.citable_ids(),
     )
     return context, trace
 

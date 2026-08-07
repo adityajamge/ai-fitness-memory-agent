@@ -134,12 +134,22 @@ lineage, queries, timeline — comes from the deterministic `EvidenceTrace`, fet
 UI through the app API. Model output is never the source of glass-box data.
 
 **What "may only cite IDs in the trace" means concretely** ([ADR-14.8](09-decisions.md#adr-14)):
-the citable set is the turn's budgeted memories **plus** every aggregate/count contributing
-ID — `ContextBlock.citable_ids()`. Because assembly is a pure function
-([ADR-14.7](09-decisions.md#adr-14)), an aggregate's contributing rows are IDs without
-snapshot metadata and are not in `trace.evidence`; a validator reading `trace.evidence` alone
-would reject a *valid* citation of an aggregated meal. T7 must reconcile the two before
-citation validation ships.
+the citable set is the turn's budgeted memories, **plus** every aggregate/count contributing
+ID, **plus** each participating insight's own ID — `ContextBlock.citable_ids()`. Because
+assembly is a pure function ([ADR-14.7](09-decisions.md#adr-14)), an aggregate's contributing
+rows are IDs without snapshot metadata and are not in `trace.evidence`; a validator reading
+`trace.evidence` alone would reject a *valid* citation of an aggregated meal.
+
+> **✅ Reconciled 2026-08-06 (Phase 6 M1).** The trace now carries the set itself, as
+> `EvidenceTrace.citable_ids` — so "may only cite IDs in the trace" is literally true and the
+> validator has exactly one source. Guarded by
+> `engine/tests/test_trace_citable_ids.py::test_aggregated_citation_is_not_a_false_positive`.
+>
+> **An insight's own `evidence_ids` are deliberately not citable** (open question Q1, resolved
+> narrow). The narrator may cite an insight's *identity*; the lineage beneath it is **rendered,
+> not cited** — it saw the hypothesis, never those rows' contents, so asserting a link between
+> them would be a claim the engine cannot mechanically verify. See
+> [glass-box-architecture.md §4.1](../engineering/glass-box-architecture.md).
 
 ## Model surfaces (the provider contract)
 

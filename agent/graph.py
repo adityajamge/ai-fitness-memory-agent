@@ -53,6 +53,7 @@ from engine.ingestion import IngestionService, Receipt
 from engine.insights import SeriesKey, UnknownSeries
 from engine.model import EmbeddingError, ModelProvider, ToolCall
 from engine.trace import EvidenceTrace
+from engine.turns import TurnRecord, persist_turn
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,9 @@ class TurnCarrier:
     context: ContextBlock | None = None
     trace: EvidenceTrace | None = None
     errors: list[str] = field(default_factory=list)
+    #: What stage (G) persisted, once it has run. ``None`` means the turn was not recorded —
+    #: either (G) has not reached this turn yet, or it failed and said so in ``errors``.
+    turn_record: TurnRecord | None = None
 
 
 @dataclass(frozen=True)
@@ -116,6 +120,10 @@ class TurnResult:
     context: ContextBlock | None
     trace: EvidenceTrace | None
     errors: list[str]
+    #: Stage (G)'s handles, or ``None`` if the turn was not persisted. The UI reads the glass
+    #: box by ``turn_record.assistant_turn_id``; a ``None`` here is exactly the case where the
+    #: answer stands but that turn has no glass box (glass-box-architecture.md §4.3).
+    turn_record: TurnRecord | None = None
 
 
 STATE_CHANNELS: frozenset[str] = frozenset(GraphState.__annotations__)
@@ -289,6 +297,42 @@ def build_graph(
             "messages": [AIMessage(content=answer)],
         }
 
+    def persist_node(state: GraphState, config: RunnableConfig) -> dict:
+        """Stage (G): record the turn and its trace, atomically with each other.
+
+        Runs after narration because that is the first moment both halves exist — the trace
+        comes from ``assemble``, the answer from ``narrate``. It is deliberately *outside* the
+        ingestion transaction: see glass-box-architecture.md §4.3, which amends ADR-13.14 and
+        ingestion-transaction-boundaries.md §12.
+
+        **Best-effort, like stage (F₀), and for the same reason.** The memories are already
+        durably committed and the answer is already produced; a failure here costs the glass
+        box for this turn and costs the user nothing. Swallowing the exception keeps a
+        UI-persistence problem from failing a turn whose real work succeeded — but it is
+        recorded in ``carrier.errors`` and logged, never silent (I-24).
+        """
+        carrier = carrier_of(config)
+        if carrier.trace is None:
+            return {}  # nothing was assembled; there is no glass box to record
+
+        memory_ids = [ref.id for receipt in carrier.receipts for ref in receipt.created]
+        try:
+            with db.transaction() as cur:
+                carrier.turn_record = persist_turn(
+                    cur,
+                    user_id=UUID(state["user_id"]),
+                    thread_id=(config or {}).get("configurable", {}).get("thread_id"),
+                    question=state["question"],
+                    answer=state.get("answer") or "",
+                    memory_ids=memory_ids,
+                    trace=carrier.trace,
+                )
+        except Exception as exc:  # noqa: BLE001 — see the docstring; never fail a good turn
+            logger.warning("stage (G) failed to persist turn for user %s: %s",
+                           state["user_id"], exc)
+            carrier.errors.append(f"turn not recorded: {exc}")
+        return {}
+
     builder = StateGraph(GraphState)
     # Every node goes through _checked: the L1 developer signal is on by construction, so a
     # node cannot quietly grow a heavy channel (M5-1).
@@ -299,6 +343,7 @@ def build_graph(
         ("retrieve", retrieve_node),
         ("assemble", assemble_node),
         ("narrate", narrate_node),
+        ("persist", persist_node),
     ):
         builder.add_node(name, _checked(name, node))
 
@@ -314,7 +359,10 @@ def build_graph(
     builder.add_conditional_edges("consolidate", _route_after_consolidate, stages)
     builder.add_edge("retrieve", "assemble")
     builder.add_edge("assemble", "narrate")
-    builder.add_edge("narrate", END)
+    # Stage (G) is the last thing a turn does: both the trace and the answer exist by
+    # here, and nothing downstream depends on it (glass-box-architecture.md §4.3).
+    builder.add_edge("narrate", "persist")
+    builder.add_edge("persist", END)
     return builder.compile(checkpointer=checkpointer)
 
 
@@ -427,4 +475,5 @@ def run_turn(
         context=carrier.context,
         trace=carrier.trace,
         errors=list(carrier.errors),
+        turn_record=carrier.turn_record,
     )

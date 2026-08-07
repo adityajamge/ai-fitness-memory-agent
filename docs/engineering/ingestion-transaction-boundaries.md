@@ -255,11 +255,41 @@ write-path concern.
 
 ## 12. Phase 6 forward-compatibility
 
-When T7 lands, the `turns` row and its `evidence_traces` row join the **same** write
+> ### ⚠️ AMENDED 2026-08-06 (Phase 6 M1) — this section's original plan was not implementable
+>
+> The paragraph below planned for the `turns` and `evidence_traces` rows to join the **same**
+> transaction (D)/(D') as the memories. **They do not.** They are written at a new stage
+> **(G)**, after narration, in their own transaction.
+>
+> **Why the original was impossible.** The trace is emitted by `assemble()`, which runs *two
+> graph nodes after* (D) commits, and the citations do not exist until `narrate` produces an
+> answer. There is no moment at which (D) is still open and a trace exists to write into it.
+>
+> **Why it would be wrong even if it were possible.** Honouring it literally means holding the
+> transaction that guarantees never-lose-input open across an LLM call. This project has
+> already paid for one long-running write transaction — a 21½-minute `DELETE` that surfaced as
+> `RETRY_SERIALIZABLE` ([cockroachdb-lessons-learned.md](cockroachdb-lessons-learned.md)
+> Part I). Narration inside (D) is the same mistake with a worse blast radius.
+>
+> **What (G) guarantees:** the turn rows and the trace row are atomic **with each other**
+> (I-25) — never a turn missing its trace, never an orphan trace. They are deliberately **not**
+> atomic with the memories, which committed earlier at (D) and stand regardless. If (G) fails,
+> the memories and the answer survive and the glass box loses that turn; the failure is logged
+> and recorded on the turn's errors, never silent (I-24).
+>
+> This is the same reasoning that puts stage (F₀) outside (D), applied to the same class of
+> data: derived, re-derivable, and not worth widening the atomic turn to cover. Rule 2 is
+> untouched — (G) never writes `memories` (I-26) and never runs on the direct-ingest path.
+>
+> Full reasoning and the rejected alternatives: [glass-box-architecture.md §4.3](glass-box-architecture.md).
+> ADR-13.14's wording is amended to match.
+
+~~When T7 lands, the `turns` row and its `evidence_traces` row join the **same** write
 transaction (D)/(D') as the memories (ADR-13.14: "written in one transaction after a turn
 completes"). This document's boundary does not move — the trace/turn writes are additional
 statements inside the *existing* single transaction, preserving rule 2 (atomic turn) and the
-turn-commit-failure guarantee. Phase 2 creates those tables but does not write to them.
+turn-commit-failure guarantee.~~ Phase 2 creates those tables but does not write to them;
+Phase 6 M1 writes them at stage (G), above.
 
 **Stage (F₀) sits outside that transaction and must stay there** (§7.1, I-14). An insight is
 derived data: losing it costs one re-derivation, whereas widening the atomic turn to cover it

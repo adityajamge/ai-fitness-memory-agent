@@ -325,10 +325,17 @@
 
 ## Phase 6 — Evidence Traces & Glass-Box UI *(~5–7 days)* — **ACTIVE**
 
-> **Status 2026-08-06: M0 complete (design locked).** Approved scope for this pass is
-> **M0–M3 only** — trace persistence, citation validation, and the read API. The frontend
-> (M4–M8) waits on a separate design-system, component-library, and frontend-engineering-rules
-> effort that will govern every React component.
+> **Status 2026-08-06: M0–M1 complete.** M0 design lock (`5aef6f5`) · M1 trace persistence at
+> stage (G) + `citable_ids` (T7a). Approved scope for this pass is **M0–M3 only** — trace
+> persistence, citation validation, and the read API. The frontend (M4–M8) waits on a separate
+> design-system, component-library, and frontend-engineering-rules effort that will govern
+> every React component.
+>
+> **M1 resolved ADR-14.8**, which three documents carried as an open item (03 §6, 05 answer
+> contract, 09 ADR-14.8): the persisted trace now carries its own citable set, so a validator
+> has one source and a valid citation of *aggregated* data can no longer be flagged invalid.
+> M1 also closed a test-cleanup gap it had itself opened — stage (G) writes `turns` and
+> `evidence_traces` on every graph-driven turn, and neither table was in the purge list.
 >
 > **Before starting:** [docs/engineering/glass-box-architecture.md](engineering/glass-box-architecture.md)
 > is the **locked** architecture for this phase — it resolves Q1 (insight lineage is rendered,
