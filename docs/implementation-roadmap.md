@@ -323,7 +323,20 @@
 
 ---
 
-## Phase 6 — Evidence Traces & Glass-Box UI *(~5–7 days)*
+## Phase 6 — Evidence Traces & Glass-Box UI *(~5–7 days)* — **ACTIVE**
+
+> **Status 2026-08-06: M0 complete (design locked).** Approved scope for this pass is
+> **M0–M3 only** — trace persistence, citation validation, and the read API. The frontend
+> (M4–M8) waits on a separate design-system, component-library, and frontend-engineering-rules
+> effort that will govern every React component.
+>
+> **Before starting:** [docs/engineering/glass-box-architecture.md](engineering/glass-box-architecture.md)
+> is the **locked** architecture for this phase — it resolves Q1 (insight lineage is rendered,
+> never cited) and ADR-14.8 (the trace carries its own citable set), and it **amends ADR-13.14
+> and ingestion-transaction-boundaries.md §12**: turn and trace persist at a new stage **(G)**
+> after narration, not inside the memories' transaction. That amendment is not a convenience —
+> the trace does not exist when the ingestion transaction commits, and honouring the original
+> wording would hold the never-lose-input transaction open across an LLM call.
 
 - **Objective:** the full wireframe-v3 experience — conversation-first, memory transparently
   visible, every claim clickable to proof.
