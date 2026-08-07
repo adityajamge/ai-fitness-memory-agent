@@ -193,6 +193,18 @@ actually did, which defeats the entire point. The stored JSONB is the artifact.
 **Cross-user denial is a route-level invariant**, tested per endpoint (I-28), not left to a
 `WHERE` clause a future refactor could drop.
 
+### 4.5.1 Two shapes the read API commits to *(added M3)*
+
+**A resource the caller cannot see returns 404, never 403.** A different status for
+"exists but is someone else's" would confirm the resource exists — the same posture
+`repository.get_memory` already takes, extended to every glass-box route.
+
+**Batch hydration omits unreachable IDs rather than rejecting the request.** A trace can
+legitimately cite a row that was later superseded, and one stale chip must not fail the whole
+evidence pane. The response carries a `missing` list so the UI renders an honest placeholder
+instead of silently showing fewer rows than the answer cited — the never-lose-input instinct,
+applied to reads.
+
 ### 4.6 Hydration is batched, and it is the only place the API joins rows
 
 **Decision.** T16's batch fetch resolves a set of memory IDs to display rows in **one** query.
@@ -260,7 +272,7 @@ count, not content size.
 | M0 | Design lock | this document | ✅ `5aef6f5` |
 | M1 | Trace persistence (T7a) | stage (G); `citable_ids` in the trace; ADR amendments | ✅ `32e2e1b` |
 | M2 | Citation validation (T7b) | deterministic validator, honest scope | ✅ *this milestone* |
-| M3 | Read API + hydration (T16) | trace/memory/timeline/stats endpoints, batch fetch | `feat(api): glass-box read API` |
+| M3 | Read API + hydration (T16) | trace/memory/timeline/stats endpoints, batch fetch | ✅ *this milestone* |
 | M4 | SPA foundation | toolchain, design system, shell, state primitives | *awaiting the design system* |
 | M5 | Chat + chips + receipts | build-order 1–3 | |
 | M6 | Live engine pane | evidence rows, query display, SSE | |
@@ -288,7 +300,7 @@ at the unit that owns the logic.
 
 | | Question | Owner |
 |---|---|---|
-| **Q4** | Does the UI read traces by `turn_id` or `thread_id`? *Recommended:* `turn_id`, with thread scoping at the list endpoint. Affects the SSE contract. | M3 |
+| **Q4** | ✅ **Resolved M3: `turn_id`.** `GET /api/turns/{turn_id}/trace` fetches one glass box; `GET /api/turns?thread_id=…` scopes history. A trace belongs to exactly one assistant turn, so `turn_id` is the natural key and the SSE contract in M6 can push a `turn_id` for the pane to fetch. | ✅ M3 |
 | **Q5** | Does the live pane push full traces or deltas? *Recommended:* full — payloads are small and there is no reconciliation state to get wrong. | M6 |
 
 ## 11. Maintenance notes

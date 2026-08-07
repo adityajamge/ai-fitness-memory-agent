@@ -325,8 +325,11 @@
 
 ## Phase 6 — Evidence Traces & Glass-Box UI *(~5–7 days)* — **ACTIVE**
 
-> **Status 2026-08-06: M0–M1 complete.** M0 design lock (`5aef6f5`) · M1 trace persistence at
-> stage (G) + `citable_ids` (T7a). Approved scope for this pass is **M0–M3 only** — trace
+> **Status 2026-08-06: M0–M3 complete — the glass box's whole backend.** M0 design lock
+> (`5aef6f5`) · M1 trace persistence at stage (G) + `citable_ids` (T7a, `32e2e1b`) ·
+> M2 mechanical citation validation (T7b, `f652732`) · M3 glass-box read API + batch
+> hydration (T16). Every artifact Phase 5 produces is now persisted, validated, and
+> fetchable; what remains in this phase is rendering it. Approved scope for this pass is **M0–M3 only** — trace
 > persistence, citation validation, and the read API. The frontend (M4–M8) waits on a separate
 > design-system, component-library, and frontend-engineering-rules effort that will govern
 > every React component.
