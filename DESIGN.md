@@ -10,6 +10,33 @@
 
 ---
 
+## 0. Frontend Foundation Status
+
+**As of 2026-08-07. Active milestone: M4 (SPA foundation → chat shell).**
+
+| Step | Delivered |
+|---|---|
+| **F0** | Agent toolkit installed and locked (§11, and [frontend-guidelines.md §16](docs/engineering/frontend-guidelines.md)) |
+| **F1** | This document — design system approved as the M4–M8 visual contract |
+| **F2** | `web/` scaffolded on the approved stack; tokens live and verified in-browser |
+| **F3** | Wired into Docker (Node 24 stage), CI (`web` job), and FastAPI ([api/spa.py](api/spa.py), 12 tests) |
+| **F4** | [frontend-guidelines.md](docs/engineering/frontend-guidelines.md) — the engineering contract |
+| **F5** | `/plan-design-review`: 7/10 → 9/10, six decisions applied (§15), seven tasks queued (§16) |
+
+**Foundation commit: `fa2dcd5`** — `feat(web): frontend foundation — design system, scaffold, and serving`.
+Verified at that commit: 766 Python tests passed · ruff clean · `tsc -b` clean · production build
+320 KB / 103 KB gzip · tokens confirmed rendering in a real browser.
+
+**Not verified there:** the Docker image never built locally (no daemon on the dev machine); CI is
+the first real check. No visual mockups exist — the gstack designer needs an `OPENAI_API_KEY` that
+was not set.
+
+**Carried into M4 unresolved:** SSE through Express Mode's shared ALB is still unproven, and the
+live engine pane (M6) depends on it. Spike it before building that pane — the fallback is Query's
+`refetchInterval`, a three-line change if we learn early and a rewrite if we learn at M7.
+
+---
+
 ## 1. Product Philosophy
 
 ### What this is
@@ -1223,7 +1250,36 @@ Reuse these. Do not rebuild them.
 | [`docs/engineering/frontend-guidelines.md`](docs/engineering/frontend-guidelines.md) | The code-structure contract, including the review checklist |
 | Lucide + Base UI | Icon set and every interactive primitive; no component library decisions remain open |
 
-## 15. Decisions Log
+## 15. M4 build order
+
+Seven tasks from the 2026-08-07 `/plan-design-review`. Each derives from a numbered finding, not
+from a wishlist. P1 blocks the phase; P2 lands in the same phase; P3 is a follow-up.
+
+Numbered `F-T*` to stay clear of the T1–T18 backlog in
+[11-implementation-tasks.md](docs/office-hours/11-implementation-tasks.md).
+
+- [ ] **F-T1 (P1, human ~4h / CC ~45min)** — first-run — Build the guided first-turn sequence (§9.1)
+  - *Why:* ADR-13.4 gives judges an empty account with no seed data, so signup → first message →
+    first receipt **is** the live product experience being scored. It was the least-specified
+    surface in the plan.
+  - *Verify:* E2E path 1 (signup → log → receipt → pane)
+- [ ] **F-T2 (P1, ~3h / ~30min)** — auth — Build `/login` and `/signup` to §6.17
+  - *Why:* two of four routes had zero design; the default improvisation is a generic centered card,
+    on the only screen between the landing page and the product.
+- [ ] **F-T3 (P1, ~15min / ~5min)** — layout — Cap conversation text at 72ch (§5.7)
+  - *Why:* `minmax(560px, 1fr)` yields ~2000px lines of 15px text on the wide monitor a reviewer
+    actually uses.
+- [ ] **F-T4 (P1, ~2h / ~20min)** — auth — 401 inline notice, preserve the draft (§6.11.1)
+  - *Why:* nothing specified session expiry; a redirect would discard a typed message, which is the
+    one thing this product promises never to do.
+- [ ] **F-T5 (P2, ~30min / ~10min)** — glassbox — Render `citation_report.status === "uncited"` (§6.6)
+  - *Why:* the backend emits a three-way status; only two had UI.
+- [ ] **F-T6 (P2, ~2h / ~20min)** — responsive — Mobile keyboard: `dvh`, visual-viewport composer (§5.8)
+  - *Why:* the keyboard covering the composer is the classic mobile-chat failure.
+- [ ] **F-T7 (P3, ~1h / ~15min)** — timeline — Bucket the rail by week below 768px (§5.8)
+  - *Why:* a 300-day account renders 1px untappable bars at 390px.
+
+## 16. Decisions Log
 
 | Date | Decision | Rationale |
 |---|---|---|

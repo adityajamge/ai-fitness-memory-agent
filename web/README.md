@@ -1,7 +1,10 @@
 # web/ — Glass-Box UI
 
 Vite + React + TypeScript SPA, built to static assets and served by FastAPI from the same
-container (ADR-13.7). Scaffolded in Phase 6 / F2–F3; product screens land in M4.
+container (ADR-13.7). Scaffolded in Phase 6 / F0–F5 (commit `fa2dcd5`); product screens land in M4.
+
+**Current status, verification evidence, and open risks: [DESIGN.md §0](../DESIGN.md#0-frontend-foundation-status).**
+**What to build first: [DESIGN.md §15](../DESIGN.md#15-m4-build-order)** (seven tasks, F-T1…F-T7).
 
 ## Run it
 

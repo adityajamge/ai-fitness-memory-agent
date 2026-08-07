@@ -325,7 +325,9 @@
 
 ## Phase 6 — Evidence Traces & Glass-Box UI *(~5–7 days)* — **ACTIVE**
 
-> **Status 2026-08-07: frontend foundation (F0–F5) complete; M4 is next.** The design system is
+> **Status 2026-08-07: frontend foundation (F0–F5) complete in `fa2dcd5`; M4 is next.**
+> Status table, verification evidence, and carried-forward risks:
+> **[DESIGN.md §0](../DESIGN.md#0-frontend-foundation-status)**. The design system is
 > locked in **[DESIGN.md](../DESIGN.md)** (approved as the M4–M8 visual contract) with the
 > engineering contract in
 > **[engineering/frontend-guidelines.md](engineering/frontend-guidelines.md)**. `web/` is

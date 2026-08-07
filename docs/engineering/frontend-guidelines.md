@@ -277,7 +277,35 @@ The last row is the honest gap. The three most important rules in this document 
 mechanically enforced, which is exactly why they are written down this precisely. If M4–M8
 produces a linting rule for any of them, add it here.
 
-## 14. Maintenance notes
+## 14. Agent toolkit (Claude Code)
+
+Locked 2026-08-07 alongside the design system. The enablement itself is committed
+(`.claude/settings.json`, `.mcp.json`) so a fresh clone gets it automatically; this section is the
+*reasoning*, which config files cannot carry.
+
+| Tool | Scope | Why it is here |
+|---|---|---|
+| `context7` MCP | user | Current library docs. It corrected five stale version assumptions during F2 — treat it as the default over recall for any library question. |
+| `shadcn` MCP | project (`.mcp.json`) | Browse and pull registry components. **Caveat below.** |
+| `frontend-design` plugin | project | Anthropic's skill for distinctive UI; directly counters the generic-AI aesthetic this project is defined against. |
+| `chrome-devtools-mcp` plugin | project | Performance traces, Lighthouse, console, a11y debugging. This is how §10's budget gets *measured* instead of estimated, and it verified the tokens rendering during F3. |
+| `playwright` plugin | project | Agent-driven browsing during development. **Not the test suite** — see §11. |
+| `modern-web-guidance` plugin | project | Catches obsolete CSS/JS patterns. Low cost, occasional real save. |
+
+**shadcn MCP caveat.** It resolves `components.json` from the working directory, and that file
+lives in `web/`, not the repo root. Registry *browsing* works from anywhere; component
+*installation* must run as `npx shadcn add <name>` from inside `web/`. Running it from the root
+either fails or scaffolds into the wrong place.
+
+**Disable the Vercel plugins for this project.** They are installed at user scope and inject ~30
+`vercel:*` skills. This project deploys to **ECS Express Mode**, not Vercel (ADR-13.3), so they are
+pure noise — and `vercel:knowledge-update` claims a session-start slot for a platform we do not use.
+
+**Do not add a second component registry.** Aceternity, Magic UI, React Bits, and Origin UI were
+all evaluated and rejected; rationale in [DESIGN.md §11](../../DESIGN.md). Adding one reintroduces
+the aesthetic the design system exists to avoid, and a second component idiom in one codebase.
+
+## 15. Maintenance notes
 
 - **Do not touch casually:** `theme.css` (it is the design system, not a stylesheet),
   `api/schemas.ts` (it mirrors a backend contract — change the backend first),
@@ -288,7 +316,7 @@ produces a linting rule for any of them, add it here.
 - **This document can be retired** when the frontend has a linting setup that enforces §12
   mechanically. Until then it is the contract.
 
-## 15. Related files
+## 16. Related files
 
 | Path | What it is |
 |---|---|

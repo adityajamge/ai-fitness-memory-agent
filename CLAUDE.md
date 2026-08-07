@@ -17,6 +17,15 @@ and QA, flag any code that does not match it. The three rules most often broken:
 for database-originated values (never for style), no hardcoded colors (tokens only), and every
 data-driven component ships empty, loading, and error states alongside the populated one.
 
+**Also read [docs/engineering/frontend-guidelines.md](docs/engineering/frontend-guidelines.md)
+before writing any code in `web/`** — it is the engineering contract (layout, the single fetch
+boundary, state, motion under `LazyMotion strict`, accessibility, the agent toolkit, the review
+checklist). DESIGN.md wins on appearance; that file wins on structure.
+
+Frontend status, the foundation commit, and what to build first are in
+**[DESIGN.md §0](DESIGN.md#0-frontend-foundation-status)** and
+**[§15 M4 build order](DESIGN.md#15-m4-build-order)**.
+
 ## Skill routing
 
 When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.
