@@ -565,15 +565,79 @@ layer (the committed row), not only at the unit that owns the logic. The M5 smok
 10-record rehearsal into a throwaway account — is what caught the first and is retained as
 standard practice for any future bulk operation.
 
-## ADR-16 — Phase 5 (insight engine) — *pending*
+## ADR-16 — Phase 5 (insight engine) — *accepted 2026-08-06*
 
-Phase 5's decisions are held in
-[../engineering/consolidation-architecture.md §4](../engineering/consolidation-architecture.md)
-(**LOCKED 2026-08-03**) while the phase is in flight — the same holding pattern
-[ADR-15](#adr-15) used for replay. That document is canonical for the *how*; the amendments it
-required to ADR-13.1, 13.11, and 13.12 are already recorded inline above. When M1–M7 land,
-§4 is promoted here as **ADR-16**, recording only what is architecturally binding and only
-what implementation actually validated.
+Promoted from [../engineering/consolidation-architecture.md §4](../engineering/consolidation-architecture.md)
+(LOCKED 2026-08-03), which remains canonical for the *how* — its §11 implementation record and
+§5 invariant table are not duplicated here. This records only what is architecturally binding
+and what implementation actually validated. Amendments to ADR-13.1, 13.11, and 13.12 are
+recorded inline above.
+
+**16.1 Two detectors, chosen against the data — not the design.** The planned analytics
+(`ruptures` PELT changepoints + a 7–35d lag scan) were measured against what the Phase 4 replay
+actually committed and had nothing to run on. They are replaced by two deterministic detectors,
+`level_shift` and `intervention_outcome`. `ruptures` is not a dependency. *Validated:* both
+detectors produce insights over the real replayed history via the M5d sweep.
+
+**16.2 No detector reads text.** Every intervention reduces to exact equality or arithmetic
+(I-8). The notes in the history look enough like structured data that this is the invariant most
+likely to be eroded by a well-meaning improvement.
+
+**16.3 `pattern_strength` is a labeled heuristic, never a probability.** It is exactly
+`effect × coverage × specificity`, and the three components stay separately visible. Enforced at
+the type layer: `InsightPayload` rejects a `pattern_strength` that does not match the product
+within `1e-6` (I-19).
+
+**16.4 Per-series `EffectScale`, not one global threshold.** A single relative effect floor
+refused every clinically meaningful body-composition change (body fat 39.2 → 36.0 is 8.2%). Each
+series carries its own `min_delta` gate and `full_delta` denominator. *These are product
+heuristics, not clinical thresholds*, and the code says so at each calibration site.
+
+**16.5 Insight identity is a fingerprint, and supersession is how it changes.** Identity is
+`(user_id, kind, series_metric)` plus a fingerprint over `claim_dates` + values + intervention
+ids. `claim_dates` — not the evidence window — because fingerprinting the window made an
+unchanged claim supersede itself once per logged day.
+
+**16.6 Retraction only ever sets `status='retracted'`.** It never deletes or rewrites a payload
+(I-20) and is fully deterministic: no model calls, no language parsing, no note interpretation
+(I-21). Direction is judged against typed `pre_value`/`post_value` fields, not prose.
+
+**16.7 Consolidation runs at stage (F₀): post-commit, best-effort, budgeted.** Outside the
+ingestion transaction, after the receipt. Insights are derived data — losing one costs a
+re-derivation, while moving it inside the turn transaction would put every write at risk to
+protect a value that can be recomputed. It swallows its own exceptions by construction.
+
+**16.8 Writes are graph-dispatched; the retrieval builder set stays read-only.** `analyze_series`
+joins `log_memory` as a write tool routed through the graph's `_STAGES` table (I-17). `assemble()`
+stays pure.
+
+**16.9 Freshness is derived, never stored.** No `last_evaluated_at` column: it would reintroduce
+payload mutation for a derivable value and give one fact two sources of truth.
+
+**16.10 One `ConsolidationService`, one composition root.** The API builds it once and shares it
+between the ingestion tail and the graph node; `cli/consolidate.py` uses the same service and
+owns no consolidation logic of its own.
+
+### Open — do not treat as settled
+
+**The consolidation budget number.** ADR-13.1's ~300 ms predates the deployed topology and
+remains **provisional**. Measured during M5: consolidation costs **~635 ms per series** from the
+`us-east-1` app to the `ap-south-1` cluster, so a 300 ms budget completes exactly one series and
+cleanly defers the rest. The *mechanism* is validated — clean deferral, nothing partial, no
+error — and the *number* is T12's to re-derive. **M6/T12 is postponed, not waived**
+([TODOS.md](../../TODOS.md)); this field stays open until a production measurement exists, and
+open question Q3 (does the deferral path need a catch-up trigger?) rides with it.
+
+**Q1 — insight citability.** `citable_ids()` includes each participating insight's own id but
+**not** its `evidence_ids`. Whether the narrator may cite through an insight to its underlying
+memories is T7's call alongside ADR-14.8, and is asserted by test so that widening the surface
+must be deliberate. A citable surface is far easier to widen later than to narrow.
+
+### Cut
+
+**M7 — photo ingestion** (S3 + Bedrock vision) was the designated first-to-cut milestone and was
+cut on 2026-08-06. Invariant **I-23** (a photo turn persists something for every outcome) stands
+in §5 as unimplemented, not withdrawn. Remaining work is in [TODOS.md](../../TODOS.md).
 
 ## Standing assumptions (verify, don't trust)
 

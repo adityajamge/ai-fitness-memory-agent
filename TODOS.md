@@ -32,6 +32,52 @@
 - **Resume from:** this entry + §8 M6 + §11.3's measured table. Nothing was started in code,
   so there is no partial work to reconcile — only the blockers above to clear.
 
+## M7 — Photo ingestion (S3 + Bedrock vision): DEFERRED 2026-08-06, post-hackathon
+
+- **Status:** intentionally deferred, **not abandoned**. This was the designated first-to-cut
+  milestone from the day Phase 5 was planned (`consolidation-architecture.md` §7, §8), so
+  cutting it is the plan executing as written, not the plan slipping.
+- **Why cut, specifically:**
+  1. **It is the only Phase 5 deliverable that is not the "memory thinks" thesis.** Insights,
+     lineage, retraction, and the glass-box evidence they feed are what judges score. Photo
+     logging is a nice input channel with zero consolidation value.
+  2. **AWS blockers that gate verification, not just work:** an S3 bucket, a task-role policy,
+     and a presigned-upload path. The local AWS session is expired, so M7 would land in the
+     same code-complete-but-unverified state M6 is postponed *for*.
+  3. **Measured blast radius (2026-08-06):** `ModelProvider` is `@runtime_checkable`, so
+     adding `extract_from_image` immediately breaks the conformance tests for **four**
+     implementations — `BedrockProvider`, `ClaudeAPIProvider`, `CompositeProvider`,
+     `FakeModelProvider`. Verified by making the change and running the suite:
+     `test_provider_contract`, `test_provider_selection`, and `test_claude_api_provider` all
+     failed on `isinstance(..., ModelProvider)`. The change was reverted; the tree is clean.
+     **There is no contracts-only first lane** — M7's first commit is necessarily the protocol
+     plus all four providers.
+- **What remains, in build order:**
+  1. `engine/model.py`: `VisionError` + `extract_from_image(s3_key, *, now, tz, caption)` on
+     the Protocol, with the same three-outcome contract as `extract_events` (typed events /
+     affirmed-empty / raise). Draft wording is in the reverted probe — see §4.17 for the rule
+     it must encode: a provider that cannot tell "no loggable content" from "I failed to
+     parse this" **must raise**.
+  2. All four provider implementations above, or the conformance tests stay red.
+  3. An S3 seam (upload before extraction — the bytes are durable *first*, so a vision failure
+     loses nothing) plus bucket + IAM task-role policy.
+  4. `engine/ingestion.py`: the photo branch. `NotePayload.text` stays **required**; a failed
+     vision turn writes the caption when present, otherwise the honest literal
+     `"[photo, not parsed]"`, with `photo_s3_key` as an extra payload key.
+  5. `_NOTE_CONFIDENCE` parameterised (default 1.0 for live chat) so a photo fallback can
+     carry a lower value — this is what closes the note-confidence TODO below.
+  6. `api/routers/ingest.py` photo route; `Dockerfile` if the S3 client needs anything.
+  7. Tests per §8 M7: vision success → typed meal with `photo_s3_key`; vision failure → note
+     with the honest literal + the key; S3 failure → turn persists with a partial-save
+     message; the three-outcome contract holds for the vision surface.
+- **Invariant it owes:** **I-23** — a photo turn persists something for every failure outcome.
+  Already written into §5's invariant table; it is unimplemented, not withdrawn.
+- **Docs owed on resume:** `ingestion-transaction-boundaries.md` (§4 photo branch, §9 matrix),
+  and close the note-confidence entry below.
+- **Do not:** make `NotePayload.text` optional to accommodate a textless photo note. That
+  weakens never-lose-input for the *text* path it was written for, and §4.17 rejected it
+  explicitly. The literal marker is the decided answer.
+
 ## Production abuse & spend controls (deferred 2026-07-12, /plan-eng-review D14)
 
 - **What:** Layered abuse/spend protection for the public app: per-account daily model-call

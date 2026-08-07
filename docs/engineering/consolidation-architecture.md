@@ -1139,7 +1139,13 @@ live write path → measurement → orthogonal lane*, the same shape that made P
 - **Tests:** none required — the artifact is the deliverable.
 - **Rollback:** docs-only.
 
-**M7 — Photo ingestion** *(orthogonal; first to cut)*
+**M7 — Photo ingestion** *(orthogonal; first to cut)* — ✂️ *cut 2026-08-06; see §11.4 and TODOS.md*
+
+> Measured when the cut was taken: `ModelProvider` is `@runtime_checkable`, so adding
+> `extract_from_image` breaks conformance for **four** implementations at once (Bedrock,
+> Claude API, Composite, Fake). There is no contracts-only first lane, which is part of why
+> this was the right thing to cut rather than half-build.
+
 - **Objective:** presigned S3 upload → Bedrock vision → meal events; every failure outcome persists
   something.
 - **Files:** `engine/model.py`, both providers + `CompositeProvider`, `engine/ingestion.py`,
@@ -1281,7 +1287,7 @@ by construction. **Not a trigger:** a desire to say "changepoint detection" in t
 | — | Teardown fix + CockroachDB engineering record | ✅ `6d02f15` |
 | — | Declarative ECS runtime configuration | ✅ `adb4598` |
 | M6 | Latency profile (T12) | ⏸ **POSTPONED 2026-08-06** — owed, not cut. Blocked on a verified production deploy; see [TODOS.md](../../TODOS.md) → *M6 — Latency profile (T12)* |
-| M7 | Photo ingestion | ⏳ (first to cut) |
+| M7 | Photo ingestion | ✂️ **CUT 2026-08-06** — the designated first cut, taken. Deferred post-hackathon; remaining work in [TODOS.md](../../TODOS.md) → *M7 — Photo ingestion* |
 
 **On the M6 postponement.** Deferred deliberately rather than measured locally: the number's
 entire value is the `us-east-1` → `ap-south-1` hop, so a local figure would describe something
@@ -1312,11 +1318,17 @@ hash after the final amend, not before.*
   mutation for a derivable value and gives the same fact two sources of truth.
 - **Do not lower the §4.15 thresholds to make the demo produce more insights.** Fewer, believable
   insights is the product.
-- **When M1–M7 land**, promote §4 into ADR-16 in
+- **§4 was promoted into ADR-16** on 2026-08-06 in
   [09-decisions.md](../office-hours/09-decisions.md), recording only what is architecturally binding
-  and what implementation actually validated — the ADR-15 discipline. **M6 is postponed, not
-  waived** (§11.4): the ADR-13.1 budget amendment it feeds cannot be written honestly until
-  T12's production measurement exists, so phase close waits on it even if M7 is cut.
+  and what implementation actually validated — the ADR-15 discipline.
+
+  Phase 5 closed with M6 postponed and M7 cut, so ADR-16 carries **one deliberately open
+  field**: the consolidation budget number, which ADR-13.1 still lists as provisional and
+  which only T12's production measurement can settle. That is recorded *in* the ADR as an
+  open item rather than left implicit — the earlier note here said phase close should wait
+  on M6, and writing the ADR with the gap marked is the honest version of that: everything
+  settled is settled, and the one unsettled number is visibly unsettled instead of quietly
+  inheriting a figure nobody measured.
 
 ---
 

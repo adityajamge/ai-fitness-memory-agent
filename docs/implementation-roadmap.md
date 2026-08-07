@@ -234,7 +234,10 @@
 > teardown fix + CockroachDB engineering record (`6d02f15`) · declarative ECS runtime
 > configuration (`adb4598`).
 >
-> **Remaining: M7 photo ingestion, then M6.**
+> **PHASE CLOSED 2026-08-06** — §4 promoted into **ADR-16**. Every insight-engine deliverable
+> ships: consolidation at stage (F₀), on-demand `analyze_series`, typed retraction, insight
+> retrieval + trace lineage, and the retroactive CLI sweep. Two milestones were resolved by
+> decision rather than by build, both deliberately and both recorded:
 >
 > > ⏸ **M6 (latency profile / T12) is POSTPONED as of 2026-08-06 — owed, not skipped.**
 > > It measures the `us-east-1` app → `ap-south-1` CockroachDB hop, so it requires a
@@ -242,8 +245,16 @@
 > > task*, with real CockroachDB Cloud and Bedrock connectivity. A local benchmark would
 > > measure something other than production and would then be cited in an ADR-13.1
 > > amendment — worse than having no number. Blockers, deliverables, and the resume point
-> > are in [TODOS.md](../TODOS.md) → *M6 — Latency profile (T12)*. **Phase 5 does not close
-> > without it**, even if M7 is cut.
+> > are in [TODOS.md](../TODOS.md) → *M6 — Latency profile (T12)*. ADR-16 therefore carries
+> > the consolidation budget number as an **explicitly open field** rather than inheriting a
+> > figure nobody measured.
+>
+> > ✂️ **M7 (photo ingestion) is CUT as of 2026-08-06 — the designated first cut, taken.**
+> > It was named first-to-cut when the phase was planned, it is the only Phase 5 deliverable
+> > outside the "memory thinks" thesis, it needs S3 + IAM that cannot be verified right now,
+> > and it was measured to break conformance tests for all four `ModelProvider`
+> > implementations at once — so there is no cheap partial version. Remaining work, in build
+> > order, is in [TODOS.md](../TODOS.md) → *M7 — Photo ingestion*. Post-hackathon.
 >
 > **Consolidation is live in the deployed app as of M5c**: the composition root now builds one
 > `ConsolidationService` and shares it between the ingestion tail's stage (F₀) and the graph's
