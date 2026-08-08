@@ -16,6 +16,7 @@
 
 import { m, useReducedMotion } from "motion/react";
 import { Link } from "react-router";
+import MoltenMetal from "@/components/effects/MoltenMetal";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
 
@@ -69,11 +70,19 @@ function Section({
 }
 
 export function Landing() {
+  const reduce = useReducedMotion();
+
   return (
     <div className="min-h-dvh">
-      <header className="sticky top-0 z-30 border-b border-transparent bg-background/80 backdrop-blur transition-colors duration-240">
+      {/* `fixed`, not `sticky`: it needs to visually float over the hero's shader background
+          from y=0, which a sticky element (in normal flow, pushed below the hero) cannot do.
+          Transparent + blurred rather than the old solid `bg-background/80`, so the animated
+          background reads *through* it instead of stopping dead at a black bar (the thing this
+          whole change was for). Every section below is dark by design (§5.2), so legibility
+          holds once scrolled past the hero too — there is no light surface anywhere to fight. */}
+      <header className="fixed inset-x-0 top-0 z-30 border-b border-transparent backdrop-blur transition-colors duration-240">
         <nav className="mx-auto flex h-14 w-full max-w-marketing items-center gap-3 px-6">
-          <img src="/logo.png" alt="AyuMind AI" className="h-[26px] w-[26px] shrink-0 object-contain" />
+          <img src="/logo.png" alt="AyuMind AI" className="h-9 w-9 shrink-0 object-contain" />
           <span className="text-dense font-medium text-foreground">AyuMind AI</span>
           <div className="ml-auto flex items-center gap-2">
             <Link to="/login">
@@ -88,36 +97,85 @@ export function Landing() {
 
       {/* ── Hero (§8.2). Left-weighted, full-bleed, no centered composition. ─────────────── */}
       <div className="relative overflow-hidden">
+        {/* Deliberate DESIGN.md deviation — see MoltenMetal.tsx's docstring and §16 Decisions
+            Log. Skipped entirely under prefers-reduced-motion (handled inside the component).
+            Spans from y=0 (the actual top of the page, behind the now-transparent fixed header)
+            rather than starting below it. */}
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+          <MoltenMetal
+            color1="#5227FF"
+            color2="#FF9FFC"
+            color3="#FFFFFF"
+            speed={0.35}
+            scale={4}
+            detail={3}
+            glow={1.6}
+            coreSize={0.1}
+            swirl={1}
+            fold={-0.2}
+            blackPoint={0.05}
+            brightness={1.3}
+            colorMode="molten"
+            grain
+            grainIntensity={0.05}
+            mouseInteraction
+            mouseStrength={0.3}
+            opacity={1}
+          />
+        </div>
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 [background-image:var(--graph-rule)] [mask-image:linear-gradient(to_bottom,black,transparent_75%)]"
         />
+
+        {/* Reserves the fixed header's height so hero content starts below it instead of under
+            it — the background layers above are unaffected and still reach all the way to y=0. */}
+        <div aria-hidden="true" className="h-14" />
+
         <Section className="relative py-24 md:py-32">
-          <div>
-            {/* No `ch` cap on this container: `ch` resolves against the *container's* 15px font,
-                which would wrap the 72px heading and orphan the last word onto its own line.
-                The heading is two short lines by construction and needs no measure limit. */}
-            <h1 className="text-display-s text-foreground md:text-display-m lg:text-display-l">
-              It remembers.
-              <br />
-              {/* The claim is bright, the proof-of-claim is quiet. That one tonal shift is the
-                  whole brand in two lines. */}
-              <span className="text-muted-foreground">And it can prove it.</span>
-            </h1>
+          <div className="grid gap-12 lg:grid-cols-[1fr_auto] lg:items-center">
+            <div>
+              {/* No `ch` cap on this container: `ch` resolves against the *container's* 15px
+                  font, which would wrap the 72px heading and orphan the last word onto its own
+                  line. The heading is two short lines by construction and needs no measure
+                  limit. */}
+              <h1 className="text-display-s text-foreground md:text-display-m lg:text-display-l">
+                It remembers.
+                <br />
+                {/* The claim is bright, the proof-of-claim is quiet. That one tonal shift is the
+                    whole brand in two lines. */}
+                <span className="text-muted-foreground">And it can prove it.</span>
+              </h1>
 
-            <p className="mt-8 max-w-[52ch] text-lead text-muted-foreground">
-              A health companion with a real memory: every meal, workout, and scan becomes a
-              queryable row. Ask what changed, and get the receipts.
-            </p>
+              <p className="mt-8 max-w-[52ch] text-lead text-muted-foreground">
+                A health companion with a real memory: every meal, workout, and scan becomes a
+                queryable row. Ask what changed, and get the receipts.
+              </p>
 
-            <div className="mt-10 flex flex-wrap items-center gap-3">
-              <Link to="/signup">
-                <Button variant="primary" size="lg">Try it</Button>
-              </Link>
-              <a href="#proof">
-                <Button variant="secondary" size="lg">See the glass box ↓</Button>
-              </a>
+              <div className="mt-10 flex flex-wrap items-center gap-3">
+                <Link to="/signup">
+                  <Button variant="primary" size="lg">Try it</Button>
+                </Link>
+                <a href="#proof">
+                  <Button variant="secondary" size="lg">See the glass box ↓</Button>
+                </a>
+              </div>
             </div>
+
+            {/* Right-side mark, continuously animated — decorative only (`aria-hidden`, empty
+                alt: the header's img already carries the accessible "AyuMind AI" name), so
+                hiding it below `lg` costs nothing and keeps a tight viewport uncluttered.
+                Reduced-motion gets the same mark with no animation, never a missing image. */}
+            <m.img
+              src="/logo.png"
+              alt=""
+              aria-hidden="true"
+              className="hidden h-56 w-56 justify-self-center object-contain lg:block xl:h-72 xl:w-72"
+              {...(!reduce && {
+                animate: { y: [0, -18, 0], rotate: [-3, 3, -3] },
+                transition: { duration: 7, repeat: Infinity, ease: "easeInOut" as const },
+              })}
+            />
           </div>
 
           {/* The hero visual IS the product: a real cited answer, not a screenshot of one. */}
