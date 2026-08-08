@@ -13,7 +13,6 @@
 import { useNavigate } from "react-router";
 import { logout } from "@/api/client";
 import { useStats } from "@/api/queries";
-import { Mark } from "@/components/Mark";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
@@ -54,8 +53,8 @@ export function TopBar({ isBusy = false }: { isBusy?: boolean }) {
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border px-4 md:px-6">
       <div className="flex items-center gap-2">
-        <Mark size={16} />
-        <span className="text-dense font-medium text-foreground">Fitness Memory Agent</span>
+        <img src="/logo.png" alt="AyuMind AI" className="h-5 w-5 shrink-0 object-contain" />
+        <span className="text-dense font-medium text-foreground">AyuMind AI</span>
       </div>
 
       <div className="ml-auto flex items-center gap-4">
@@ -95,7 +94,7 @@ export function TopBar({ isBusy = false }: { isBusy?: boolean }) {
         )}
 
         <span className="hidden items-center gap-1.5 font-mono text-meta text-faint sm:flex">
-          CockroachDB
+          Database
           <ConnectionDots isBusy={isBusy} isError={isError} />
         </span>
 

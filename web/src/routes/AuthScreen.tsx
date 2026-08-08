@@ -102,7 +102,7 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
 
       <div className="relative flex min-h-dvh items-center px-6 md:px-[max(6vw,48px)]">
         <div className="w-full max-w-[380px]">
-          <Link to="/" aria-label="Fitness Memory Agent home" className="inline-block">
+          <Link to="/" aria-label="AyuMind AI home" className="inline-block">
             <Mark size={20} interactive />
           </Link>
 

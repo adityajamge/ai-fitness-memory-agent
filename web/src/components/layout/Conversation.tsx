@@ -32,11 +32,14 @@ function PendingTurn({ stage, isReduced }: { stage: string | undefined; isReduce
       initial={isReduced ? false : { opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: isReduced ? 0 : 0.18 }}
-      className="flex items-center gap-2 text-meta text-faint"
+      className="flex items-center gap-3"
       aria-live="polite"
     >
-      <span className="size-1.5 animate-pulse rounded-full bg-signal" />
-      {stage && <span className="font-mono">{stage}…</span>}
+      <img src="/logo.png" alt="" aria-hidden="true" className="h-6 w-6 shrink-0 object-contain" />
+      <span className="flex items-center gap-2 text-meta text-faint">
+        <span className="size-1.5 animate-pulse rounded-full bg-signal" />
+        {stage && <span className="font-mono">{stage}…</span>}
+      </span>
     </m.div>
   );
 }
@@ -99,42 +102,52 @@ function TurnBlock({
       initial={reduce ? false : { opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: reduce ? 0 : 0.24, ease: [0.2, 0, 0, 1] }}
-      className="flex flex-col gap-2.5"
+      className="flex gap-3"
     >
-      {turn.receipts.map((receipt, i) => (
-        <Receipt key={i} receipt={receipt} />
-      ))}
+      <img
+        src="/logo.png"
+        alt=""
+        aria-hidden="true"
+        className="mt-0.5 h-6 w-6 shrink-0 object-contain"
+      />
 
-      {turn.content && (
-        <Answer
-          text={turn.content}
-          rows={rows}
-          missing={missing}
-          report={turn.citationReport}
-          activeId={activeId}
-          onActivate={(id) => onActivateCitation(id, turn.id)}
-        />
-      )}
+      <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+        {turn.receipts.map((receipt, i) => (
+          <Receipt key={i} receipt={receipt} />
+        ))}
 
-      {/* Retrieval the engine refused. Surfaced rather than swallowed — the answer may be
-          partial, and the user deserves to know which part. */}
-      {turn.errors.length > 0 && (
-        <ErrorState
-          title="Part of this answer is missing"
-          detail={turn.errors.join(" · ")}
-          preserved="Everything you logged was still saved."
-        />
-      )}
+        {turn.content && (
+          <Answer
+            text={turn.content}
+            rows={rows}
+            missing={missing}
+            report={turn.citationReport}
+            activeId={activeId}
+            onActivate={(id) => onActivateCitation(id, turn.id)}
+          />
+        )}
 
-      {/* §6.6: the third citation state. Quiet, because an uncited answer is a narrator weakness
-          rather than a system failure — but never hidden, or the validator has no teeth. */}
-      {turn.citationReport?.status === "uncited" && (
-        <p className="text-meta text-faint">
-          answered without citing evidence ·{" "}
-          <span className="font-mono">{turn.citationReport.citable_count}</span> memories were
-          available
-        </p>
-      )}
+        {/* Retrieval the engine refused. Surfaced rather than swallowed — the answer may be
+            partial, and the user deserves to know which part. */}
+        {turn.errors.length > 0 && (
+          <ErrorState
+            title="Part of this answer is missing"
+            detail={turn.errors.join(" · ")}
+            preserved="Everything you logged was still saved."
+          />
+        )}
+
+        {/* §6.6: the third citation state. Quiet, because an uncited answer is a narrator
+            weakness rather than a system failure — but never hidden, or the validator has no
+            teeth. */}
+        {turn.citationReport?.status === "uncited" && (
+          <p className="text-meta text-faint">
+            answered without citing evidence ·{" "}
+            <span className="font-mono">{turn.citationReport.citable_count}</span> memories were
+            available
+          </p>
+        )}
+      </div>
     </m.div>
   );
 }

@@ -16,7 +16,6 @@
 
 import { m, useReducedMotion } from "motion/react";
 import { Link } from "react-router";
-import { Mark } from "@/components/Mark";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
 
@@ -74,8 +73,8 @@ export function Landing() {
     <div className="min-h-dvh">
       <header className="sticky top-0 z-30 border-b border-transparent bg-background/80 backdrop-blur transition-colors duration-240">
         <nav className="mx-auto flex h-14 w-full max-w-marketing items-center gap-3 px-6">
-          <Mark size={18} interactive />
-          <span className="text-dense font-medium text-foreground">Fitness Memory Agent</span>
+          <img src="/logo.png" alt="AyuMind AI" className="h-[26px] w-[26px] shrink-0 object-contain" />
+          <span className="text-dense font-medium text-foreground">AyuMind AI</span>
           <div className="ml-auto flex items-center gap-2">
             <Link to="/login">
               <Button variant="ghost" size="sm">Sign in</Button>
@@ -327,10 +326,8 @@ GROUP BY 1 ORDER BY 1;`}</code>
 
       <footer className="border-t border-border">
         <div className="mx-auto flex w-full max-w-marketing flex-wrap items-center gap-3 px-6 py-8">
-          <Mark size={14} />
-          <span className="text-meta text-faint">
-            CockroachDB × AWS Agentic Memory Hackathon
-          </span>
+          <img src="/logo.png" alt="AyuMind AI" className="h-5 w-5 shrink-0 object-contain" />
+          <span className="text-meta text-faint">Your memory, structured and provable.</span>
           <a
             href="https://github.com/adityajamge/ai-fitness-memory-agent"
             className="ml-auto text-meta text-muted-foreground underline decoration-border underline-offset-4 transition-colors duration-120 hover:decoration-foreground"
