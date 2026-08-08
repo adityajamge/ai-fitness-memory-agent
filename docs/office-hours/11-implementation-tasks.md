@@ -31,7 +31,7 @@
 - [ ] **T6 (P1, ~3d / ~5h)** — engine — Sync consolidation under ~300ms budget: daily bucketing (gaps stay missing), ruptures PELT, bounded lag scan (7–35d), documented pattern-strength formula
   - Surfaced by: Arch issue 1 (1A) + outside voice #9 (17A → ADR-13.1/13.12)
   - Files: `engine/consolidation.py` · Verify: fixture series with/without changepoint; budget-exceeded → ingestion still succeeds
-- [ ] **T7 (P1, ~2d / ~3h)** — engine/api — EvidenceTrace persistence (`evidence_traces` table, same transaction as the turn) + citation validation with honestly-scoped guarantee
+- [x] **T7 (P1, ~2d / ~3h)** — engine/api — EvidenceTrace persistence (`evidence_traces` table, same transaction as the turn) + citation validation with honestly-scoped guarantee ✅ 2026-08-06: persistence at stage (G) (M1, `32e2e1b`) + mechanical citation validation (M2, `f652732`); ADR-14.8 resolved (trace carries its own `citable_ids`)
   - Surfaced by: ADR-12 + outside voice #8/#11 (ADR-13.13/13.14)
   - Files: `engine/trace.py`, `api/turns.py` · Verify: property test — no assembled context without a persisted trace; invalid-citation fixture flagged
   - ⚠️ **Blocking contract decision — settle before writing the validator** ([ADR-14.8](09-decisions.md#adr-14)): the citable set is `trace.evidence` **∪ aggregate/count contributing IDs** (`ContextBlock.citable_ids()`). Because assembly is pure ([ADR-14.7](09-decisions.md#adr-14)), an aggregate's contributing rows are IDs without metadata and are absent from `trace.evidence` — validating against it alone would flag *valid* citations of aggregated data as invalid. Either validate against the full citable set, or carry those IDs into the persisted trace (recommended, keeps "the UI reads the trace" literally true; pairs naturally with T16's batch-fetch hydration).
@@ -73,7 +73,7 @@
 - [x] **T10 (P1, ~1d / ~2h)** — infra — Dockerfile (FastAPI + built Vite SPA) + **ECS Express Mode** deploy (orig. App Runner — closed to new customers; ADR-13.3 amendment) + GitHub Actions CI with single-node CockroachDB service ✅ 2026-07-19: live and verified — push→CI→ECR→Express pipeline exercised end-to-end; URL in [../deploy.md](../deploy.md) (Phase 1 serves the hello page; "bare chat" beat lands with Milestone 1)
   - Surfaced by: Arch issue 3 (3A) + test infra (8A); deploy-early rule
   - Files: `Dockerfile`, `.github/workflows/ci.yml` · Verify: live URL serves the bare chat in Milestone 1
-- [ ] **T11 (P2, ~1.5d / ~2h)** — web — Empty-state design for new accounts (timeline, stats, insights, engine pane): inviting, not broken
+- [x] **T11 (P2, ~1.5d / ~2h)** — web — Empty-state design for new accounts (timeline, stats, insights, engine pane): inviting, not broken ✅ 2026-08-08: all four surfaces shipped across M4 (stats, engine pane, guided first turn) and M7 (timeline's "your memory starts here")
   - Surfaced by: Outside voice #3 — consequence of the multi-user model (ADR-13.4); rank 4 in the [07 build order](07-glass-box-ui.md)
   - Files: `web/src/components/EmptyStates.tsx`
 - [ ] **T12 (P2, ~1d / ~1.5h)** — api — Measure + document end-to-end turn latency (ingest / query / both); receipt < 3s perceived target
@@ -89,7 +89,7 @@
   - Surfaced by: Outside voice #12 — backfill had no execution home (no scheduler exists by design)
   - Files: `engine/ingestion.py`, `cli/backfill.py`
   - Test gap closed 2026-07-22: opportunistic half in `engine/tests/test_ingestion.py`, CLI entry point in `cli/tests/test_backfill.py` (page draining, idempotency, embed-outage termination, user discovery, `--user`/`--all`/argparse)
-- [ ] **T16 (P3, ~0.5d / ~1h)** — api/web — Batch-fetch evidence rows by ID (`WHERE id = ANY(...)`); in-process cache for timeline/stats queries
+- [x] **T16 (P3, ~0.5d / ~1h)** — api/web — Batch-fetch evidence rows by ID (`WHERE id = ANY(...)`); in-process cache for timeline/stats queries ✅ 2026-08-06: `POST /api/memories/batch` (M3, `2e0c469`); TanStack Query caches timeline/stats client-side
   - Surfaced by: Performance advisory notes
   - Files: `api/evidence.py`
 - [ ] **T17 (P3, ~0.5d / ~30min)** — docs — README tools write-up: honest framing of the vector index's role at demo scale vs lifelong scale

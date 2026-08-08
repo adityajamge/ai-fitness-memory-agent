@@ -20,6 +20,16 @@
 > assembly's two-view evidence split, the graph-state durability boundary). One open contract
 > item is flagged for Phase 6: [ADR-14.8](09-decisions.md#adr-14) gates T7's citation
 > validator.
+>
+> **Documentation audit 2026-08-08 (end of Phase 6):** that open item is resolved — ADR-14.8
+> was settled in Phase 6 M1 (the persisted trace carries its own `citable_ids`; see
+> [03-memory-engine.md](03-memory-engine.md) and
+> [glass-box-architecture.md §4.2](../engineering/glass-box-architecture.md)).
+> The glass-box UI (07's build order) is now fully shipped or deliberately cut — status table
+> and evidence: [DESIGN.md §0](../../DESIGN.md#0-frontend-foundation-status). Remaining Phase 6
+> follow-up (2 of the 4 required Playwright E2E paths, both live-model eval lanes, the Phase 5
+> latency profile and photo ingestion) is Phase 7 scope; detail in
+> [12-test-plan.md](12-test-plan.md) and [TODOS.md](../../TODOS.md).
 
 ## The project in three sentences
 

@@ -42,9 +42,29 @@
 >   [engineering/consolidation-architecture.md](../engineering/consolidation-architecture.md) §9, §11.
 >   Test hygiene: since Phase 5 M0 a full run leaves **zero** residue for the ids it mints.
 >
-> Still planned: the retroactive CLI (M5d), the latency profile (M6/T12), trace persistence + citation
-> validation (T7), photo/S3 ingestion (M7), the 4 Playwright E2E paths, and both live-model
-> eval lanes.
+> **Phase 6 (2026-08-08): 772 tests green, plus 15/15 Playwright E2E.** `engine/trace`'s
+> persistence + citation validation block (T7a/T7b), `api/tests/test_glassbox.py`'s read API and
+> batch hydration (T16), `api/tests/test_chat_stream.py`'s SSE stage-narration contract (M6), and
+> the `pattern_strength`/`retraction` additions to `engine/tests/test_retrieval_insights.py`
+> (M8) all landed here. E2E: `web/e2e/first-run.spec.ts` (signup → log → receipt → pane,
+> including a dedicated 390×844 mobile-viewport run of the timeline) and
+> `web/e2e/glass-box.spec.ts` (money question → chips → trace) are both green with zero axe
+> violations. Detail: [engineering/glass-box-architecture.md](../engineering/glass-box-architecture.md),
+> [DESIGN.md §0](../../DESIGN.md#0-frontend-foundation-status).
+>
+> **Still planned:** the latency profile (Phase 5's M6/T12 — postponed, not skipped, see
+> `TODOS.md`), photo/S3 ingestion (Phase 5's M7 — deferred post-hackathon, see `TODOS.md`), **2 of
+> the 4** Playwright E2E paths (slow-Bedrock UI state; cross-user denial — the properties
+> themselves are tested elsewhere: I-28 cross-user 404s are asserted per-route in
+> `api/tests/test_glassbox.py`, and the staged-progress line is exercised indirectly by every
+> E2E turn, but neither has a dedicated spec), and both live-model eval lanes (T14 — `evals/`
+> holds no golden-set suite yet). All four are Phase 7 scope, not Phase 6 gaps.
+>
+> **Naming note:** "M6"/"M7" appear twice in this project with different meanings — Phase 5's
+> M6 (latency profile) and M7 (photo ingestion) in `TODOS.md`, versus Phase 6's frontend M6
+> (live engine pane) and M7 (timeline strip) in `DESIGN.md` §0 and
+> `docs/implementation-roadmap.md`. Both are correct in their own document; check which phase a
+> milestone reference is scoped to before assuming which one it means.
 
 ```
 CODE PATHS                                               USER FLOWS

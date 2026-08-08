@@ -246,9 +246,17 @@ Continuing Phase 5's numbering (I-1 … I-23 live in
 
 ## 7. Risks
 
-**[High] SSE through the shared ALB is unproven.** ADR-13.7 chose SSE for the live pane; Express
-Mode's shared ALB may buffer streamed responses. *Mitigated by* proving it against the deployed
-URL early in M6 and keeping the pane's data flow switchable to polling without a redesign.
+**[High → Low] SSE through the shared ALB is unproven.** ADR-13.7 chose SSE for the live pane;
+Express Mode's shared ALB may buffer streamed responses. **Downgraded in M6**, not by proving it
+against the deployed URL (still blocked on AWS access — see the Medium risk below) but by making
+the client detect the failure at runtime instead of needing it proven in advance:
+`web/src/api/chatStream.ts` falls back to the plain, already-tested `POST /api/chat` for any turn
+whose stream fails to establish or complete. If the ALB buffers or drops the stream in
+production, the product degrades to its pre-M6 behavior (no live progress line) rather than
+breaking — the "switchable to polling without a redesign" mitigation, just resolved by feature
+detection rather than a static switch decided now. Residual risk: this has not been observed
+against the *actual* deployed container, only the real dev stack (uvicorn + real CockroachDB);
+low because failure degrades gracefully rather than breaking the turn.
 
 **[High] Design-system scope creep.** ~10 working days remain against Phase 6 (5–7) plus Phase 7
 (4–5). *Mitigated by* fixing tokens once in M4 and consuming them thereafter without
@@ -258,8 +266,12 @@ renegotiation.
 recorded in TODOS.md. Phase 6 builds without it; the *demo* does not. Longest-lead blocker in
 the project.
 
-**[Medium] E2E lands last, at the deadline.** *Mitigated by* standing the Playwright harness up
-with one trivial test in M4, so M8 writes tests rather than fighting CI browsers.
+**[Medium → Low] E2E lands last, at the deadline.** *Mitigated by* standing the Playwright harness
+up with one trivial test in M4; by M8, 15 real specs run against the real API and CockroachDB
+(zero axe violations). Residual: 2 of the 4 Definition-of-Done paths (slow-Bedrock UI state,
+cross-user denial) still lack a dedicated spec — the underlying properties are tested elsewhere
+(I-28 per-route in `api/tests/test_glassbox.py`), so this is a test-organization gap, not an
+unverified property. Left for Phase 7; see `docs/office-hours/12-test-plan.md`.
 
 **[Low] Trace JSONB size.** A wide turn's trace carries evidence + ranking + steps. Payload-free
 by construction (snapshots hold metadata, never payload copies), so growth is bounded by row
@@ -271,17 +283,22 @@ count, not content size.
 |---|---|---|---|
 | M0 | Design lock | this document | ✅ `5aef6f5` |
 | M1 | Trace persistence (T7a) | stage (G); `citable_ids` in the trace; ADR amendments | ✅ `32e2e1b` |
-| M2 | Citation validation (T7b) | deterministic validator, honest scope | ✅ *this milestone* |
-| M3 | Read API + hydration (T16) | trace/memory/timeline/stats endpoints, batch fetch | ✅ *this milestone* |
-| M4 | SPA foundation | toolchain, design system, shell, state primitives | *awaiting the design system* |
-| M5 | Chat + chips + receipts | build-order 1–3 | |
-| M6 | Live engine pane | evidence rows, query display, SSE | |
-| M7 | Timeline + stats | build-order 7 | |
-| M8 | Responsive/a11y/perf + E2E + ADR-17 | phase close | |
+| M2 | Citation validation (T7b) | deterministic validator, honest scope | ✅ `f652732` |
+| M3 | Read API + hydration (T16) | trace/memory/timeline/stats endpoints, batch fetch | ✅ `2e0c469` |
+| M4 | SPA foundation | toolchain, design system, shell, state primitives | ✅ `dc7d334` |
+| M5 | Chat + chips + receipts | build-order 1–3 | ✅ `99dda12` |
+| M6 | Live engine pane | evidence rows, query display, SSE | ✅ `125f44b` |
+| M7 | Timeline + stats | build-order 7 | ✅ `5de6e19` |
+| M8 | Responsive/a11y/perf + E2E + ADR-17 | phase close | ✅ `5de6e19` |
 
-**M4–M8 are deliberately unelaborated here.** The frontend design system, component library,
-animation guidelines, and frontend engineering rules are being authored separately and will
-govern every React component; specifying UI structure now would pre-empt them.
+**M4–M8 were deliberately unelaborated here** — this document predates the frontend design
+system, which governs every React component and was authored separately (`DESIGN.md`, approved
+as the M4–M8 contract) rather than being pre-empted by architecture-lock text. What each
+milestone actually delivered, against that contract, is recorded live in
+[DESIGN.md §0](../../DESIGN.md#0-frontend-foundation-status) and
+[implementation-roadmap.md](../implementation-roadmap.md)'s Phase 6 status block — not here,
+and not retroactively rewritten here, so this table stays what it always was: the plan as it
+stood at M0, with commits added only to close the loop on whether each row shipped.
 
 ## 9. Test strategy
 
@@ -301,7 +318,7 @@ at the unit that owns the logic.
 | | Question | Owner |
 |---|---|---|
 | **Q4** | ✅ **Resolved M3: `turn_id`.** `GET /api/turns/{turn_id}/trace` fetches one glass box; `GET /api/turns?thread_id=…` scopes history. A trace belongs to exactly one assistant turn, so `turn_id` is the natural key and the SSE contract in M6 can push a `turn_id` for the pane to fetch. | ✅ M3 |
-| **Q5** | Does the live pane push full traces or deltas? *Recommended:* full — payloads are small and there is no reconciliation state to get wrong. | M6 |
+| **Q5** | ✅ **Resolved M6, as recommended: full, not deltas.** The `done` SSE frame carries the complete `POST /api/chat` response body — same `_turn_json`, same shape — so there is no reconciliation state on either transport. The `stage` frames that precede it carry no trace data at all (`{stage, label}` only); the pane only ever receives a trace once, complete. | ✅ M6 |
 
 ## 11. Maintenance notes
 

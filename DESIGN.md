@@ -1232,12 +1232,23 @@ does not know about `node_modules`. M4 must begin with: scaffold, Dockerfile nod
 frontend lane, FastAPI static mount + SPA catch-all. Estimated half a day, and it is a prerequisite
 for every other Phase-6 milestone.
 
-### Open risk
+### Open risk — resolved by M6, differently than planned
 
-**SSE through Express Mode's shared ALB is unproven**, and the live engine pane depends on it. A
-~20-line spike against the deployed URL should run before the pane is built. If SSE does not
-survive the ALB, the fallback is Query's `refetchInterval` — a three-line change if we learn early,
-a rewrite if we learn at M7.
+**SSE through Express Mode's shared ALB is unproven**, and the live engine pane depends on it.
+This section originally planned a ~20-line spike against the deployed URL before building the
+pane, with Query's `refetchInterval` as the fallback if SSE failed. Neither happened as written:
+the deployed URL was never reachable (AWS access blocked throughout Phase 6 — see `TODOS.md`),
+so there was nothing to spike against.
+
+**What shipped instead (M6):** the pane was built directly on SSE, but the client
+(`web/src/api/chatStream.ts`) detects a failed or incomplete stream **per request, at runtime**,
+and falls back to the plain `POST /api/chat` for that turn — not `refetchInterval` polling, but
+the same effect: a turn that cannot stream still completes normally, just without the live
+progress line. This is a strictly better mitigation than the one planned here, because it does
+not require knowing in advance whether the ALB cooperates, and it degrades per-turn rather than
+for the whole session. The residual risk is unchanged in kind, only in size: this has been
+verified against the real dev stack (raw SSE curl, 15/15 Playwright E2E, zero fallbacks observed
+in five real turns) but never against the actual deployed container.
 
 ---
 
@@ -1301,11 +1312,11 @@ Design decisions considered during the 2026-08-07 review and explicitly deferred
 | Deferred | Why |
 |---|---|
 | Light theme | ~1 day for a second designed ramp; demo, video and judging all happen on one screen. Tokens are structured so it is purely additive after the hackathon. |
-| Reasoning lineage **graph** | A visualization project hiding in a bullet. First-to-cut per 07's build order; the text lineage list in §9 is the shipped form. |
+| Reasoning lineage **graph** | A visualization project hiding in a bullet. First-to-cut per 07's build order; the text lineage list (§9, **shipped in M8**) is the shipped form. |
 | Command palette (§6.16) | Specified but cut-eligible. Ranks below every item in the Phase-6 priority list; the keyboard shortcuts stand without it. |
 | Password reset flow | Requires email delivery, which is infrastructure this project does not have and the demo does not need. |
 | Multi-thread conversation UI | `thread_id` exists in the API and the UI uses one thread. A thread switcher is product surface the demo never touches. |
-| Photo-ingest UI | M7 is cut for the hackathon (see TODOS.md). The composer's camera affordance is not built in Phase 6. |
+| Photo-ingest UI | **Not** this document's M7 (the timeline strip, shipped) — Phase 5's separately-numbered M7 (photo ingestion, the backend feature) is cut for the hackathon (see `TODOS.md`). The composer's camera affordance is not built in Phase 6 regardless. |
 | Onboarding tour / checklist | Rejected in favor of the single guided first turn (§9.1). A multi-step tour fights the conversation-first grammar two wireframe drafts already established. |
 | Settings / profile screen | No setting in this product changes anything a judge would see. |
 
