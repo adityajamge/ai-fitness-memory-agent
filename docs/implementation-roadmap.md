@@ -325,6 +325,13 @@
 
 ## Phase 6 — Evidence Traces & Glass-Box UI *(~5–7 days)* — **ACTIVE**
 
+> **Status 2026-08-08: M5 complete — the glass box is interactive.** Citation chips resolve to
+> hydrated database rows, clicking one highlights and scrolls to its evidence row, the executed
+> SQL is shown with its bound parameters, and history stays inspectable via per-turn trace
+> fetching. Mobile gets the evidence drawer on the same gesture. **14/14 Playwright E2E green**
+> (Definition-of-Done paths 1 and 2) with axe assertions. **M6 (live engine pane, SSE) is next —
+> and SSE through the shared ALB is still unproven.**
+>
 > **Status 2026-08-08: M4 complete — the SPA is live end to end.** Landing, auth, app shell,
 > guided first turn, engine pane and the design-system primitives all ship, verified with **8/8
 > Playwright E2E** (real API + real CockroachDB, axe assertion included), zero WCAG 2.2 AA

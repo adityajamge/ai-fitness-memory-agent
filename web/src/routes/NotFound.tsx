@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/Button";
 export function NotFound() {
   return (
     <main className="flex min-h-dvh items-center px-6 md:px-[max(6vw,48px)]">
-      <div className="max-w-[420px]">
+      <div className="max-w-[52ch]">
         <Mark size={20} />
         <p className="mt-8 font-mono text-micro uppercase tracking-[0.08em] text-faint">404</p>
         <h1 className="mt-2 text-h2 text-foreground">There's nothing at this address.</h1>

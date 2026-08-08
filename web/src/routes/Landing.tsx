@@ -63,7 +63,7 @@ function Section({
   className?: string;
 }) {
   return (
-    <section className={cn("mx-auto w-full max-w-[1120px] px-6 py-16 md:py-24", className)}>
+    <section className={cn("mx-auto w-full max-w-marketing px-6 py-16 md:py-24", className)}>
       {children}
     </section>
   );
@@ -73,7 +73,7 @@ export function Landing() {
   return (
     <div className="min-h-dvh">
       <header className="sticky top-0 z-30 border-b border-transparent bg-background/80 backdrop-blur transition-colors duration-240">
-        <nav className="mx-auto flex h-14 w-full max-w-[1120px] items-center gap-3 px-6">
+        <nav className="mx-auto flex h-14 w-full max-w-marketing items-center gap-3 px-6">
           <Mark size={18} interactive />
           <span className="text-dense font-medium text-foreground">Fitness Memory Agent</span>
           <div className="ml-auto flex items-center gap-2">
@@ -326,7 +326,7 @@ GROUP BY 1 ORDER BY 1;`}</code>
       </div>
 
       <footer className="border-t border-border">
-        <div className="mx-auto flex w-full max-w-[1120px] flex-wrap items-center gap-3 px-6 py-8">
+        <div className="mx-auto flex w-full max-w-marketing flex-wrap items-center gap-3 px-6 py-8">
           <Mark size={14} />
           <span className="text-meta text-faint">
             CockroachDB × AWS Agentic Memory Hackathon

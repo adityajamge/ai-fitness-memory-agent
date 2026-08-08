@@ -12,7 +12,7 @@
 
 ## 0. Frontend Foundation Status
 
-**As of 2026-08-08. M4 complete. Active milestone: M5 (chat + chips + receipts).**
+**As of 2026-08-08. M5 complete. Active milestone: M6 (live engine pane, SSE).**
 
 | Step | Delivered |
 |---|---|
@@ -32,7 +32,13 @@ Verified at that commit: 766 Python tests passed · ruff clean · `tsc -b` clean
 the first real check. No visual mockups exist — the gstack designer needs an `OPENAI_API_KEY` that
 was not set.
 
-**M4 shipped** (commit below): all four P1 tasks (F-T1…F-T4), the landing page, auth, the app
+**M5 shipped:** citation chips, batch-hydrated evidence, the chip→row choreography, the executed
+query display, the mobile evidence drawer, and per-turn trace fetching so history stays
+inspectable. **14/14 Playwright E2E green** (paths 1 and 2) including axe. Two real defects found
+by measuring: a history-seed race that erased in-flight turns, and `--faint` failing AA on raised
+surfaces across 143 nodes.
+
+**M4 shipped:** all four P1 tasks (F-T1…F-T4), the landing page, auth, the app
 shell, the engine pane with form-encoded provenance/confidence, and the design-system primitives.
 Verified against a real API and a real CockroachDB: **8/8 Playwright E2E green including an axe
 assertion**, zero WCAG 2.2 AA violations across all four routes, initial bundle **106 KB gzip**
@@ -279,7 +285,7 @@ is a copy for reading, and the CSS file wins if they ever disagree.
   /* Foreground */
   --color-foreground:       oklch(0.965 0.003 250);  /* #F4F6F8  17.4:1 */
   --color-muted-foreground: oklch(0.720 0.012 250);  /* #A2A9B4   8.3:1 */
-  --color-faint:            oklch(0.590 0.014 250);  /* #7C8593   4.9:1 */
+  --color-faint:            oklch(0.640 0.014 250);  /* #868D95 */
 
   /* Signal — the only accent. Means: this is evidence you can open. */
   --color-signal:        oklch(0.800 0.155 78);   /* #FFB224  11.0:1 */
@@ -292,8 +298,20 @@ is a copy for reading, and the CSS file wins if they ever disagree.
 }
 ```
 
-**Contrast** is measured against `--color-background` and every pairing above meets WCAG AA.
-`--color-faint` at 4.9:1 is the floor; nothing lighter than it may carry text.
+**Contrast is measured against the worst surface a token can land on**, not against the page.
+That distinction is not pedantry: `--color-faint` was originally `oklch(0.590)` and measured a
+comfortable 4.82:1 on `--background` — while failing at **4.16:1 on `--surface-2`** and **3.72:1
+on `--surface-3`**, which is where most faint text actually sits. Axe caught it across 143 nodes
+during M5. Checking a foreground against one background is not checking it.
+
+| token | background | surface | surface-2 | surface-3 |
+|---|---|---|---|---|
+| `--foreground` | 17.4 | 16.4 | 15.0 | 13.4 |
+| `--muted-foreground` | 7.99 | 7.52 | 6.90 | 6.17 |
+| `--faint` | 5.89 | 5.55 | 5.09 | **4.55** |
+
+`--faint` is the floor; nothing lighter than it may carry text, and 4.55:1 on `--surface-3` is
+the number that constrains it.
 
 **The semantic budget is two colors.** `--signal` (evidence) and `--invalid` (retracted/invalid).
 That is the entire meaningful palette.
@@ -1283,7 +1301,7 @@ Numbered `F-T*` to stay clear of the T1–T18 backlog in
 - [x] **F-T4 (P1, ~2h / ~20min)** — auth — 401 inline notice, preserve the draft (§6.11.1)
   - *Why:* nothing specified session expiry; a redirect would discard a typed message, which is the
     one thing this product promises never to do.
-- [ ] **F-T5 (P2, ~30min / ~10min)** — glassbox — Render `citation_report.status === "uncited"` (§6.6)
+- [x] **F-T5 (P2, ~30min / ~10min)** — glassbox — Render `citation_report.status === "uncited"` (§6.6)
   - *Why:* the backend emits a three-way status; only two had UI.
 - [ ] **F-T6 (P2, ~2h / ~20min)** — responsive — Mobile keyboard: `dvh`, visual-viewport composer (§5.8)
   - *Why:* the keyboard covering the composer is the classic mobile-chat failure.

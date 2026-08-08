@@ -11,10 +11,11 @@
 
 import { useEffect, useRef } from "react";
 import { m, useReducedMotion } from "motion/react";
-import type { ChatTurn } from "@/types/turn";
+import type { MemoryRow } from "@/api/schemas";
+import { Answer } from "@/components/glassbox/Answer";
 import { Receipt } from "@/components/glassbox/Receipt";
 import { ErrorState } from "@/components/state/ErrorState";
-import { cn } from "@/lib/utils";
+import type { ChatTurn } from "@/types/turn";
 
 /** Staged progress while a turn runs — DESIGN.md §6.10. Driven by elapsed time only until the
  * graph emits real stage events (M6); the labels never claim more than "still working". */
@@ -33,10 +34,39 @@ function PendingTurn({ isReduced }: { isReduced: boolean }) {
   );
 }
 
-function TurnBlock({ turn }: { turn: ChatTurn }) {
+export interface ConversationProps {
+  turns: ChatTurn[];
+  rows: Map<string, MemoryRow>;
+  missing: Set<string>;
+  activeId: string | null;
+  onActivateCitation: (id: string, turnId: string) => void;
+  onRetry: (message: string, failedId: string) => void;
+}
+
+function TurnBlock({
+  turn,
+  rows,
+  missing,
+  activeId,
+  onActivateCitation,
+  onRetry,
+}: { turn: ChatTurn } & Omit<ConversationProps, "turns">) {
   const reduce = useReducedMotion();
 
   if (turn.kind === "pending") return <PendingTurn isReduced={Boolean(reduce)} />;
+
+  if (turn.kind === "failed") {
+    return (
+      <ErrorState
+        title="That message didn't go through"
+        detail={turn.detail}
+        // The guarantee, stated where it matters: nothing was thrown away.
+        preserved="Your message is still here — nothing was lost."
+        onRetry={() => onRetry(turn.message, turn.id)}
+        retryLabel="send again"
+      />
+    );
+  }
 
   if (turn.kind === "user") {
     return (
@@ -60,10 +90,14 @@ function TurnBlock({ turn }: { turn: ChatTurn }) {
       ))}
 
       {turn.content && (
-        // 72ch: the cap that makes this readable on a wide monitor.
-        <p className="max-w-[72ch] text-body whitespace-pre-wrap text-foreground">
-          {turn.content}
-        </p>
+        <Answer
+          text={turn.content}
+          rows={rows}
+          missing={missing}
+          report={turn.citationReport}
+          activeId={activeId}
+          onActivate={(id) => onActivateCitation(id, turn.id)}
+        />
       )}
 
       {/* Retrieval the engine refused. Surfaced rather than swallowed — the answer may be
@@ -89,7 +123,7 @@ function TurnBlock({ turn }: { turn: ChatTurn }) {
   );
 }
 
-export function Conversation({ turns }: { turns: ChatTurn[] }) {
+export function Conversation({ turns, ...rest }: ConversationProps) {
   const endRef = useRef<HTMLDivElement>(null);
 
   // Pin to the newest turn. `auto` rather than `smooth`: a long smooth scroll on every token
@@ -102,9 +136,9 @@ export function Conversation({ turns }: { turns: ChatTurn[] }) {
   return (
     <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8">
       {/* The column centers and caps; extra viewport width becomes margin, not measure. */}
-      <div className={cn("mx-auto flex w-full max-w-[860px] flex-col gap-6")}>
+      <div className="mx-auto flex w-full max-w-conversation flex-col gap-6">
         {turns.map((turn) => (
-          <TurnBlock key={turn.id} turn={turn} />
+          <TurnBlock key={turn.id} turn={turn} {...rest} />
         ))}
         <div ref={endRef} />
       </div>

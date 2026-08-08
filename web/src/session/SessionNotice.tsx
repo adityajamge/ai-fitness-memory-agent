@@ -70,7 +70,7 @@ export function SessionNotice() {
       <Dialog.Root open={isOpen} onOpenChange={setOpen}>
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 z-40 bg-black/60 backdrop-blur-[2px]" />
-          <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-surface-3 p-6 shadow-[var(--shadow-overlay)]">
+          <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-surface-3 p-6 shadow-[var(--shadow-overlay)] focus:outline-none">
             <Dialog.Title className="text-h3 text-foreground">Sign back in</Dialog.Title>
             <Dialog.Description className="mt-1 text-dense text-muted-foreground">
               Your conversation and anything you typed are still here.

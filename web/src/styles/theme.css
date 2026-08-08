@@ -94,11 +94,21 @@
   --color-border-strong: oklch(0.400 0.014 250);
 
   /* ── Foreground ──────────────────────────────────────────────────────────
-   * Contrast vs --color-background: 17.4:1 / 8.3:1 / 4.9:1. `faint` is the
-   * floor — nothing lighter than it may carry text. */
+   * Contrast is verified against the WORST surface the token can land on
+   * (--color-surface-3, used by overlays), not merely against the page:
+   *
+   *   token             bg     surface  surface-2  surface-3
+   *   foreground       17.4     16.4       15.0       13.4
+   *   muted-foreground  7.99     7.52       6.90       6.17
+   *   faint             5.89     5.55       5.09       4.55
+   *
+   * `faint` was oklch(0.590) and measured 4.82 on the page but **4.16 on
+   * surface-2 and 3.72 on surface-3** — a real AA failure that axe caught
+   * across 143 nodes. Checking a foreground against one background is not
+   * checking it. Nothing lighter than `faint` may carry text. */
   --color-foreground: oklch(0.965 0.003 250);
   --color-muted-foreground: oklch(0.720 0.012 250);
-  --color-faint: oklch(0.590 0.014 250);
+  --color-faint: oklch(0.640 0.014 250);
 
   /* ── Signal — the ONLY accent ────────────────────────────────────────────
    * Means exactly one thing: "this is evidence you can open."
@@ -112,6 +122,18 @@
   /* ── Invalid — retracted insights, unresolvable citations, destructive ── */
   --color-invalid: oklch(0.650 0.190 25);
   --color-invalid-dim: oklch(0.650 0.190 25 / 0.14);
+
+  /* ── Layout widths (§5.7) ────────────────────────────────────────────────
+   * Named because they are design decisions, not incidental numbers, and each
+   * appears in several files:
+   *   conversation — the reading column; text inside it caps at 72ch
+   *   pane         — the engine pane, FIXED and never flexing, because evidence
+   *                  rows have a natural width and stretching them on a wide
+   *                  monitor makes them harder to read
+   *   marketing    — the landing grid */
+  --container-conversation: 860px;
+  --container-pane: 420px;
+  --container-marketing: 1120px;
 
   /* ── Radius ──────────────────────────────────────────────────────────────
    * Deliberately small (category norm is 12–16px). Calipers, not
