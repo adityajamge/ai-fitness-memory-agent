@@ -13,7 +13,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate } from "react-router";
 import { useReducedMotion } from "motion/react";
 import { ApiError } from "@/api/client";
-import { isUnauthorized, useSendMessage, useStats, useTurns } from "@/api/queries";
+import { StreamUnavailableError, streamChat } from "@/api/chatStream";
+import { isUnauthorized, useInvalidateAfterTurn, useSendMessage, useStats, useTurns } from "@/api/queries";
+import type { ChatResponse } from "@/api/schemas";
 import { FirstAskHint, FirstRun } from "@/components/FirstRun";
 import { EvidenceDrawer } from "@/components/glassbox/EvidenceDrawer";
 import { EvidencePane } from "@/components/glassbox/EvidencePane";
@@ -38,8 +40,12 @@ export function AppScreen() {
   const stats = useStats();
   const history = useTurns();
   const send = useSendMessage();
+  const invalidateAfterTurn = useInvalidateAfterTurn();
   const sessionExpired = useSessionExpired();
   const reduce = useReducedMotion();
+  // Cancels a superseded turn's SSE connection — a retry or a fast second message must not let
+  // a stale stream keep writing into a `pending` slot that has since moved on.
+  const streamAbortRef = useRef<AbortController | null>(null);
 
   const [draft, setDraft] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -101,6 +107,14 @@ export function AppScreen() {
     setTurns((prev) => [...seededTurns, ...prev]);
   }, [history.data]);
 
+  // A superseded stream (component unmount, or the user fires a second turn before the first
+  // resolves) must not keep writing into state after the fact.
+  useEffect(() => () => streamAbortRef.current?.abort(), []);
+
+  // True regardless of which transport is carrying the turn — `send.isPending` alone would go
+  // dark during the SSE path, since that transport never touches the mutation.
+  const isSending = turns.some((t) => t.kind === "pending");
+
   /**
    * The signature interaction (§5.6). On mobile the same gesture opens the drawer, so the
    * claim→proof link survives the smallest screen — that coupling is deliberate, not incidental.
@@ -134,7 +148,15 @@ export function AppScreen() {
   };
 
   /** `replaceId` is set when retrying: the failed turn becomes the new pending one in place,
-   * so the conversation does not grow a duplicate every time a retry succeeds. */
+   * so the conversation does not grow a duplicate every time a retry succeeds.
+   *
+   * **Transport: SSE first, plain `POST /api/chat` as the automatic fallback (M6).** DESIGN.md
+   * §11 flags SSE through Express Mode's shared ALB as unproven, so this does not pick one
+   * transport statically — it tries the stream, and any failure to *establish or complete* it
+   * (`StreamUnavailableError`: wrong content-type, dropped connection, no terminal frame) falls
+   * through to the mutation that has carried every turn since M4. A frame the graph itself
+   * produced (an `error` event) is not that — it is a real turn failure and is reported as one,
+   * identically on both transports. */
   function sendTurn(message: string, replaceId?: string) {
     if (!message) return;
 
@@ -150,53 +172,78 @@ export function AppScreen() {
     setActiveCitation(null);
     setSelectedTurnId(null);
 
-    send.mutate(
-      threadId ? { message, threadId } : { message },
-      {
-        onSuccess: (response) => {
-          setThreadId(response.thread_id);
-          // Step 6 of §9.1: hand off to asking, but only after the first *created* memory.
-          if (response.receipts.some((r) => r.created.length > 0) && turns.length === 0) {
-            setShowAskHint(true);
+    const onSuccess = (response: ChatResponse) => {
+      setThreadId(response.thread_id);
+      // Step 6 of §9.1: hand off to asking, but only after the first *created* memory.
+      if (response.receipts.some((r) => r.created.length > 0) && turns.length === 0) {
+        setShowAskHint(true);
+      }
+      setTurns((prev) =>
+        prev.map((turn) =>
+          turn.id === pendingId
+            ? {
+                kind: "assistant",
+                id: pendingId,
+                content: response.answer,
+                receipts: response.receipts,
+                citations: response.citations,
+                citationReport: response.citation_report,
+                trace: response.trace,
+                turnId: response.turn_id,
+                errors: response.errors,
+              }
+            : turn,
+        ),
+      );
+    };
+
+    // The turn failed, and the user is told so in place — with the message kept and one action
+    // to resend it. Dropping it silently and refilling the composer looked like the message had
+    // bounced for no reason (§6.11).
+    const onFailure = (error: unknown) => {
+      const detail =
+        error instanceof ApiError && error.status >= 500
+          ? "The server couldn't complete it."
+          : error instanceof ApiError
+            ? error.message
+            : "Couldn't reach the server.";
+      setTurns((prev) =>
+        prev.map((t) =>
+          t.id === pendingId ? { kind: "failed" as const, id: pendingId, message, detail } : t,
+        ),
+      );
+    };
+
+    streamAbortRef.current?.abort();
+    const controller = new AbortController();
+    streamAbortRef.current = controller;
+
+    void (async () => {
+      try {
+        let payload: ChatResponse | null = null;
+        for await (const event of streamChat(message, threadId, controller.signal)) {
+          if (event.type === "stage") {
+            setTurns((prev) =>
+              prev.map((t) =>
+                t.id === pendingId && t.kind === "pending" ? { ...t, stage: event.label } : t,
+              ),
+            );
+          } else {
+            payload = event.payload;
           }
-          setTurns((prev) =>
-            prev.map((turn) =>
-              turn.id === pendingId
-                ? {
-                    kind: "assistant",
-                    id: pendingId,
-                    content: response.answer,
-                    receipts: response.receipts,
-                    citations: response.citations,
-                    citationReport: response.citation_report,
-                    trace: response.trace,
-                    turnId: response.turn_id,
-                    errors: response.errors,
-                  }
-                : turn,
-            ),
-          );
-        },
-        onError: (error) => {
-          // The turn failed, and the user is told so in place — with the message kept and one
-          // action to resend it. Dropping it silently and refilling the composer looked like the
-          // message had bounced for no reason (§6.11).
-          const detail =
-            error instanceof ApiError && error.status >= 500
-              ? "The server couldn't complete it."
-              : error instanceof ApiError
-                ? error.message
-                : "Couldn't reach the server.";
-          setTurns((prev) =>
-            prev.map((t) =>
-              t.id === pendingId
-                ? { kind: "failed" as const, id: pendingId, message, detail }
-                : t,
-            ),
-          );
-        },
-      },
-    );
+        }
+        if (!payload) throw new StreamUnavailableError("stream ended without a payload");
+        onSuccess(payload);
+        invalidateAfterTurn();
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return; // superseded
+        if (err instanceof StreamUnavailableError) {
+          send.mutate(threadId ? { message, threadId } : { message }, { onSuccess, onError: onFailure });
+          return;
+        }
+        onFailure(err);
+      }
+    })();
   }
 
   function handleSubmit() {
@@ -208,7 +255,7 @@ export function AppScreen() {
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
-      <TopBar isBusy={send.isPending} />
+      <TopBar isBusy={isSending} />
 
       <div className="flex min-h-0 flex-1">
         <main className="flex min-w-0 flex-1 flex-col">
@@ -256,7 +303,7 @@ export function AppScreen() {
                 onChange={setDraft}
                 onSubmit={handleSubmit}
                 isLocked={sessionExpired}
-                isSending={send.isPending}
+                isSending={isSending}
               />
             </div>
           </div>
@@ -265,7 +312,7 @@ export function AppScreen() {
         {/* Fixed 420px, never flexes: evidence rows have a natural width and stretching them on a
             wide monitor makes them harder to read, not easier (§5.7). */}
         <div className="hidden w-pane shrink-0 lg:block">
-          <EvidencePane {...paneProps} isBusy={send.isPending} />
+          <EvidencePane {...paneProps} isBusy={isSending} />
         </div>
       </div>
 

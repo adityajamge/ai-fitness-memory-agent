@@ -18,14 +18,16 @@ rides inline today (decision D-2) and becomes a ``trace_id`` fetch once T7 persi
 
 from __future__ import annotations
 
+import json
 import logging
 from uuid import UUID, uuid4
 
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 
-from agent.graph import TurnResult, run_turn
+from agent.graph import STAGE_LABELS, TurnResult, run_turn, run_turn_stream
 from api.deps import get_current_user
 from api.routers.ingest import receipt_json
 from engine.model import NarrationError, PlanningError
@@ -132,3 +134,66 @@ def chat(body: ChatBody, request: Request, user_id: UUID = Depends(get_current_u
         ) from exc
 
     return _turn_json(client_thread_id, result)
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+@router.post("/chat/stream")
+def chat_stream(
+    body: ChatBody, request: Request, user_id: UUID = Depends(get_current_user)
+) -> StreamingResponse:
+    """SSE twin of ``POST /api/chat`` — the live engine pane's transport (M6).
+
+    Same turn, same validation, same graph; the only difference is that stage progress is
+    narrated as it happens instead of arriving all at once in one response. The client falls
+    back to the plain endpoint above when this connection never reaches a ``done``/``error``
+    frame — DESIGN.md §11's "open risk": SSE through Express Mode's shared ALB is unproven —
+    so this handler owes the same two outcomes ``chat()`` does, just framed as SSE events
+    instead of HTTP status codes (headers are already sent by the time a graph error can
+    surface, so a status code is no longer available to report it with).
+    """
+    graph = getattr(request.app.state, "graph", None)
+    if graph is None:
+        raise HTTPException(status_code=503, detail="chat is temporarily unavailable")
+
+    settings = request.app.state.settings
+    client_thread_id = body.thread_id or uuid4().hex
+
+    def events():
+        try:
+            for item in run_turn_stream(
+                graph,
+                user_id=user_id,
+                question=body.message,
+                thread_id=thread_key(user_id, client_thread_id),
+                tz=settings.default_tz,
+            ):
+                if isinstance(item, TurnResult):
+                    yield _sse("done", _turn_json(client_thread_id, item))
+                else:
+                    yield _sse("stage", {"stage": item, "label": STAGE_LABELS[item]})
+        except (PlanningError, NarrationError) as exc:
+            logger.warning("chat stream failed for user %s: %s", user_id, exc)
+            yield _sse(
+                "error", {"detail": "the assistant is unavailable right now; please retry"}
+            )
+        except psycopg.OperationalError as exc:
+            logger.warning(
+                "chat stream failed for user %s: database connection lost: %s", user_id, exc
+            )
+            yield _sse("error", {"detail": "chat is temporarily unavailable"})
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            # The standard opt-out for proxies that buffer text responses by default. Not proof
+            # the ALB itself won't buffer — that risk is exactly what the client-side fallback
+            # to the plain endpoint exists to cover.
+            "X-Accel-Buffering": "no",
+        },
+    )

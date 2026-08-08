@@ -325,12 +325,20 @@
 
 ## Phase 6 — Evidence Traces & Glass-Box UI *(~5–7 days)* — **ACTIVE**
 
+> **Status 2026-08-08: M6 complete — the engine pane narrates itself live.** `POST
+> /api/chat/stream` streams real per-stage progress (`retrieving`, `assembling context`,
+> `generating`, …) as the LangGraph turn actually runs; the frontend falls back to the
+> already-tested plain endpoint automatically whenever the stream fails to establish or complete,
+> so the unproven-ALB risk DESIGN.md §11 flagged is handled at runtime rather than by a guess made
+> now. Verified against the real dev stack (raw SSE curl + **14/14 Playwright E2E green**, zero
+> fallbacks observed in the access log); the actual deployed ALB hop remains unverified pending
+> the AWS access that is still blocked. **M7 (timeline strip) is next.**
+>
 > **Status 2026-08-08: M5 complete — the glass box is interactive.** Citation chips resolve to
 > hydrated database rows, clicking one highlights and scrolls to its evidence row, the executed
 > SQL is shown with its bound parameters, and history stays inspectable via per-turn trace
 > fetching. Mobile gets the evidence drawer on the same gesture. **14/14 Playwright E2E green**
-> (Definition-of-Done paths 1 and 2) with axe assertions. **M6 (live engine pane, SSE) is next —
-> and SSE through the shared ALB is still unproven.**
+> (Definition-of-Done paths 1 and 2) with axe assertions.
 >
 > **Status 2026-08-08: M4 complete — the SPA is live end to end.** Landing, auth, app shell,
 > guided first turn, engine pane and the design-system primitives all ship, verified with **8/8

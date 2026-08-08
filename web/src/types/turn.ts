@@ -27,7 +27,15 @@ export type ChatTurn =
       turnId: string | null;
       errors: string[];
     }
-  | { kind: "pending"; id: string }
+  | {
+      kind: "pending";
+      id: string;
+      /** The latest stage label from a real `event: stage` frame (M6). Undefined until the
+       * first one arrives, or for the whole turn on the plain-transport fallback, which carries
+       * no stage information at all — §6.10 requires this be driven by real events, never a
+       * timer standing in for progress. */
+      stage?: string;
+    }
   /**
    * A turn the server could not complete.
    *

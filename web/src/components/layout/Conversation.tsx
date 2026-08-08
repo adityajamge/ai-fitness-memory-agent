@@ -17,9 +17,15 @@ import { Receipt } from "@/components/glassbox/Receipt";
 import { ErrorState } from "@/components/state/ErrorState";
 import type { ChatTurn } from "@/types/turn";
 
-/** Staged progress while a turn runs — DESIGN.md §6.10. Driven by elapsed time only until the
- * graph emits real stage events (M6); the labels never claim more than "still working". */
-function PendingTurn({ isReduced }: { isReduced: boolean }) {
+/**
+ * Staged progress while a turn runs — DESIGN.md §6.10, §9.1 step 3.
+ *
+ * `stage` arrives from a real `event: stage` SSE frame (M6) and nothing else — there is no
+ * elapsed-time fallback, because a timer standing in for progress is exactly what §6.10 rules
+ * out. Until the first frame lands (or on the plain-transport fallback, which carries none),
+ * only the pulse shows: an honest "something is happening" with no claim about what stage.
+ */
+function PendingTurn({ stage, isReduced }: { stage: string | undefined; isReduced: boolean }) {
   return (
     <m.div
       initial={isReduced ? false : { opacity: 0 }}
@@ -29,7 +35,7 @@ function PendingTurn({ isReduced }: { isReduced: boolean }) {
       aria-live="polite"
     >
       <span className="size-1.5 animate-pulse rounded-full bg-signal" />
-      <span className="font-mono">assembling context…</span>
+      {stage && <span className="font-mono">{stage}…</span>}
     </m.div>
   );
 }
@@ -53,7 +59,9 @@ function TurnBlock({
 }: { turn: ChatTurn } & Omit<ConversationProps, "turns">) {
   const reduce = useReducedMotion();
 
-  if (turn.kind === "pending") return <PendingTurn isReduced={Boolean(reduce)} />;
+  if (turn.kind === "pending") {
+    return <PendingTurn stage={turn.stage} isReduced={Boolean(reduce)} />;
+  }
 
   if (turn.kind === "failed") {
     return (

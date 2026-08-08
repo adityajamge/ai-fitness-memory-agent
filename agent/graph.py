@@ -427,32 +427,17 @@ def _now_of(state: GraphState) -> datetime:
     return datetime.fromisoformat(raw) if raw else datetime.now(timezone.utc)
 
 
-def run_turn(
-    graph,
-    *,
-    user_id: UUID,
-    question: str,
-    thread_id: str,
-    tz: str,
-    now: datetime | None = None,
-) -> TurnResult:
-    """Run one turn end to end: create the carrier, invoke the graph, collect everything.
+def _turn_input(user_id: UUID, question: str, tz: str, now: datetime | None) -> dict:
+    return {
+        "messages": [HumanMessage(content=question)],
+        "user_id": str(user_id),
+        "question": question,
+        "now": (now or datetime.now(timezone.utc)).isoformat(),
+        "tz": tz,
+    }
 
-    This is the seam the chat endpoint (M6) uses — it owns the carrier lifecycle so callers
-    never have to know that heavy objects travel out-of-band (M5-1).
-    """
-    carrier = TurnCarrier()
-    config = {"configurable": {"thread_id": thread_id, CARRIER_KEY: carrier}}
-    state = graph.invoke(
-        {
-            "messages": [HumanMessage(content=question)],
-            "user_id": str(user_id),
-            "question": question,
-            "now": (now or datetime.now(timezone.utc)).isoformat(),
-            "tz": tz,
-        },
-        config,
-    )
+
+def _turn_result(thread_id: str, state: GraphState, carrier: TurnCarrier) -> TurnResult:
     return TurnResult(
         thread_id=thread_id,
         answer=state.get("answer", ""),
@@ -465,3 +450,69 @@ def run_turn(
         citation_report=carrier.citations,
         turn_record=carrier.turn_record,
     )
+
+
+def run_turn(
+    graph,
+    *,
+    user_id: UUID,
+    question: str,
+    thread_id: str,
+    tz: str,
+    now: datetime | None = None,
+) -> TurnResult:
+    """Run one turn end to end: create the carrier, invoke the graph, collect everything.
+
+    This is the seam the chat endpoint uses — it owns the carrier lifecycle so callers never
+    have to know that heavy objects travel out-of-band (M5-1).
+    """
+    carrier = TurnCarrier()
+    config = {"configurable": {"thread_id": thread_id, CARRIER_KEY: carrier}}
+    state = graph.invoke(_turn_input(user_id, question, tz, now), config)
+    return _turn_result(thread_id, state, carrier)
+
+
+#: Stages worth narrating to a live pane, in the order §6.10/§9.1 describe them. `plan` is
+#: excluded: it is a single fast model call with nothing evidentiary to show yet, and
+#: `persist` completes after the answer is already in the user's hands.
+STAGE_LABELS: dict[str, str] = {
+    "ingest": "extracting",
+    "consolidate": "analyzing",
+    "retrieve": "retrieving",
+    "assemble": "assembling context",
+    "narrate": "generating",
+}
+
+
+def run_turn_stream(
+    graph,
+    *,
+    user_id: UUID,
+    question: str,
+    thread_id: str,
+    tz: str,
+    now: datetime | None = None,
+):
+    """The streaming twin of ``run_turn`` — the SSE endpoint's seam (M6).
+
+    Yields the name of each graph node as it completes (a subset of ``STAGE_LABELS``'s keys,
+    since ``stream_mode="updates"`` only reports nodes that actually ran), then the final
+    ``TurnResult`` exactly as ``run_turn`` would have returned it. The two functions must stay
+    behaviourally identical on the result — this one only adds progress narration — so the
+    fallback from streaming to plain `POST /api/chat` is invisible to everything downstream of
+    the transport.
+
+    ``graph.stream`` executes each node synchronously between yields, same as ``invoke``; this
+    does not make retrieval or narration concurrent, it only reports progress as it happens.
+    """
+    carrier = TurnCarrier()
+    config = {"configurable": {"thread_id": thread_id, CARRIER_KEY: carrier}}
+    stream = graph.stream(_turn_input(user_id, question, tz, now), config, stream_mode="updates")
+    for update in stream:
+        for node_name in update:
+            if node_name in STAGE_LABELS:
+                yield node_name
+    # The checkpointer holds the final state; `invoke` returns it directly, `stream` does not,
+    # so it is read back the same way any other checkpoint consumer would.
+    final_state = graph.get_state(config).values
+    yield _turn_result(thread_id, final_state, carrier)

@@ -7,7 +7,7 @@
  * each other.
  */
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   ApiError,
   getMemoriesBatch,
@@ -83,22 +83,34 @@ export function useMemories(ids: string[]) {
 }
 
 /**
- * Send a turn.
+ * Every derived surface, invalidated together, because one message can change all of them at
+ * once: an ingest turn creates memories (stats, timeline), records turns (history), and may
+ * trigger consolidation that writes an insight (stats again). Invalidating individually would
+ * let the top bar and the timeline disagree for a frame.
  *
- * On success every derived surface is invalidated together, because one message can change all
- * of them at once: an ingest turn creates memories (stats, timeline), records turns (history),
- * and may trigger consolidation that writes an insight (stats again). Invalidating individually
- * would let the top bar and the timeline disagree for a frame.
+ * Shared between `useSendMessage` (the plain transport) and the SSE transport
+ * (`AppScreen`'s `useInvalidateAfterTurn`) — the two must leave the cache in the same state, or
+ * falling back from one to the other mid-session would be observable as a UI inconsistency.
  */
+function invalidateTurnDerivedQueries(queryClient: QueryClient) {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.timeline });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.turns });
+}
+
+/** Send a turn over the plain, always-available transport (the SSE fallback target). */
 export function useSendMessage() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ message, threadId }: { message: string; threadId?: string }) =>
       sendMessage(message, threadId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.stats });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.timeline });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.turns });
-    },
+    onSuccess: () => invalidateTurnDerivedQueries(queryClient),
   });
+}
+
+/** The same cache invalidation `useSendMessage` does on success, for callers driving the turn
+ * through the SSE transport instead of a mutation. */
+export function useInvalidateAfterTurn() {
+  const queryClient = useQueryClient();
+  return () => invalidateTurnDerivedQueries(queryClient);
 }

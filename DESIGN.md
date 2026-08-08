@@ -12,7 +12,7 @@
 
 ## 0. Frontend Foundation Status
 
-**As of 2026-08-08. M5 complete. Active milestone: M6 (live engine pane, SSE).**
+**As of 2026-08-08. M6 complete. Active milestone: M7 (timeline strip).**
 
 | Step | Delivered |
 |---|---|
@@ -23,6 +23,8 @@
 | **F4** | [frontend-guidelines.md](docs/engineering/frontend-guidelines.md) — the engineering contract |
 | **F5** | `/plan-design-review`: 7/10 → 9/10, six decisions applied (§16), seven tasks queued (§15) |
 | **M4** | SPA foundation → chat shell: F-T1…F-T4, landing, auth, app shell, engine pane, primitives |
+| **M5** | Citation chips, batch hydration, the chip→row choreography, query display, mobile drawer |
+| **M6** | Live engine pane: SSE stage narration with an automatic plain-transport fallback |
 
 **Foundation commit: `fa2dcd5`** — `feat(web): frontend foundation — design system, scaffold, and serving`.
 Verified at that commit: 766 Python tests passed · ruff clean · `tsc -b` clean · production build
@@ -31,6 +33,24 @@ Verified at that commit: 766 Python tests passed · ruff clean · `tsc -b` clean
 **Not verified there:** the Docker image never built locally (no daemon on the dev machine); CI is
 the first real check. No visual mockups exist — the gstack designer needs an `OPENAI_API_KEY` that
 was not set.
+
+**M6 shipped:** `POST /api/chat/stream` — the SSE twin of `/api/chat`, narrating `retrieving` /
+`assembling context` / `generating` (or `extracting` for an ingest turn) as the graph's nodes
+actually complete (`agent/graph.py`'s `run_turn_stream`, driven by `graph.stream(stream_mode=
+"updates")`, never a timer). The frontend (`web/src/api/chatStream.ts`) hand-rolls SSE-over-`fetch`
+(`EventSource` cannot send a POST body) and **resolves §11's open risk at runtime instead of by
+static choice**: any connection that fails to establish as an event stream, or closes without a
+`done`/`error` frame, throws `StreamUnavailableError` and `AppScreen` falls back to the
+already-tested plain mutation for that turn — invisibly, mid-conversation, with no user-visible
+difference beyond the progress line not appearing. A frame the *graph itself* produced (an
+`error` event, e.g. a Bedrock failure) is not that signal and is reported as a real turn failure
+on both transports identically. Verified: a raw SSE curl against the real dev stack showed all
+three/two-stage sequences correctly; **14/14 Playwright E2E green**, and the dev API's access log
+confirms all five chat turns in that run went through `/api/chat/stream` with zero fallbacks.
+**Not verified: the ALB hop in the actual deployed container** — AWS access is still blocked (see
+`TODOS.md`), so the runtime fallback is what makes that gap safe to ship past rather than a
+blocker, per the milestone brief's own guidance ("if it does not [work], choose the smallest,
+clean fallback... without redesigning").
 
 **M5 shipped:** citation chips, batch-hydrated evidence, the chip→row choreography, the executed
 query display, the mobile evidence drawer, and per-turn trace fetching so history stays
@@ -44,13 +64,8 @@ Verified against a real API and a real CockroachDB: **8/8 Playwright E2E green i
 assertion**, zero WCAG 2.2 AA violations across all four routes, initial bundle **106 KB gzip**
 (budget 150).
 
-**Still unresolved, carried into M5–M6:** SSE through Express Mode's shared ALB. The live engine
-pane (M6) depends on it. Spike it before building that pane — the fallback is Query's
-`refetchInterval`, a three-line change if we learn early and a rewrite if we learn at M7.
-
-**Deferred from M4 by design:** the mobile evidence drawer (§5.8) lands with the full evidence
-pane in M6; below `lg` the engine pane is hidden rather than half-built. Citation chips, the
-retrieval-query display, and the timeline are M5–M7 per the milestone table.
+**Deferred from M4 by design, now resolved:** the mobile evidence drawer (§5.8) landed with the
+full evidence pane in M5, ahead of the M6 slot originally planned for it.
 
 ---
 
