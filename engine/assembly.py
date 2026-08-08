@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
+from engine.insights import render_retraction_condition
 from engine.retrieval import (
     AggregateResult,
     CountResult,
@@ -221,6 +222,12 @@ def assemble(
                 id=i.id,
                 hypothesis=i.hypothesis,
                 evidence_ids=i.evidence_ids,
+                pattern_strength=i.pattern_strength,
+                retraction=(
+                    render_retraction_condition(i.retraction_condition)
+                    if i.retraction_condition
+                    else None
+                ),
             )
             for i in insights
         ),

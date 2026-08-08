@@ -243,6 +243,47 @@ def test_assemble_populates_trace_insights_with_lineage(db, user_id):
     assert ref.to_json()["evidence_ids"]  # renders for the glass box
 
 
+def test_assemble_threads_pattern_strength_and_no_retraction_when_none_was_written(db, user_id):
+    """Phase 6 M8: the text lineage list (DESIGN.md §9 "click an insight") needs both the
+    strength score and the retraction sentence. No condition was written here, so the rendered
+    field must be honestly absent rather than a placeholder."""
+    _seed_insight(db, user_id)
+    result, step = _lookup(db, user_id)
+
+    _, trace = assemble("what have you noticed?", [RetrievalOutcome(result, step)])
+
+    ref = trace.insights[0]
+    assert ref.pattern_strength == pytest.approx(0.844)
+    assert ref.retraction is None
+    assert ref.to_json()["pattern_strength"] == pytest.approx(0.844)
+    assert ref.to_json()["retraction"] is None
+
+
+def test_assemble_renders_the_retraction_condition_as_prose(db, user_id):
+    """The trace carries a sentence, never the structured condition (rule 16) — and it is the
+    same sentence ``render_retraction_condition`` produces directly, so display and evaluation
+    can never quietly disagree (ADR-13.11)."""
+    from engine.insights import render_retraction_condition
+    from engine.types import RetractionCondition
+
+    condition = {
+        "metric": "protein_g",
+        "direction": "falling",
+        "window_days": 7,
+        "min_count": 2,
+        "threshold": 45.0,
+    }
+    _seed_insight(db, user_id, retraction_condition=condition)
+    result, step = _lookup(db, user_id)
+
+    _, trace = assemble("what have you noticed?", [RetrievalOutcome(result, step)])
+
+    ref = trace.insights[0]
+    expected = render_retraction_condition(RetractionCondition.model_validate(condition))
+    assert ref.retraction == expected
+    assert "protein" in ref.retraction.lower()
+
+
 def test_insight_ids_are_citable(db, user_id):
     """§4.10: the narrator may cite the claim it was shown."""
     insight_id = _seed_insight(db, user_id)

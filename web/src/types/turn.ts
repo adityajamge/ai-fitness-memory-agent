@@ -10,7 +10,15 @@
 import type { CitationReport, EvidenceTrace, Receipt } from "@/api/schemas";
 
 export type ChatTurn =
-  | { kind: "user"; id: string; content: string }
+  | {
+      kind: "user";
+      id: string;
+      content: string;
+      /** ISO timestamp — persisted `created_at` for history, wall-clock at send time for a live
+       * turn. Navigation sugar only (timeline "click a day to scrub", §9): never rendered as
+       * evidence, so the live-turn approximation does not touch the data-source rule (ADR-12). */
+      createdAt?: string;
+    }
   | {
       kind: "assistant";
       id: string;
@@ -26,6 +34,7 @@ export type ChatTurn =
        * for this turn" — the answer stands; it is not an error state. */
       turnId: string | null;
       errors: string[];
+      createdAt?: string;
     }
   | {
       kind: "pending";

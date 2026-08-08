@@ -15,13 +15,71 @@
  * prevent.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
-import type { EvidenceTrace, MemoryRow } from "@/api/schemas";
+import type { EvidenceTrace, InsightRef, MemoryRow } from "@/api/schemas";
 import { EmptyState } from "@/components/state/EmptyState";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { EvidenceRow } from "./EvidenceRow";
+import { ConfidenceMeter, EvidenceRow } from "./EvidenceRow";
 import { RetrievalQueries } from "./RetrievalQueries";
+
+/**
+ * One consulted insight, expandable to its lineage — DESIGN.md §9 "click an insight": "shows
+ * lineage: the hypothesis, its supporting memory IDs, its confidence, and its retraction
+ * condition." `pattern_strength` reuses `ConfidenceMeter` (same 0–1 scale, same segment meter)
+ * rather than inventing a second visual language for what is the same kind of number.
+ *
+ * The evidence IDs are deliberately rendered as plain mono text, never as citation chips: Q1
+ * (insight lineage is rendered, never cited) means these ids are not in `citable_ids`, and a
+ * chip here would silently imply they were clickable proof when they are not.
+ */
+function InsightCard({ insight }: { insight: InsightRef }) {
+  const [isOpen, setOpen] = useState(false);
+  return (
+    <li className="rounded-md border border-border bg-surface-2 p-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={isOpen}
+        className="w-full text-left"
+      >
+        <p className="text-dense text-foreground">{insight.hypothesis}</p>
+        <p className="mt-1.5 font-mono text-micro text-faint">
+          {insight.evidence_ids.length} supporting{" "}
+          {insight.evidence_ids.length === 1 ? "memory" : "memories"} · lineage shown, not cited
+        </p>
+      </button>
+
+      {isOpen && (
+        <div className="mt-2.5 flex flex-col gap-2 border-t border-border pt-2.5">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-micro uppercase tracking-[0.08em] text-faint">
+              pattern strength
+            </span>
+            <ConfidenceMeter value={insight.pattern_strength} />
+          </div>
+
+          {insight.retraction && (
+            <p className="text-meta text-muted-foreground">
+              <span className="font-mono text-micro uppercase tracking-[0.08em] text-faint">
+                withdrawn if:{" "}
+              </span>
+              {insight.retraction}
+            </p>
+          )}
+
+          <ul className="flex flex-col gap-1">
+            {insight.evidence_ids.map((id) => (
+              <li key={id} className="font-mono text-micro text-faint">
+                {id.slice(0, 8)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </li>
+  );
+}
 
 export interface EvidencePaneProps {
   trace: EvidenceTrace | null;
@@ -135,7 +193,7 @@ export function EvidencePaneBody({
 
       {/* Insight lineage is RENDERED, never cited (Q1, resolved narrow): the narrator saw the
           hypothesis, not the rows beneath it, so these IDs are deliberately absent from the
-          citable set and never become chips. */}
+          citable set and never become chips. Click a card to expand it (§9). */}
       {trace.insights.length > 0 && (
         <div className="mt-3 border-t border-border pt-3">
           <p className="font-mono text-micro uppercase tracking-[0.08em] text-faint">
@@ -143,14 +201,7 @@ export function EvidencePaneBody({
           </p>
           <ul className="mt-2 flex flex-col gap-2">
             {trace.insights.map((insight) => (
-              <li key={insight.id} className="rounded-md border border-border bg-surface-2 p-3">
-                <p className="text-dense text-foreground">{insight.hypothesis}</p>
-                <p className="mt-1.5 font-mono text-micro text-faint">
-                  {insight.evidence_ids.length} supporting{" "}
-                  {insight.evidence_ids.length === 1 ? "memory" : "memories"} · lineage shown,
-                  not cited
-                </p>
-              </li>
+              <InsightCard key={insight.id} insight={insight} />
             ))}
           </ul>
         </div>

@@ -9,12 +9,13 @@
  * ever be judged on belongs to a reviewer.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { m, useReducedMotion } from "motion/react";
 import type { MemoryRow } from "@/api/schemas";
 import { Answer } from "@/components/glassbox/Answer";
 import { Receipt } from "@/components/glassbox/Receipt";
 import { ErrorState } from "@/components/state/ErrorState";
+import { cn } from "@/lib/utils";
 import type { ChatTurn } from "@/types/turn";
 
 /**
@@ -47,6 +48,11 @@ export interface ConversationProps {
   activeId: string | null;
   onActivateCitation: (id: string, turnId: string) => void;
   onRetry: (message: string, failedId: string) => void;
+  /** A day picked on the timeline strip (§9 "click a timeline day"), or null between scrubs. */
+  scrubDay?: string | null;
+  /** Called once the scrub has been acted on, so `AppScreen` can clear it and the same day can
+   * be clicked again later. */
+  onScrubHandled?: () => void;
 }
 
 function TurnBlock({
@@ -56,7 +62,9 @@ function TurnBlock({
   activeId,
   onActivateCitation,
   onRetry,
-}: { turn: ChatTurn } & Omit<ConversationProps, "turns">) {
+}: {
+  turn: ChatTurn;
+} & Omit<ConversationProps, "turns" | "scrubDay" | "onScrubHandled">) {
   const reduce = useReducedMotion();
 
   if (turn.kind === "pending") {
@@ -131,8 +139,11 @@ function TurnBlock({
   );
 }
 
-export function Conversation({ turns, ...rest }: ConversationProps) {
+export function Conversation({ turns, scrubDay, onScrubHandled, ...rest }: ConversationProps) {
   const endRef = useRef<HTMLDivElement>(null);
+  const turnRefs = useRef(new Map<string, HTMLDivElement>());
+  const [scrubbedId, setScrubbedId] = useState<string | null>(null);
+  const reduce = useReducedMotion();
 
   // Pin to the newest turn. `auto` rather than `smooth`: a long smooth scroll on every token
   // fights the user if they scrolled up to read, and theme.css disables smooth under reduced
@@ -141,12 +152,64 @@ export function Conversation({ turns, ...rest }: ConversationProps) {
     endRef.current?.scrollIntoView({ block: "end" });
   }, [turns.length]);
 
+  // §5.8 mobile keyboard: "opening the keyboard pins the conversation to its last turn rather
+  // than preserving scroll offset" — a shrinking `visualViewport` is the opening keyboard.
+  // Feature-detected: browsers without `visualViewport` (or `dvh` support) fall back to
+  // whatever their normal reflow does, which is the pre-existing behavior, not a regression.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    let lastHeight = vv.height;
+    const onResize = () => {
+      if (vv.height < lastHeight) endRef.current?.scrollIntoView({ block: "end" });
+      lastHeight = vv.height;
+    };
+    vv.addEventListener("resize", onResize);
+    return () => vv.removeEventListener("resize", onResize);
+  }, []);
+
+  // §9 "click a timeline day scrubs the conversation to that date": find the nearest turn whose
+  // `createdAt` falls on that UTC day, scroll to it, and hold a brief highlight. Rule 7 confines
+  // `--signal` to a fixed list that this interaction is not on, so the highlight is a surface
+  // change (`--surface-3`, already the established non-signal emphasis — see EvidenceRow's
+  // hover), not a signal border.
+  useEffect(() => {
+    if (!scrubDay) return;
+    const match = turns.find(
+      (t) => (t.kind === "user" || t.kind === "assistant") && t.createdAt?.slice(0, 10) === scrubDay,
+    );
+    if (match) {
+      turnRefs.current.get(match.id)?.scrollIntoView({
+        behavior: reduce ? "auto" : "smooth",
+        block: "center",
+      });
+      setScrubbedId(match.id);
+      const timer = setTimeout(() => setScrubbedId(null), 1400);
+      onScrubHandled?.();
+      return () => clearTimeout(timer);
+    }
+    onScrubHandled?.();
+    return undefined;
+  }, [scrubDay, turns, reduce, onScrubHandled]);
+
   return (
     <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8">
       {/* The column centers and caps; extra viewport width becomes margin, not measure. */}
       <div className="mx-auto flex w-full max-w-conversation flex-col gap-6">
         {turns.map((turn) => (
-          <TurnBlock key={turn.id} turn={turn} {...rest} />
+          <div
+            key={turn.id}
+            ref={(el) => {
+              if (el) turnRefs.current.set(turn.id, el);
+              else turnRefs.current.delete(turn.id);
+            }}
+            className={cn(
+              "rounded-md transition-colors duration-medium",
+              scrubbedId === turn.id && "bg-surface-2",
+            )}
+          >
+            <TurnBlock turn={turn} {...rest} />
+          </div>
         ))}
         <div ref={endRef} />
       </div>

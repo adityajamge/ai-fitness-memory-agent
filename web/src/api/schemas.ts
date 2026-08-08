@@ -77,11 +77,18 @@ export const EvidenceSnapshot = z.object({
  * `evidence_ids` is its lineage and is **rendered, never cited** (Q1, resolved narrow): the
  * narrator saw the hypothesis, not the rows beneath it, so these IDs are deliberately absent
  * from `citable_ids`. Do not treat them as citable in the UI.
+ *
+ * `pattern_strength` and `retraction` are additive (M8) — `.default()`, not required, because
+ * the trace is served verbatim (I-29) and a row persisted before M8 simply lacks these keys.
+ * `retraction` is already-rendered prose (`engine.insights.render_retraction_condition`), never
+ * a structured condition: rule 16 forbids deriving display copy from data client-side.
  */
 export const InsightRef = z.object({
   id: Uuid,
   hypothesis: z.string(),
   evidence_ids: z.array(Uuid),
+  pattern_strength: z.number().default(0),
+  retraction: z.string().nullable().default(null),
 });
 
 /** Why a candidate was selected — the four committed scoring axes plus the composite. */

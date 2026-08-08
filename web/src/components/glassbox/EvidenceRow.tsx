@@ -24,7 +24,9 @@ import { cn } from "@/lib/utils";
 
 const SEGMENTS = 4;
 
-function ConfidenceMeter({ value }: { value: number }) {
+/** Exported for reuse — insight lineage cards (EvidencePane) show the same meter for
+ * `pattern_strength` (§9 "click an insight"), which is a 0–1 score exactly like confidence. */
+export function ConfidenceMeter({ value }: { value: number }) {
   const filled = Math.max(1, Math.round(value * SEGMENTS));
   return (
     <span

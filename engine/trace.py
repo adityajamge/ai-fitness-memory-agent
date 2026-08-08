@@ -83,17 +83,29 @@ class EvidenceSnapshot:
 class InsightRef:
     """A derived insight that participated in an answer, with its lineage (evidence_ids).
     Populated from Phase 5 (T5/T6) onward; an empty ``insights`` tuple is honest, not an
-    error."""
+    error.
+
+    ``pattern_strength`` and ``retraction`` are additive (Phase 6 M8): the text lineage list
+    (DESIGN.md §9 "click an insight") needs them to show *why* the engine believes this and
+    *what would make it stop*. ``retraction`` is prose already rendered by
+    ``engine.insights.render_retraction_condition`` — never a raw condition object — because
+    the UI must never re-derive display copy from structured data (rule 16); assembly does that
+    rendering once, deterministically, and the trace carries the sentence verbatim.
+    """
 
     id: UUID
     hypothesis: str
     evidence_ids: tuple[UUID, ...]
+    pattern_strength: float = 0.0
+    retraction: str | None = None
 
     def to_json(self) -> dict:
         return {
             "id": str(self.id),
             "hypothesis": self.hypothesis,
             "evidence_ids": [str(e) for e in self.evidence_ids],
+            "pattern_strength": self.pattern_strength,
+            "retraction": self.retraction,
         }
 
 

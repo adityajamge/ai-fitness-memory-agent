@@ -25,6 +25,7 @@ import { Composer } from "@/components/layout/Composer";
 import { Conversation } from "@/components/layout/Conversation";
 import { TopBar } from "@/components/layout/TopBar";
 import { ErrorState } from "@/components/state/ErrorState";
+import { Timeline } from "@/components/timeline/Timeline";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { SessionNotice } from "@/session/SessionNotice";
 import { useSessionExpired } from "@/session/sessionStore";
@@ -57,6 +58,10 @@ export function AppScreen() {
   const [isDesktop, setDesktop] = useState(
     () => typeof window !== "undefined" && window.matchMedia(DESKTOP_QUERY).matches,
   );
+  // Set by a timeline click, consumed once by Conversation's scroll-and-highlight effect (§9
+  // "click a timeline day"), then cleared here so clicking the same day twice still re-triggers.
+  const [scrubDay, setScrubDay] = useState<string | null>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
   const seeded = useRef(false);
 
   // The pane follows the selected turn; when nothing is selected it follows the newest answer,
@@ -90,7 +95,7 @@ export function AppScreen() {
     seeded.current = true;
     const seededTurns: ChatTurn[] = history.data.turns.map((t) =>
         t.role === "user"
-          ? { kind: "user" as const, id: t.id, content: t.content ?? "" }
+          ? { kind: "user" as const, id: t.id, content: t.content ?? "", createdAt: t.created_at }
           : {
               kind: "assistant" as const,
               id: t.id,
@@ -102,6 +107,7 @@ export function AppScreen() {
               trace: null,
               turnId: t.has_trace ? t.id : null,
               errors: [],
+              createdAt: t.created_at,
             },
     );
     setTurns((prev) => [...seededTurns, ...prev]);
@@ -114,6 +120,28 @@ export function AppScreen() {
   // True regardless of which transport is carrying the turn — `send.isPending` alone would go
   // dark during the SSE path, since that transport never touches the mutation.
   const isSending = turns.some((t) => t.kind === "pending");
+
+  // The keyboard shortcuts §9 lists that are still worth having without the command palette
+  // they were specified alongside (§13: cut-eligible, ranked below everything else in the
+  // Phase-6 priority list). `/` (focus composer) and `⌘Enter` (send) already live in Composer;
+  // this covers the two that are page-level. `Esc` blurring the active element is the browser's
+  // native behavior for most controls, so there is nothing to add for it here.
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const typing =
+        target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable;
+      if (typing) return;
+      if (event.key === "e" || event.key === "E") {
+        if (!isDesktop) setDrawerOpen((v) => !v);
+      } else if (event.key === "t" || event.key === "T") {
+        timelineRef.current?.focus();
+        timelineRef.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isDesktop, reduce]);
 
   /**
    * The signature interaction (§5.6). On mobile the same gesture opens the drawer, so the
@@ -161,10 +189,15 @@ export function AppScreen() {
     if (!message) return;
 
     const pendingId = nextId();
+    const sentAt = new Date().toISOString();
     setTurns((prev) =>
       replaceId
         ? prev.map((t) => (t.id === replaceId ? { kind: "pending", id: pendingId } : t))
-        : [...prev, { kind: "user", id: nextId(), content: message }, { kind: "pending", id: pendingId }],
+        : [
+            ...prev,
+            { kind: "user", id: nextId(), content: message, createdAt: sentAt },
+            { kind: "pending", id: pendingId },
+          ],
     );
     setShowAskHint(false);
     // A new turn's evidence replaces the old: leaving the previous selection active would point
@@ -191,6 +224,7 @@ export function AppScreen() {
                 trace: response.trace,
                 turnId: response.turn_id,
                 errors: response.errors,
+                createdAt: new Date().toISOString(),
               }
             : turn,
         ),
@@ -253,9 +287,21 @@ export function AppScreen() {
     sendTurn(message);
   }
 
+  /** §9 "click a timeline day scrubs the conversation to that date" — `scrubDay` is a one-shot
+   * signal Conversation consumes, then it is cleared so the same day can be clicked again. */
+  function handleScrub(day: string) {
+    setScrubDay(day);
+  }
+
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
       <TopBar isBusy={isSending} />
+
+      {/* One of the four designed empty states (§6.9) — rendered unconditionally, so a brand-new
+          account shows "your memory starts here" here too rather than nothing. */}
+      <div ref={timelineRef} tabIndex={-1} className="outline-none">
+        <Timeline onScrub={handleScrub} />
+      </div>
 
       <div className="flex min-h-0 flex-1">
         <main className="flex min-w-0 flex-1 flex-col">
@@ -287,6 +333,8 @@ export function AppScreen() {
               activeId={activeCitation}
               onActivateCitation={activateCitation}
               onRetry={sendTurn}
+              scrubDay={scrubDay}
+              onScrubHandled={() => setScrubDay(null)}
             />
           )}
 

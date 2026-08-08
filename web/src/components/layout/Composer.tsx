@@ -72,6 +72,12 @@ export function Composer({
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       if (!isLocked && value.trim()) onSubmit();
+      return;
+    }
+    // §9 shortcuts: Esc blurs the composer. Overlays (Dialog/Drawer) close on Esc already, as
+    // Base UI's own behavior — this is only the "blur composer" half.
+    if (event.key === "Escape") {
+      ref.current?.blur();
     }
   }
 

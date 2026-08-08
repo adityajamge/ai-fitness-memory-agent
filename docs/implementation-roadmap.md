@@ -325,6 +325,29 @@
 
 ## Phase 6 — Evidence Traces & Glass-Box UI *(~5–7 days)* — **ACTIVE**
 
+> **Status 2026-08-08: M7 + M8 complete — the 07 build order is fully shipped.** The timeline
+> strip renders memory density with changepoint markers, buckets by week and scrolls below 768px
+> (a previously-open F-T7 gap, now closed and verified at a 390×844 viewport), and click-to-scrub
+> jumps the conversation to the matching turn. Insight lineage cards expand to their pattern
+> strength and a rendered retraction sentence — the text list DESIGN.md §13 designated as the
+> reasoning-lineage graph's shipped form; the graph itself stays cut. `E`/`T` keyboard shortcuts
+> and Esc-blurs-composer landed alongside, plus F-T6's verifiable subset (dvh was already in
+> place; added a feature-detected visualViewport listener that re-pins scroll to the last turn
+> when the keyboard opens). **772 Python tests green, 15/15 Playwright E2E green** including the
+> new mobile-viewport run, zero axe violations, `tsc`/`ruff` clean, bundle unchanged at 106.56 KB
+> gzip. **Every item in 07's build order is now shipped or deliberately cut — Phase 6's UI
+> surface is functionally complete.** One honest gap against this phase's own Definition of
+> Done: it names **4** required Playwright E2E paths (signup→log→receipt→pane; money
+> question→chips→trace; slow-Bedrock UX; cross-user denial) and only the first two exist as
+> dedicated specs. The properties are not unverified — cross-user denial (I-28) is asserted
+> per-route in `api/tests/test_glassbox.py`, and the slow-turn staged-progress line (M6) is
+> exercised indirectly by every E2E turn, which all take several real seconds — but neither has
+> a Playwright spec written for that scenario specifically. Left for Phase 7 rather than built
+> now, to keep this session's scope at M6–M8. What remains beyond that is hardening: the F-T6
+> residual (a literal `position: fixed` visual-viewport composer, deferred pending real-device
+> access), the M6 latency profile (Phase 5, postponed pending AWS), and Phase 7's
+> evals/evidence/submission work.
+>
 > **Status 2026-08-08: M6 complete — the engine pane narrates itself live.** `POST
 > /api/chat/stream` streams real per-stage progress (`retrieving`, `assembling context`,
 > `generating`, …) as the LangGraph turn actually runs; the frontend falls back to the
@@ -332,7 +355,7 @@
 > so the unproven-ALB risk DESIGN.md §11 flagged is handled at runtime rather than by a guess made
 > now. Verified against the real dev stack (raw SSE curl + **14/14 Playwright E2E green**, zero
 > fallbacks observed in the access log); the actual deployed ALB hop remains unverified pending
-> the AWS access that is still blocked. **M7 (timeline strip) is next.**
+> the AWS access that is still blocked.
 >
 > **Status 2026-08-08: M5 complete — the glass box is interactive.** Citation chips resolve to
 > hydrated database rows, clicking one highlights and scrolls to its evidence row, the executed

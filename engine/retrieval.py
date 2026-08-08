@@ -36,12 +36,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import psycopg
 from psycopg.types.json import Jsonb
+from pydantic import ValidationError
 
 from engine.insights import CONSOLIDATION_SERIES
 from engine.memory import vector_literal
 from engine.model import ModelProvider
 from engine.trace import EvidenceSnapshot, RetrievalStep
-from engine.types import INSIGHT_KINDS, MEMORY_TYPE_REGISTRY
+from engine.types import INSIGHT_KINDS, MEMORY_TYPE_REGISTRY, RetractionCondition
 
 
 class RetrievalSpecError(ValueError):
@@ -700,6 +701,13 @@ class InsightRow:
     confidence: float
     provenance: str
     status: str
+    #: What would make the engine withdraw this claim, typed — or ``None`` if the insight was
+    #: written without one, or the stored condition no longer parses (tolerant of a payload an
+    #: older Phase 5 milestone wrote, same posture as every other field here). Rendered to prose
+    #: by ``engine.insights.render_retraction_condition`` at assembly time (Phase 6 M8): storing
+    #: the sentence instead would let the displayed rule drift from the rule the retraction
+    #: evaluator (``engine/consolidation.py``) actually runs.
+    retraction_condition: RetractionCondition | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -779,7 +787,17 @@ def _insight_row(row: dict) -> InsightRow:
         confidence=row["confidence"],
         provenance=row["provenance"],
         status=row["status"],
+        retraction_condition=_retraction_condition(payload.get("retraction_condition")),
     )
+
+
+def _retraction_condition(raw: object) -> RetractionCondition | None:
+    if not raw:
+        return None
+    try:
+        return RetractionCondition.model_validate(raw)
+    except ValidationError:  # pragma: no cover — display code stays tolerant of a bad payload
+        return None
 
 
 def _parse_moment(value: object) -> datetime | None:

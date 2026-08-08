@@ -12,7 +12,8 @@
 
 ## 0. Frontend Foundation Status
 
-**As of 2026-08-08. M6 complete. Active milestone: M7 (timeline strip).**
+**As of 2026-08-08. M4–M8 build order complete (07's eight items, all shipped or deliberately cut
+per §13). Remaining work is hardening, not new UI surface — see the end of this section.**
 
 | Step | Delivered |
 |---|---|
@@ -25,6 +26,8 @@
 | **M4** | SPA foundation → chat shell: F-T1…F-T4, landing, auth, app shell, engine pane, primitives |
 | **M5** | Citation chips, batch hydration, the chip→row choreography, query display, mobile drawer |
 | **M6** | Live engine pane: SSE stage narration with an automatic plain-transport fallback |
+| **M7** | Timeline strip: density bars, changepoint caps, mobile weekly bucketing, click-to-scrub |
+| **M8** | Insight lineage: the text list (§13's designated shipped form; the graph stays cut) |
 
 **Foundation commit: `fa2dcd5`** — `feat(web): frontend foundation — design system, scaffold, and serving`.
 Verified at that commit: 766 Python tests passed · ruff clean · `tsc -b` clean · production build
@@ -51,6 +54,33 @@ confirms all five chat turns in that run went through `/api/chat/stream` with ze
 `TODOS.md`), so the runtime fallback is what makes that gap safe to ship past rather than a
 blocker, per the milestone brief's own guidance ("if it does not [work], choose the smallest,
 clean fallback... without redesigning").
+
+**M7 + M8 shipped together** (both frontend-only; the backend groundwork — `GET /api/timeline`,
+retrieval-insight fields — already existed): the timeline strip (`web/src/components/timeline/
+Timeline.tsx`) — hand-rolled SVG density bars, a 2px `--signal` cap on changepoint days (the one
+other permitted use of the signal token, rule 7), a mono hover tooltip, click-to-scrub that
+scrolls the matching turn into view with a `--surface-2` highlight (never `--signal` — rule 7
+again), and the fourth designed empty state ("your memory starts here"). Below 768px it buckets
+into 7-day chunks at a fixed 16px each inside a horizontally scrolling rail, with the `now`
+marker and tooltip pinned to the non-scrolling viewport — §5.8's explicit fix for a 300-day
+account rendering unreadable 1px bars on a 390px phone (F-T7, previously unchecked).
+
+Insight lineage cards in the evidence pane are now interactive: clicking one expands to
+`pattern_strength` (via the same `ConfidenceMeter` evidence rows use — same 0–1 scale, one visual
+language, not two) and the retraction condition rendered as prose (`engine.insights.
+render_retraction_condition`, never a raw structured condition — rule 16). Both fields are new,
+additive `EvidenceTrace.insights[]` keys; the Zod schema defaults them for traces persisted
+before this change, since the trace is served verbatim (I-29) and old rows simply lack the keys.
+The reasoning-lineage **graph** stays cut per §13 — this text list is its designated shipped
+form, not a placeholder for it.
+
+Also landed: the `E`/`T` keyboard shortcuts and `Esc`-blurs-composer (§9's shortcut table, minus
+the cut command palette — §13), and F-T6's safe, verifiable subset (§15).
+
+Verified: 772 Python tests green (2 new, locking `pattern_strength`/`retraction` end to end from
+a seeded `retraction_condition` through `assemble()`); **15/15 Playwright E2E green**, including a
+dedicated 390×844 mobile-viewport run of the bucketed timeline with zero axe violations; `tsc` and
+`ruff` clean; initial bundle unchanged at 106.56 KB gzip.
 
 **M5 shipped:** citation chips, batch-hydrated evidence, the chip→row choreography, the executed
 query display, the mobile evidence drawer, and per-turn trace fetching so history stays
@@ -1318,10 +1348,26 @@ Numbered `F-T*` to stay clear of the T1–T18 backlog in
     one thing this product promises never to do.
 - [x] **F-T5 (P2, ~30min / ~10min)** — glassbox — Render `citation_report.status === "uncited"` (§6.6)
   - *Why:* the backend emits a three-way status; only two had UI.
-- [ ] **F-T6 (P2, ~2h / ~20min)** — responsive — Mobile keyboard: `dvh`, visual-viewport composer (§5.8)
+- [x] **F-T6 (P2)** — responsive — Mobile keyboard: `dvh`, visual-viewport composer (§5.8) — **partial, recorded honestly**
   - *Why:* the keyboard covering the composer is the classic mobile-chat failure.
-- [ ] **F-T7 (P3, ~1h / ~15min)** — timeline — Bucket the rail by week below 768px (§5.8)
+  - *Done:* the app shell already used `100dvh` (F2); added a feature-detected
+    `visualViewport.resize` listener (`Conversation.tsx`) that re-pins to the last turn when the
+    viewport shrinks — the keyboard-opening heuristic §5.8 specifies. Base UI `Drawer`'s own
+    focus trap already moves focus off the composer when the drawer opens, satisfying "drawer and
+    keyboard are mutually exclusive" without new code.
+  - *Not done:* a `position: fixed`, `visualViewport`-tracked composer (the literal "pinned to the
+    visual viewport" mechanism). `dvh` is the modern standard fix and covers iOS Safari 15.4+ /
+    Android Chrome 108+; the more invasive fixed-positioning approach was not added because it
+    cannot be verified against a real device in this environment, and shipping unverified
+    viewport-tracking code risks being worse than the dvh baseline. Revisit with real-device
+    access.
+- [x] **F-T7 (P3)** — timeline — Bucket the rail by week below 768px (§5.8)
   - *Why:* a 300-day account renders 1px untappable bars at 390px.
+  - *Done:* below 768px `Timeline.tsx` sums into 7-day buckets, renders them at a fixed 16px each
+    inside a horizontally scrolling viewport, and keeps the `now` marker and hover tooltip pinned
+    to the outer (non-scrolling) container so they read correctly at any scroll position.
+    Verified: a dedicated mobile-viewport (390×844) Playwright test asserts the bucketed timeline
+    renders with zero axe violations.
 
 ## 16. Decisions Log
 
