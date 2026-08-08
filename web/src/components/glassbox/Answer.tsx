@@ -15,8 +15,10 @@
  * - **resolved** — hydrated, clickable, and it walks the user to the row.
  */
 
+import { Fragment } from "react";
 import type { CitationReport, MemoryRow } from "@/api/schemas";
 import { parseAnswer } from "@/lib/citations";
+import { parseBold } from "@/lib/textFormatting";
 import { CitationChip, type ChipState } from "./CitationChip";
 
 export interface AnswerProps {
@@ -37,7 +39,24 @@ export function Answer({ text, rows, missing, report, activeId, onActivate }: An
     // 72ch (§5.7 / F-T3): the column may grow with the viewport, the measure may not.
     <p className="max-w-[72ch] text-body whitespace-pre-wrap text-foreground">
       {parseAnswer(text).map((segment, i) => {
-        if (segment.kind === "text") return <span key={i}>{segment.text}</span>;
+        if (segment.kind === "text") {
+          return (
+            <span key={i}>
+              {parseBold(segment.text).map((run, j) =>
+                run.bold ? (
+                  <strong key={j} className="font-medium">
+                    {run.text}
+                  </strong>
+                ) : (
+                  // Fragment, not a span: `whitespace-pre-wrap` on the parent already preserves
+                  // this text's line breaks, and an extra inline element per plain-text run would
+                  // be free structure with no purpose.
+                  <Fragment key={j}>{run.text}</Fragment>
+                ),
+              )}
+            </span>
+          );
+        }
 
         const row = rows.get(segment.id);
         const state: ChipState = invalid.has(segment.id)
