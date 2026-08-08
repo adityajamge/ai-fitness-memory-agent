@@ -81,26 +81,6 @@ function bucketByWeek(days: TimelineDay[]): TimelineDay[] {
   return buckets;
 }
 
-/** One tick per first-of-month, so label density scales with the range instead of the day count. */
-function monthTicks(days: TimelineDay[]): { index: number; label: string }[] {
-  const ticks: { index: number; label: string }[] = [];
-  let lastMonth = "";
-  days.forEach((d, i) => {
-    const month = d.day.slice(0, 7);
-    if (month !== lastMonth) {
-      lastMonth = month;
-      ticks.push({
-        index: i,
-        label: parseDay(d.day).toLocaleDateString(undefined, {
-          month: "short",
-          timeZone: "UTC",
-        }),
-      });
-    }
-  });
-  return ticks;
-}
-
 const RAIL_BACKGROUND = { backgroundImage: "var(--graph-rule)" };
 
 export interface TimelineProps {
@@ -125,7 +105,6 @@ export function Timeline({ onScrub }: TimelineProps) {
 
   const days = useMemo(() => fillRange(data?.days ?? []), [data]);
   const bars = useMemo(() => (isMobile ? bucketByWeek(days) : days), [days, isMobile]);
-  const ticks = useMemo(() => monthTicks(bars), [bars]);
   const maxN = useMemo(() => Math.max(1, ...bars.map((d) => d.n)), [bars]);
 
   if (isPending) {
@@ -245,16 +224,6 @@ export function Timeline({ onScrub }: TimelineProps) {
               );
             })}
           </svg>
-
-          {ticks.map((tick) => (
-            <span
-              key={tick.index}
-              className="pointer-events-none absolute bottom-0.5 hidden font-mono text-micro text-faint sm:block"
-              style={{ left: `${(tick.index / bars.length) * 100}%` }}
-            >
-              {tick.label}
-            </span>
-          ))}
         </div>
       </div>
 

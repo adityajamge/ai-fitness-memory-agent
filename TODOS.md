@@ -1,5 +1,17 @@
 # TODOS
 
+## Full Playwright suite pending re-run — Timeline month-tick removal (2026-08-09)
+
+- **What:** `web/src/components/timeline/Timeline.tsx` had its always-visible month-tick labels
+  removed (they overlapped into unreadable text on an account with a wide date range; the
+  per-day hover tooltip already shows the date on demand). `web/e2e/first-run.spec.ts`'s two
+  timeline-touching tests were run in isolation post-fix and passed 9/9 clean against a fresh
+  backend connection; the full suite (`glass-box.spec.ts` included) was not re-run afterward —
+  skipped deliberately to save time under competition deadline pressure, not because of a known
+  failure.
+- **Action:** run `npx playwright test` (full suite, `web/`) once time allows, before treating
+  this change as fully verified.
+
 ## M6 — Latency profile (T12): POSTPONED 2026-08-06, not skipped
 
 - **Status:** intentionally deferred, still **owed**. Phase 5 is not complete without it, and

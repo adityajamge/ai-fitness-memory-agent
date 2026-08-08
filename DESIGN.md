@@ -676,11 +676,15 @@ green checkmark.
 The permanent memory-density strip, full width, 72px desktop / 48px tablet / 40px mobile rail.
 
 **Anatomy:** graph-rule background (§4.4) → per-day density bars → changepoint markers
-(`◆ May 12 protein ↑`) → month ticks in mono `text-micro` → a `now` marker pinned right.
+(`◆ May 12 protein ↑`) → a `now` marker pinned right.
 
 Bars are `--faint` at a height proportional to `n`; days containing an insight get a 2px
-`--signal` cap. Hovering a day shows a mono tooltip with the exact counts. Clicking scrubs the
-conversation to that date.
+`--signal` cap. Hovering a day shows a mono tooltip with the exact date and counts — this is the
+*only* place a date renders. An earlier version also drew a permanent month-tick label
+(`Jan`, `Feb`, …) under the rail; on a real account whose history spans many months, those
+labels sit close enough together to overlap into unreadable text, and a hover tooltip already
+answers the same question on demand. Removed rather than throttled to every Nth month, since a
+chart is not the place to invent a rule for which months get skipped.
 
 **Rules.** Data comes from `GET /api/timeline` (`{day, n, insights}`), aggregated in SQL. Never
 ship a year of rows to count them client-side. Hand-rolled SVG, no chart library (§12).
