@@ -231,6 +231,18 @@
   }
 }
 
+/* Hides a scroll container's visible scrollbar without disabling scrolling — the timeline
+ * strip's rail (§6.8) scrolls to reach older history, but a chrome scrollbar under a 40px rail
+ * reads as a stray browser control, not part of the instrument. Keyboard and touch scrolling are
+ * unaffected; this is presentation only. */
+.scrollbar-none {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge */
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Chromium Edge */
+}
+
 /* ── Reduced motion ────────────────────────────────────────────────────────
  * Not optional (§5.6). A glass box that slides, pulses and streams is hostile
  * to users with vestibular sensitivity. Under reduce, movement is removed and

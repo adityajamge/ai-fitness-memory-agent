@@ -23,10 +23,17 @@ const RAIL_HEIGHT = "h-10 sm:h-12 lg:h-[72px]";
 /** DESIGN.md §5.8: below 768px, ~340px of scrollable width cannot render one 1px bar per day for
  * a months-long history (unreadable, untappable) — the rail buckets by week instead. */
 const MOBILE_QUERY = "(max-width: 767px)";
-/** Fixed per-bucket width on mobile, in CSS px — the rail scrolls horizontally rather than
- * squeezing buckets to fit the viewport, so each one stays comfortably tappable. */
-const MOBILE_BUCKET_PX = 16;
 const DAYS_PER_BUCKET = 7;
+/** The rail defaults to showing roughly this many days, scrolled to "now" at the right edge —
+ * older history is reached by scrolling left, rather than every day of a long account's real
+ * history being squeezed into one sliver at the far right (reported live: a several-month
+ * account rendered as a wall of empty grid with all the actual bars crammed into ~2% of the
+ * width). Bar width is derived from this and the rail's own measured width, so it holds at any
+ * viewport size instead of being tuned to one. */
+const VISIBLE_DAYS = 90;
+/** Never let a bar get thinner than this, even on a narrow viewport — the floor for both
+ * legibility and (on mobile) a tappable target. */
+const MIN_BAR_PX = 3;
 
 function isoDay(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -94,7 +101,9 @@ export function Timeline({ onScrub }: TimelineProps) {
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== "undefined" && window.matchMedia(MOBILE_QUERY).matches,
   );
+  const [railWidth, setRailWidth] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const mq = window.matchMedia(MOBILE_QUERY);
@@ -103,9 +112,35 @@ export function Timeline({ onScrub }: TimelineProps) {
     return () => mq.removeEventListener("change", onChange);
   }, []);
 
+  // Measures the rail itself, not the window — a chart embedded in a narrower column still gets
+  // bars sized off the space it actually has.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      if (entry) setRailWidth(entry.contentRect.width);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const days = useMemo(() => fillRange(data?.days ?? []), [data]);
   const bars = useMemo(() => (isMobile ? bucketByWeek(days) : days), [days, isMobile]);
   const maxN = useMemo(() => Math.max(1, ...bars.map((d) => d.n)), [bars]);
+
+  // One bar = one day on desktop, one bucket = seven days on mobile — so "90 visible days" is
+  // 90 bars on one and ~13 on the other, and both land on the same real span of history.
+  const visibleBars = isMobile ? Math.ceil(VISIBLE_DAYS / DAYS_PER_BUCKET) : VISIBLE_DAYS;
+  const barPx = railWidth > 0 ? Math.max(railWidth / visibleBars, MIN_BAR_PX) : 0;
+  // Shorter histories still fill the rail (no dead space, no scroll needed); longer ones overflow
+  // and scroll — `barPx * bars.length` only wins once it actually exceeds the rail's own width.
+  const contentWidth = barPx > 0 ? Math.max(barPx * bars.length, railWidth) : undefined;
+
+  // Lands on "now" by default — the most recent ~90 days are what's visible without scrolling;
+  // everything older is one scroll away, never rendered as a barely-visible sliver.
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ left: scrollRef.current.scrollWidth, behavior: "auto" });
+  }, [contentWidth, bars.length]);
 
   if (isPending) {
     return (
@@ -159,9 +194,9 @@ export function Timeline({ onScrub }: TimelineProps) {
   const firstDay = days[0];
   const lastDay = days[days.length - 1];
 
-  // Index math reads the SVG's OWN rect (`event.currentTarget`), not the outer container's —
-  // on mobile the SVG is wider than its scrolling viewport, and its rect already reflects the
-  // current scroll offset, so this stays correct regardless of how far the rail is scrolled.
+  // Index math reads the SVG's OWN rect (`event.currentTarget`), which reflects the current
+  // scroll offset of its scrolling ancestor — so this stays correct wherever the rail is
+  // scrolled to, on any breakpoint.
   function handleMove(event: ReactMouseEvent<SVGSVGElement>) {
     const svgRect = event.currentTarget.getBoundingClientRect();
     const ratio = (event.clientX - svgRect.left) / svgRect.width;
@@ -173,7 +208,7 @@ export function Timeline({ onScrub }: TimelineProps) {
     if (day && outerRect) setHover({ day, x: event.clientX - outerRect.left });
   }
 
-  const svgLabel = `Memory timeline: ${total} ${total === 1 ? "memory" : "memories"} across ${days.length} ${days.length === 1 ? "day" : "days"}, from ${firstDay?.day} to ${lastDay?.day}.`;
+  const svgLabel = `Memory timeline: ${total} ${total === 1 ? "memory" : "memories"} across ${days.length} ${days.length === 1 ? "day" : "days"}, from ${firstDay?.day} to ${lastDay?.day}. Showing the most recent ~${VISIBLE_DAYS} days by default — scroll left for earlier history.`;
 
   return (
     <div
@@ -181,18 +216,19 @@ export function Timeline({ onScrub }: TimelineProps) {
       className={cn("relative shrink-0 border-b border-border bg-surface", RAIL_HEIGHT)}
       style={RAIL_BACKGROUND}
     >
-      {/* The scrolling viewport. Only mobile scrolls; desktop/tablet render at 100% width and
-          this div is inert. */}
-      <div className={cn("h-full", isMobile && "overflow-x-auto")}>
-        {/* The scrolled content. Fixed pixel width on mobile so weekly buckets stay a
-            comfortable, consistent size instead of being squeezed to fit (§5.8); 100% on
-            desktop/tablet, where the SVG itself stretches via `preserveAspectRatio="none"`. */}
-        <div className="relative h-full" style={isMobile ? { width: bars.length * MOBILE_BUCKET_PX } : undefined}>
+      {/* The scrolling viewport — every breakpoint scrolls now, landed on "now" by default
+          (the effect above) rather than stretching the whole history to fit and rendering a
+          long account as a wall of empty grid with all its real bars in a 2%-wide sliver. */}
+      <div ref={scrollRef} className="scrollbar-none h-full overflow-x-auto">
+        {/* `barPx * bars.length` (or the rail's own width, whichever is larger — see
+            `contentWidth`) — bar width is derived from the rail's measured width, not a
+            hardcoded constant, so it holds at any viewport size. */}
+        <div className="relative h-full" style={{ width: contentWidth ?? "100%" }}>
           <svg
             role="img"
             aria-label={svgLabel}
             viewBox={`0 0 ${bars.length} 100`}
-            preserveAspectRatio={isMobile ? undefined : "none"}
+            preserveAspectRatio="none"
             className="h-full w-full"
             onMouseMove={handleMove}
             onMouseLeave={() => setHover(null)}
