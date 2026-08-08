@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from api.deps import get_current_user
+from api.routers.chat import thread_key
 from engine.citations import validate_citations
 from engine.db import Database
 from engine.glassbox import (
@@ -100,9 +101,18 @@ def list_turns(
     user_id: UUID = Depends(get_current_user),
 ) -> dict:
     """Conversation history, oldest last. ``has_trace`` tells the UI which turns have a glass
-    box to open without hydrating any of them."""
+    box to open without hydrating any of them.
+
+    ``thread_id`` is the **raw client-supplied id** — the same string a caller would pass to
+    ``POST /api/chat`` — never the namespaced one stored in ``turns.thread_id``. Namespacing it
+    here, the same way ``chat.py``'s write path does before it ever reaches the checkpointer or
+    stage (G), is what keeps that scheme an internal detail: a client that only ever deals in
+    its own raw thread ids can filter its own history without knowing this table's keys are
+    ``user_id:thread_id`` under the hood.
+    """
+    namespaced = thread_key(user_id, thread_id) if thread_id else None
     with _db(request).transaction() as cur:
-        rows = fetch_turns(cur, user_id, thread_id=thread_id, limit=limit)
+        rows = fetch_turns(cur, user_id, thread_id=namespaced, limit=limit)
     return {
         "turns": [
             {

@@ -22,7 +22,10 @@ import { markAuthenticated } from "@/session/sessionStore";
 export const queryKeys = {
   stats: ["stats"] as const,
   timeline: ["timeline"] as const,
-  turns: ["turns"] as const,
+  // Keyed by thread so "New chat" (a new thread id) never reads the previous thread's cached
+  // history — each thread gets its own cache entry under the shared "turns" prefix, which is
+  // also what lets invalidateTurnDerivedQueries below invalidate all of them with one call.
+  turns: (threadId?: string) => ["turns", threadId ?? "all"] as const,
   trace: (turnId: string) => ["trace", turnId] as const,
   memories: (ids: string[]) => ["memories", ...ids] as const,
 };
@@ -57,10 +60,11 @@ export function useTimeline() {
   return useQuery({ queryKey: queryKeys.timeline, queryFn: getTimeline });
 }
 
-export function useTurns() {
-  // Wrapped rather than passed by reference: Query calls queryFn with a context object, which
-  // `getTurns` would read as its optional params argument.
-  return useQuery({ queryKey: queryKeys.turns, queryFn: () => getTurns() });
+/** Conversation history for one thread — the active thread, per `session/threadStore.ts`. Every
+ * account has exactly one at a time; "New chat" swaps which thread is active rather than adding
+ * a second one to read. */
+export function useTurns(threadId: string) {
+  return useQuery({ queryKey: queryKeys.turns(threadId), queryFn: () => getTurns({ threadId }) });
 }
 
 /** A turn's glass box. Enabled only for turns that have one — stage (G) is best-effort, and a
@@ -95,7 +99,11 @@ export function useMemories(ids: string[]) {
 function invalidateTurnDerivedQueries(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: queryKeys.stats });
   void queryClient.invalidateQueries({ queryKey: queryKeys.timeline });
-  void queryClient.invalidateQueries({ queryKey: queryKeys.turns });
+  // The bare "turns" prefix, not `queryKeys.turns(id)` for one specific thread: TanStack Query
+  // matches by prefix, so this invalidates every thread's cached history in one call. There is
+  // only ever one active thread in the UI, but stale entries for an abandoned thread (from
+  // before a "New chat") should not linger as reusable cache either.
+  void queryClient.invalidateQueries({ queryKey: ["turns"] });
 }
 
 /** Send a turn over the plain, always-available transport (the SSE fallback target). */

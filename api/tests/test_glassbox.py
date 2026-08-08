@@ -149,6 +149,33 @@ def test_turns_list_never_shows_another_users_conversation(client, app_provider)
     assert client.get("/api/turns").json()["turns"] == []
 
 
+def test_turns_list_filters_by_the_caller_s_raw_thread_id(client, app_provider) -> None:
+    """The filter must accept the same raw id `POST /api/chat` was given — not the namespaced
+    `user_id:thread_id` string `turns.thread_id` actually stores. A caller that only ever deals
+    in its own thread ids (the "New chat" feature) must be able to filter its own history
+    without knowing that internal scheme exists."""
+    _signup(client)
+    app_provider.plan_calls = [ToolCall(tool=LOG_MEMORY, arguments={"text": "lunch"})]
+    app_provider.events = [_meal_event()]
+    first = client.post(
+        "/api/chat", json={"message": "lunch: 200g chicken", "thread_id": "thread-a"}
+    ).json()
+    second = client.post(
+        "/api/chat", json={"message": "dinner: 3 eggs", "thread_id": "thread-b"}
+    ).json()
+    assert first["thread_id"] == "thread-a"
+    assert second["thread_id"] == "thread-b"
+
+    only_a = client.get("/api/turns", params={"thread_id": "thread-a"}).json()["turns"]
+    assert [t["content"] for t in only_a if t["role"] == "user"] == ["lunch: 200g chicken"]
+
+    only_b = client.get("/api/turns", params={"thread_id": "thread-b"}).json()["turns"]
+    assert [t["content"] for t in only_b if t["role"] == "user"] == ["dinner: 3 eggs"]
+
+    everything = client.get("/api/turns").json()["turns"]
+    assert len(everything) == len(only_a) + len(only_b)
+
+
 # ── batch hydration (T16) ─────────────────────────────────────────────────────────────
 def test_batch_hydrates_cited_ids_in_one_request(client, app_provider) -> None:
     _signup(client)

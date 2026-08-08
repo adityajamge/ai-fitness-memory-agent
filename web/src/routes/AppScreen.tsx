@@ -29,6 +29,7 @@ import { Timeline } from "@/components/timeline/Timeline";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { SessionNotice } from "@/session/SessionNotice";
 import { useSessionExpired } from "@/session/sessionStore";
+import { getActiveThreadId, startNewThread } from "@/session/threadStore";
 import type { ChatTurn } from "@/types/turn";
 
 let localId = 0;
@@ -39,7 +40,6 @@ const DESKTOP_QUERY = "(min-width: 1024px)";
 
 export function AppScreen() {
   const stats = useStats();
-  const history = useTurns();
   const send = useSendMessage();
   const invalidateAfterTurn = useInvalidateAfterTurn();
   const sessionExpired = useSessionExpired();
@@ -51,7 +51,10 @@ export function AppScreen() {
   const [draft, setDraft] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null);
-  const [threadId, setThreadId] = useState<string>();
+  // Always defined from the first render — persisted per `session/threadStore.ts`, not lazily
+  // minted on the first sent message. "New chat" is what changes it.
+  const [threadId, setThreadId] = useState<string>(() => getActiveThreadId());
+  const history = useTurns(threadId);
   const [showAskHint, setShowAskHint] = useState(false);
   const [activeCitation, setActiveCitation] = useState<string | null>(null);
   const [isDrawerOpen, setDrawerOpen] = useState(false);
@@ -310,9 +313,29 @@ export function AppScreen() {
     setScrubDay(day);
   }
 
+  /**
+   * "New chat" — starts a fresh thread without touching any stored memory.
+   *
+   * A visible reset for an account with real, permanent history (the whole point of this
+   * product) needs to be unmistakably non-destructive: nothing here calls a delete endpoint or
+   * even a mutation. It swaps which thread is active (`session/threadStore.ts`), which changes
+   * `useTurns`'s query key and clears the local conversation — the old thread's turns and
+   * memories are exactly as they were, just no longer the one on screen. There is no UI path
+   * back to it, by design (DESIGN.md §13: no thread switcher), but the data was never at risk.
+   */
+  function handleNewChat() {
+    streamAbortRef.current?.abort();
+    setThreadId(startNewThread());
+    setTurns([]);
+    setSelectedTurnId(null);
+    setActiveCitation(null);
+    setShowAskHint(false);
+    setDrawerOpen(false);
+  }
+
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
-      <TopBar isBusy={isSending} />
+      <TopBar isBusy={isSending} onNewChat={handleNewChat} />
 
       {/* One of the four designed empty states (§6.9) — rendered unconditionally, so a brand-new
           account shows "your memory starts here" here too rather than nothing. */}
