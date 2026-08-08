@@ -3,13 +3,22 @@
  *
  * `POST /api/chat/stream` narrates a turn's stages as they happen instead of returning
  * everything at once. **Whether that works through the deployed ALB is unproven** (§11), so
- * this module treats the failure mode as a runtime signal rather than a fixed choice: any
- * connection that never reaches a `done`/`error` frame — a non-`event-stream` response, a
- * dropped connection, a proxy that buffers the whole body before releasing it — throws
- * `StreamUnavailableError`, and the caller (`AppScreen`) falls back to the plain,
- * already-tested `POST /api/chat` for that turn. A turn the graph itself failed (an `error`
- * frame) is a different thing and is NOT this error: that is a real turn failure and is
- * reported as one, the same way the plain endpoint's non-2xx would be.
+ * this module treats the failure mode as a runtime signal rather than a fixed choice: a
+ * connection that fails **before any progress was observed** throws `StreamUnavailableError`,
+ * and the caller (`AppScreen`) silently retries through the plain, already-tested
+ * `POST /api/chat` for that turn.
+ *
+ * **The one caveat that matters here.** A connection that fails *after* at least one `stage`
+ * frame arrived throws `StreamInterruptedError` instead, and that one must NOT be silently
+ * retried: the graph was observably running, which for an ingest turn can mean a memory already
+ * committed server-side before the connection broke. Silently resending the same message would
+ * risk a silent duplicate — the never-lose-input guarantee (ADR-13.5) cuts both ways, and
+ * *duplicating* input is not more honest than losing it. `AppScreen` surfaces this the same way
+ * it surfaces any other genuine turn failure: a visible "that message didn't go through, resend?"
+ * card, which makes the retry a user decision instead of an invisible one.
+ *
+ * A turn the graph itself failed on (an `error` frame) is a third, different thing: a real turn
+ * failure, reported as one, exactly like the plain endpoint's non-2xx would be.
  *
  * `EventSource` cannot send a POST body, so this hand-rolls the minimal SSE-over-`fetch` framing
  * the backend emits (`api/routers/chat.py`'s `_sse`): `event: <name>\ndata: <json>\n\n`.
@@ -18,10 +27,26 @@
 import { ApiError, ContractError } from "./client";
 import { ChatResponse } from "./schemas";
 
+/** Thrown when nothing has happened yet — safe for the caller to silently retry through the
+ * plain transport, because the graph has not observably started (see the module doc's "one
+ * caveat" for why "not observably" is doing real work in that sentence). */
 export class StreamUnavailableError extends Error {
   constructor(reason: string) {
     super(`chat stream unavailable: ${reason}`);
     this.name = "StreamUnavailableError";
+  }
+}
+
+/** Thrown when the stream broke down **after** the graph was already observed to be running (at
+ * least one `stage` frame arrived) but before a `done`/`error` frame closed it out. This must
+ * NOT trigger a silent retry: an `ingest` stage already having been seen means the turn may have
+ * already committed a memory server-side, and auto-resending the same message would risk a
+ * silent duplicate. The caller surfaces this as a normal failed turn instead — same UX, and same
+ * safety property, as the pre-existing manual "that message didn't go through, resend?" flow. */
+export class StreamInterruptedError extends Error {
+  constructor(reason: string) {
+    super(`chat stream interrupted after progress began: ${reason}`);
+    this.name = "StreamInterruptedError";
   }
 }
 
@@ -97,31 +122,49 @@ export async function* streamChat(
     throw new StreamUnavailableError(`unexpected content-type ${contentType || "(none)"}`);
   }
 
+  let sawStageFrame = false;
   let sawTerminalFrame = false;
-  for await (const { event, data } of readFrames(response.body)) {
-    if (event === "stage") {
-      const stage = data as { stage: string; label: string };
-      yield { type: "stage", stage: stage.stage, label: stage.label };
-    } else if (event === "done") {
-      sawTerminalFrame = true;
-      const parsed = ChatResponse.safeParse(data);
-      if (!parsed.success) throw new ContractError("/api/chat/stream", parsed.error.issues);
-      yield { type: "done", payload: parsed.data };
-    } else if (event === "error") {
-      sawTerminalFrame = true;
-      const detail =
-        (data as { detail?: string }).detail ??
-        "the assistant is unavailable right now; please retry";
-      // Framed as a 502 to match what the plain endpoint returns for the same graph failure
-      // (PlanningError/NarrationError) — the two transports report identical outcomes.
-      throw new ApiError(502, detail);
+  try {
+    for await (const { event, data } of readFrames(response.body)) {
+      if (event === "stage") {
+        sawStageFrame = true;
+        const stage = data as { stage: string; label: string };
+        yield { type: "stage", stage: stage.stage, label: stage.label };
+      } else if (event === "done") {
+        sawTerminalFrame = true;
+        const parsed = ChatResponse.safeParse(data);
+        if (!parsed.success) throw new ContractError("/api/chat/stream", parsed.error.issues);
+        yield { type: "done", payload: parsed.data };
+      } else if (event === "error") {
+        sawTerminalFrame = true;
+        const detail =
+          (data as { detail?: string }).detail ??
+          "the assistant is unavailable right now; please retry";
+        // Framed as a 502 to match what the plain endpoint returns for the same graph failure
+        // (PlanningError/NarrationError) — the two transports report identical outcomes.
+        throw new ApiError(502, detail);
+      }
     }
+  } catch (err) {
+    // `ApiError`/`ContractError` are already-classified outcomes raised deliberately above —
+    // let them through unchanged. Anything else here is a low-level transport failure (the
+    // reader rejecting, malformed framing from a mangling proxy) that was never given a type,
+    // and it needs the same before/after-progress classification the clean-close path below
+    // gets, or the whole point of this module — never silently duplicate a turn — is lost for
+    // exactly the failure mode (a connection that dies mid-stream) it exists to handle.
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    if (err instanceof ApiError || err instanceof ContractError) throw err;
+    if (sawStageFrame) throw new StreamInterruptedError(String(err));
+    throw new StreamUnavailableError(`transport error before any progress: ${String(err)}`);
   }
 
   if (!sawTerminalFrame) {
     // The connection closed clean but without a done/error frame: exactly the ALB-buffering or
-    // silently-dropped-connection failure mode §11 flags as unproven. Not a graph error — the
-    // graph may have finished — so this falls back rather than reporting a turn failure.
+    // silently-dropped-connection failure mode §11 flags as unproven. Whether this is safe to
+    // silently retry depends on whether the graph was ever observed running.
+    if (sawStageFrame) {
+      throw new StreamInterruptedError("connection closed after progress but before completion");
+    }
     throw new StreamUnavailableError("connection closed without a terminal event");
   }
 }

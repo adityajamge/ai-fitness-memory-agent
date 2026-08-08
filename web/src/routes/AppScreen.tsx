@@ -253,8 +253,14 @@ export function AppScreen() {
     streamAbortRef.current = controller;
 
     void (async () => {
+      // Declared outside the try block deliberately: a `done` frame can arrive and then the
+      // connection can still throw while the reader waits for EOF (rare, but real — a proxy that
+      // delivers the payload and then hangs the close). If that happens, `payload` is the one
+      // signal that the turn actually completed, and the catch block below must be able to see
+      // it — treating a post-completion transport hiccup as either "retry" or "failed" would
+      // silently duplicate the turn or lose an answer that had already arrived.
+      let payload: ChatResponse | null = null;
       try {
-        let payload: ChatResponse | null = null;
         for await (const event of streamChat(message, threadId, controller.signal)) {
           if (event.type === "stage") {
             setTurns((prev) =>
@@ -271,10 +277,21 @@ export function AppScreen() {
         invalidateAfterTurn();
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return; // superseded
+        if (payload) {
+          // The done frame already arrived — whatever broke after it is irrelevant to the turn.
+          onSuccess(payload);
+          invalidateAfterTurn();
+          return;
+        }
         if (err instanceof StreamUnavailableError) {
+          // Nothing was observed to happen server-side yet — safe to retry silently.
           send.mutate(threadId ? { message, threadId } : { message }, { onSuccess, onError: onFailure });
           return;
         }
+        // StreamInterruptedError (the graph was seen running — an ingest may already have
+        // committed — before the connection broke) falls through to here deliberately, along
+        // with every other error: surfaced as a real failure, same UX as any other failed turn,
+        // never silently resent.
         onFailure(err);
       }
     })();
