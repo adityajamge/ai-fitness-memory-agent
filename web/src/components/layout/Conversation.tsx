@@ -251,6 +251,32 @@ export const Conversation = memo(function Conversation({
     return undefined;
   }, [scrubDay, turns, reduce, onScrubHandled]);
 
+  // A returning user (this only renders once `AppScreen` has already ruled out an empty
+  // account — see its `isEmptyAccount` branch) starting a fresh thread otherwise saw nothing
+  // here at all: a blank pane between the timeline and the composer, with no indication the
+  // account's history is still there. Quiet, not a repeat of `FirstRun` — no example prompts,
+  // because this is not someone's first time.
+  if (turns.length === 0) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4 py-6 text-center">
+        <m.div
+          initial={reduce ? false : { opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: reduce ? 0 : 0.32, ease: [0.2, 0, 0, 1] }}
+          className="flex flex-col items-center gap-4"
+        >
+          <Logo size={64} />
+          <div className="flex flex-col gap-1.5">
+            <p className="text-lead text-foreground">Ask something.</p>
+            <p className="max-w-[44ch] text-meta text-muted-foreground">
+              Everything you've logged is already in memory — ask about it, or log more.
+            </p>
+          </div>
+        </m.div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8">
       {/* The column centers and caps; extra viewport width becomes margin, not measure. */}
