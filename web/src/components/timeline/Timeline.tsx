@@ -159,9 +159,12 @@ export const Timeline = memo(function Timeline({ onScrub }: TimelineProps) {
   // 90 bars on one and ~13 on the other, and both land on the same real span of history.
   const visibleBars = isMobile ? Math.ceil(VISIBLE_DAYS / DAYS_PER_BUCKET) : VISIBLE_DAYS;
   const barPx = railWidth > 0 ? Math.max(railWidth / visibleBars, MIN_BAR_PX) : 0;
-  // Shorter histories still fill the rail (no dead space, no scroll needed); longer ones overflow
-  // and scroll — `barPx * bars.length` only wins once it actually exceeds the rail's own width.
-  const contentWidth = barPx > 0 ? Math.max(barPx * bars.length, railWidth) : undefined;
+  // Bar width is always `barPx` regardless of history length — a 3-day-old account's bars are
+  // the same width as they'd be in a 90-day rail, not stretched to fill it (reported live: a
+  // brand-new account's few bars rendered enormous, stretched across the full rail width). A
+  // short history just leaves empty rule-background to the left, right-anchored (see the
+  // `justify-end` below) so the bars still sit next to the pinned `now` marker.
+  const contentWidth = barPx > 0 ? barPx * bars.length : undefined;
 
   // Lands on "now" by default — the most recent ~90 days are what's visible without scrolling;
   // everything older is one scroll away, never rendered as a barely-visible sliver.
@@ -273,11 +276,12 @@ export const Timeline = memo(function Timeline({ onScrub }: TimelineProps) {
       {/* The scrolling viewport — every breakpoint scrolls now, landed on "now" by default
           (the effect above) rather than stretching the whole history to fit and rendering a
           long account as a wall of empty grid with all its real bars in a 2%-wide sliver. */}
-      <div ref={scrollRef} className="scrollbar-none h-full overflow-x-auto">
-        {/* `barPx * bars.length` (or the rail's own width, whichever is larger — see
-            `contentWidth`) — bar width is derived from the rail's measured width, not a
-            hardcoded constant, so it holds at any viewport size. */}
-        <div className="relative h-full" style={{ width: contentWidth ?? "100%" }}>
+      <div ref={scrollRef} className="scrollbar-none flex h-full justify-end overflow-x-auto">
+        {/* `barPx * bars.length` (see `contentWidth`) — bar width is derived from the rail's
+            measured width, not a hardcoded constant, so it holds at any viewport size.
+            `shrink-0`: the flex parent's `justify-end` would otherwise squeeze this below its
+            explicit width once content overflows, which breaks the scroll. */}
+        <div className="relative h-full shrink-0" style={{ width: contentWidth ?? "100%" }}>
           <svg
             role="img"
             aria-label={svgLabel}
