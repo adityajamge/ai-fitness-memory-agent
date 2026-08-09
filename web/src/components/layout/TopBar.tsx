@@ -15,6 +15,7 @@ import { logout } from "@/api/client";
 import { useStats } from "@/api/queries";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { ThemeToggle } from "./ThemeToggle";
 import { cn } from "@/lib/utils";
 
 /** Three dots showing engine activity. The bar's one ornament, and it is functional. */
@@ -111,6 +112,8 @@ export function TopBar({ isBusy = false, onNewChat }: TopBarProps) {
             New chat
           </Button>
         )}
+
+        <ThemeToggle />
 
         <Button variant="ghost" size="sm" onClick={handleSignOut}>
           Sign out

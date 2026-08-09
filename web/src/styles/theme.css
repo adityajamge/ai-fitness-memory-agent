@@ -77,49 +77,27 @@
   --text-display-l--letter-spacing: -0.035em;
   --text-display-l--font-weight: 500;
 
-  /* ── Surfaces ────────────────────────────────────────────────────────────
-   * Cold, blue-shifted near-black. The whole ramp spans ~12 points of
-   * lightness: restraint, not contrast, is what reads as expensive.
-   * Elevation comes from THESE plus a hairline — not from shadows (§4.3).
-   *
-   * Names follow the shadcn/Tailwind idiom (background / foreground / border)
-   * so shadcn components paste in and work unmodified. The alternative
-   * (--color-text → `text-text-muted`) reads badly in every className and
-   * would need rewriting on every paste. */
+  /* ── Surfaces, Foreground, Signal, Invalid ──────────────────────────────
+   * Values live in the `[data-theme]` blocks below `@theme`, not here — see
+   * that comment for why. What's declared here is only what Tailwind needs
+   * to generate the utilities (`bg-background`, `text-signal`, etc.); the
+   * *values* those utilities resolve to always come from whichever
+   * `[data-theme]` rule is nearest in the DOM. These defaults equal dark,
+   * so anything that somehow renders before the theme attribute is set
+   * (see index.html's inline script) still gets a correct, complete theme
+   * rather than an unstyled flash. */
   --color-background: oklch(0.145 0.008 250);
   --color-surface: oklch(0.185 0.010 250);
   --color-surface-2: oklch(0.225 0.012 250);
   --color-surface-3: oklch(0.265 0.012 250);
   --color-border: oklch(0.310 0.012 250);
   --color-border-strong: oklch(0.400 0.014 250);
-
-  /* ── Foreground ──────────────────────────────────────────────────────────
-   * Contrast is verified against the WORST surface the token can land on
-   * (--color-surface-3, used by overlays), not merely against the page:
-   *
-   *   token             bg     surface  surface-2  surface-3
-   *   foreground       17.4     16.4       15.0       13.4
-   *   muted-foreground  7.99     7.52       6.90       6.17
-   *   faint             5.89     5.55       5.09       4.55
-   *
-   * `faint` was oklch(0.590) and measured 4.82 on the page but **4.16 on
-   * surface-2 and 3.72 on surface-3** — a real AA failure that axe caught
-   * across 143 nodes. Checking a foreground against one background is not
-   * checking it. Nothing lighter than `faint` may carry text. */
   --color-foreground: oklch(0.965 0.003 250);
   --color-muted-foreground: oklch(0.720 0.012 250);
   --color-faint: oklch(0.640 0.014 250);
-
-  /* ── Signal — the ONLY accent ────────────────────────────────────────────
-   * Means exactly one thing: "this is evidence you can open."
-   * Permitted on: citation chips, the receipt ✦, timeline insight caps, the
-   * subject series in a chart, focus rings. Nowhere else. Scarcity is the
-   * entire point — spend it elsewhere and it stops meaning anything. */
   --color-signal: oklch(0.800 0.155 78);
   --color-signal-dim: oklch(0.800 0.155 78 / 0.14);
   --color-signal-active: oklch(0.800 0.155 78 / 0.28);
-
-  /* ── Invalid — retracted insights, unresolvable citations, destructive ── */
   --color-invalid: oklch(0.650 0.190 25);
   --color-invalid-dim: oklch(0.650 0.190 25 / 0.14);
 
@@ -169,10 +147,69 @@
   --duration-medium: 240ms;
   --duration-enter: 320ms;
   --duration-slow: 400ms;
+}
+
+/* ============================================================================
+ * Theme values — dark (default) and light, added 2026-08-09 (§16 Decisions
+ * Log). The literal colors live HERE, not in `@theme` above, for one reason:
+ * `@theme` can only ever write to `:root`, so a subtree could never be
+ * pinned to one theme regardless of the page's choice. These are plain,
+ * unlayered rules, which in a cascade-layers world always beat `@theme`'s
+ * `@layer theme` output no matter the source order — so they are the real
+ * values `bg-background`, `text-signal`, etc. resolve to; `@theme` above
+ * exists only so Tailwind knows the tokens are there to generate utilities
+ * for.
+ *
+ * `:root` carries dark's values unconditionally, so the product still
+ * renders a complete (dark) theme with zero JavaScript — `[data-theme]` on
+ * `<html>` (see `theme/themeStore.ts`) only ever *overrides* that default,
+ * never supplies the only copy of it. The same mechanism nests: the landing
+ * page's hero (`MoltenMetal`, §16 2026-08-07) is a hardcoded-dark visual and
+ * wraps itself in `data-theme="dark"` to stay dark regardless of the page's
+ * theme — custom properties inherit down the DOM tree, and the closest
+ * `[data-theme]` ancestor wins, exactly like nesting `:root[data-theme]`
+ * does for the whole page. */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-background: oklch(0.145 0.008 250);
+  --color-surface: oklch(0.185 0.010 250);
+  --color-surface-2: oklch(0.225 0.012 250);
+  --color-surface-3: oklch(0.265 0.012 250);
+  --color-border: oklch(0.310 0.012 250);
+  --color-border-strong: oklch(0.400 0.014 250);
+
+  /* Contrast verified against the WORST surface each token can land on
+     (--color-surface-3, used by overlays), not merely against the page:
+
+       token             bg     surface  surface-2  surface-3
+       foreground       17.4     16.4       15.0       13.4
+       muted-foreground  7.99     7.52       6.90       6.17
+       faint             5.89     5.55       5.09       4.55
+
+     `faint` was oklch(0.590) and measured 4.82 on the page but **4.16 on
+     surface-2 and 3.72 on surface-3** — a real AA failure that axe caught
+     across 143 nodes. Nothing lighter than `faint` may carry text. */
+  --color-foreground: oklch(0.965 0.003 250);
+  --color-muted-foreground: oklch(0.720 0.012 250);
+  --color-faint: oklch(0.640 0.014 250);
+
+  /* --signal means exactly one thing: "this is evidence you can open."
+     Permitted on: citation chips, the receipt ✦, timeline insight caps, the
+     subject series in a chart, focus rings. Nowhere else (rule 7). */
+  --color-signal: oklch(0.800 0.155 78);
+  --color-signal-dim: oklch(0.800 0.155 78 / 0.14);
+  --color-signal-active: oklch(0.800 0.155 78 / 0.28);
+
+  --color-invalid: oklch(0.650 0.190 25);
+  --color-invalid-dim: oklch(0.650 0.190 25 / 0.14);
 
   /* The graph rule — the system's one texture (§4.4). Chart paper, because
-   * this product plots things. Never above 4% opacity, never behind body
-   * copy, never animated. */
+     this product plots things. Never above 4% opacity, never behind body
+     copy, never animated. White hairlines read as grain on this near-black
+     page; the light block below inverts to black hairlines for the same
+     reason. */
   --graph-rule: repeating-linear-gradient(
       to right,
       oklch(1 0 0 / 0.04) 0 1px,
@@ -181,13 +218,67 @@
     repeating-linear-gradient(to bottom, oklch(1 0 0 / 0.04) 0 1px, transparent 1px 24px);
 }
 
+/* Same cold, blue-shifted, restrained-ramp construction as dark, mirrored
+ * rather than reinvented — surfaces step DOWN in lightness as they elevate
+ * (dark steps up), text steps down from a near-black foreground (dark steps
+ * down from near-white). `--color-signal` and `--color-invalid` are
+ * independently re-picked, not a straight mirror: dark's amber is far too
+ * light to hold contrast on a near-white page (unmodified, it measured
+ * ~2.7:1 against a light background — well under the 4.5:1 body-text floor,
+ * and `text-signal` is real body text in Receipt.tsx, not only a ring or a
+ * chip fill), so both were darkened until they cleared AA.
+ *
+ * **Not pure white.** `--color-background` first shipped at oklch(0.985 0.003) — visibly the
+ * "stark white SaaS page" this whole design system is built to read as more considered than (§3
+ * anti-pattern list, §4.2's "cold near-black" for the dark end). Pulled down to 0.96 and given
+ * more chroma (0.007 → matches the dark theme's own 0.008 at the equivalent end of the ramp) so
+ * it reads as tinted paper, not a blank browser default — flagged live against the running app,
+ * not caught by any contrast check, because contrast was never the problem. */
+[data-theme="light"] {
+  color-scheme: light;
+
+  --color-background: oklch(0.960 0.007 250);
+  --color-surface: oklch(0.938 0.009 250);
+  --color-surface-2: oklch(0.905 0.011 250);
+  --color-surface-3: oklch(0.870 0.013 250);
+  --color-border: oklch(0.820 0.015 250);
+  --color-border-strong: oklch(0.710 0.017 250);
+
+  /*   token             bg     surface  surface-2  surface-3
+       foreground       16.9     15.8       14.3       12.8
+       muted-foreground  7.21     6.75       6.11       5.47
+       faint             6.07     5.68       5.14       4.60   */
+  --color-foreground: oklch(0.175 0.010 250);
+  --color-muted-foreground: oklch(0.430 0.014 250);
+  --color-faint: oklch(0.470 0.016 250);
+
+  /* 4.92:1 against --color-background, the case that matters. */
+  --color-signal: oklch(0.535 0.180 48);
+  --color-signal-dim: oklch(0.535 0.180 48 / 0.12);
+  --color-signal-active: oklch(0.535 0.180 48 / 0.22);
+
+  --color-invalid: oklch(0.520 0.190 25);
+  --color-invalid-dim: oklch(0.520 0.190 25 / 0.12);
+
+  /* Black hairlines, not white — the grid has to read as graph paper on a
+     near-white page too. Same 4% ceiling. */
+  --graph-rule: repeating-linear-gradient(
+      to right,
+      oklch(0 0 0 / 0.04) 0 1px,
+      transparent 1px 24px
+    ),
+    repeating-linear-gradient(to bottom, oklch(0 0 0 / 0.04) 0 1px, transparent 1px 24px);
+}
+
 @layer base {
   * {
     border-color: var(--color-border);
   }
 
   html {
-    color-scheme: dark;
+    /* `color-scheme` itself is set per-theme above (`:root`/`[data-theme]`),
+       not hardcoded here — it flips native form controls and scrollbars to
+       match whichever theme is active. */
     -webkit-text-size-adjust: 100%;
   }
 

@@ -1,10 +1,33 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#0B0D10" />
+
+    <!-- Sets `data-theme` synchronously, before any stylesheet paints, so a light-preferring
+         browser never flashes dark first. Mirrors theme/themeStore.ts's resolution order
+         exactly (explicit localStorage choice, then OS preference) — kept as inline duplicate
+         logic on purpose: it has to run before React (or even the bundled JS) is on the page at
+         all, which an import from main.tsx cannot do. -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("ayumind.theme");
+          var theme =
+            stored === "light" || stored === "dark"
+              ? stored
+              : window.matchMedia("(prefers-color-scheme: light)").matches
+                ? "light"
+                : "dark";
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.style.colorScheme = theme;
+        } catch (e) {
+          /* localStorage/matchMedia unavailable — theme.css's `:root` default (dark) stands */
+        }
+      })();
+    </script>
 
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 

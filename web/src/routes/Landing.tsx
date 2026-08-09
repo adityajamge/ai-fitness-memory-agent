@@ -14,10 +14,13 @@
  * disqualifying), a logo wall, pricing, a three-column icon grid, and any gradient.
  */
 
+import { useEffect, useState } from "react";
 import { m, useReducedMotion } from "motion/react";
 import { Link } from "react-router";
+import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import MoltenMetal from "@/components/effects/MoltenMetal";
 import { Button } from "@/components/ui/Button";
+import { useTheme } from "@/theme/themeStore";
 import { cn } from "@/lib/utils";
 
 /** Scroll-triggered reveal. Fires once and never re-triggers on scroll-up (§8.5) — a section that
@@ -69,22 +72,52 @@ function Section({
   );
 }
 
+/** MoltenMetal's fragment shader alpha-composites normally (premultiplied `col * a, a` over a
+ * transparent clear) rather than blending additively, so — unlike most WebGL "glow" backgrounds —
+ * it isn't structurally locked to a dark canvas. What has to change per theme is which end of the
+ * ramp reads as "hot": on dark, white (`color3`) is the brightest thing the canvas can show; on
+ * light, white would vanish into the page, so the core needs to be the DARKEST, most saturated
+ * color instead, and `blackPoint`/`brightness` are pulled back so the shape stays airy — mostly
+ * transparent wisps with color accents — rather than a dark blob overwhelming a white hero. */
+const MOLTEN_THEME = {
+  dark: { color1: "#5227FF", color2: "#FF9FFC", color3: "#FFFFFF", blackPoint: 0.05, brightness: 1.3, glow: 1.6 },
+  light: { color1: "#B9A6FF", color2: "#8B2F6B", color3: "#0D0416", blackPoint: 0.14, brightness: 1.1, glow: 1.45 },
+} as const;
+
 export function Landing() {
   const reduce = useReducedMotion();
+  const theme = useTheme();
+
+  // The header floats transparently over the hero from y=0 so the animated background reads
+  // through it; below content is themeable, so past the hero it needs a real, theme-aware surface
+  // instead of staying transparent over a themed page it was never designed to blur over. Added
+  // 2026-08-09 alongside the light theme (§16 Decisions Log) — before that, every section on this
+  // page was dark, so a transparent header never had a second surface to disagree with.
+  const [isScrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   return (
     <div className="min-h-dvh">
       {/* `fixed`, not `sticky`: it needs to visually float over the hero's shader background
-          from y=0, which a sticky element (in normal flow, pushed below the hero) cannot do.
-          Transparent + blurred rather than the old solid `bg-background/80`, so the animated
-          background reads *through* it instead of stopping dead at a black bar (the thing this
-          whole change was for). Every section below is dark by design (§5.2), so legibility
-          holds once scrolled past the hero too — there is no light surface anywhere to fight. */}
-      <header className="fixed inset-x-0 top-0 z-30 border-b border-transparent backdrop-blur transition-colors duration-240">
+          from y=0, which a sticky element (in normal flow, pushed below the hero) cannot do. */}
+      <header
+        className={cn(
+          "fixed inset-x-0 top-0 z-30 transition-colors duration-240",
+          isScrolled
+            ? "border-b border-border bg-background/90 backdrop-blur"
+            : "border-b border-transparent backdrop-blur",
+        )}
+      >
         <nav className="mx-auto flex h-14 w-full max-w-marketing items-center gap-3 px-6">
           <img src="/logo.png" alt="AyuMind AI" className="h-9 w-9 shrink-0 object-contain" />
           <span className="text-dense font-medium text-foreground">AyuMind AI</span>
           <div className="ml-auto flex items-center gap-2">
+            <ThemeToggle />
             <Link to="/login">
               <Button variant="ghost" size="sm">Sign in</Button>
             </Link>
@@ -95,26 +128,24 @@ export function Landing() {
         </nav>
       </header>
 
-      {/* ── Hero (§8.2). Left-weighted, full-bleed, no centered composition. ─────────────── */}
-      <div className="relative overflow-hidden">
+      {/* ── Hero (§8.2). Left-weighted, full-bleed, no centered composition. `bg-background` is
+          load-bearing, not decorative: under `prefers-reduced-motion` MoltenMetal renders nothing
+          at all (by design — see its own docstring), so this is what shows instead, and it must
+          match the real theme rather than assume dark. */}
+      <div className="relative overflow-hidden bg-background">
         {/* Deliberate DESIGN.md deviation — see MoltenMetal.tsx's docstring and §16 Decisions
             Log. Skipped entirely under prefers-reduced-motion (handled inside the component).
             Spans from y=0 (the actual top of the page, behind the now-transparent fixed header)
             rather than starting below it. */}
         <div aria-hidden="true" className="pointer-events-none absolute inset-0">
           <MoltenMetal
-            color1="#5227FF"
-            color2="#FF9FFC"
-            color3="#FFFFFF"
+            {...MOLTEN_THEME[theme]}
             speed={0.35}
             scale={4}
             detail={3}
-            glow={1.6}
             coreSize={0.1}
             swirl={1}
             fold={-0.2}
-            blackPoint={0.05}
-            brightness={1.3}
             colorMode="molten"
             grain
             grainIntensity={0.05}

@@ -21,6 +21,11 @@ import App from "./App";
 import { isUnauthorized } from "./api/queries";
 import { markSessionExpired } from "./session/sessionStore";
 import "./styles/theme.css";
+// Side-effecting import: registers the system-theme-change listener immediately rather than
+// whenever a lazy route first renders a `ThemeToggle`. index.html's inline script already
+// prevents the first-paint flash; this just makes an OS theme flip (while nobody has toggled
+// manually) take effect right away instead of only on the next route/component mount.
+import "./theme/themeStore";
 
 /**
  * Every 401 in the app funnels here, whether it came from a query or a mutation. Catching it

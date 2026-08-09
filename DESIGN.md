@@ -367,9 +367,10 @@ That is the entire meaningful palette.
   plus text. This is a deliberate trade (§3, Risk 2).
 - Provenance and confidence use **no color at all** (§5.9).
 
-**Theme scope.** Dark-only for the hackathon. Every color is a CSS variable under `:root`, so a
-light theme is purely additive post-submission. Do not author light-mode styles in M4–M8; do not
-hardcode a hex anywhere.
+**Theme scope.** Both dark and light are supported (added 2026-08-09 — see §16 for how the
+original "dark-only, tokens light-ready" scope became additive rather than deferred). Every color
+is a CSS variable, resolved through `[data-theme="dark"|"light"]` in `theme.css` — do not hardcode
+a hex anywhere; that rule never changed, only which themes exist to serve.
 
 ### 5.3 Spacing
 
@@ -1280,7 +1281,12 @@ Every component must satisfy all twenty. A review that finds a violation blocks 
    insight caps in the timeline, the subject series in a chart, and focus rings. Nowhere else.
 8. Nothing is distinguished by hue alone (WCAG 1.4.1). Provenance is fill vs outline; confidence is
    a segment meter; status is icon + text.
-9. No light-mode styles in M4–M8. Dark-only, tokens ready.
+9. Both dark and light themes are supported (added 2026-08-09, superseding the original M4–M8
+   dark-only scope — see §16 Decisions Log). `[data-theme="dark"|"light"]` in `theme.css` is the
+   only place literal color values may appear; every component still reaches them only through
+   the same `@theme` tokens rule 6 already required. The landing page's hero is the one
+   exception, pinned to dark on purpose because `MoltenMetal`'s colors are hardcoded — see its
+   own entry in §16.
 
 **Form**
 
@@ -1414,3 +1420,4 @@ Numbered `F-T*` to stay clear of the T1–T18 backlog in
 | 2026-08-07 | **Mobile keyboard + timeline rail specified** (§5.8) | The keyboard covering the composer is the classic mobile-chat failure; a 300-day rail at 390px is 1px bars. Both were unspecified |
 | 2026-08-09 | **MoltenMetal (React Bits) added to the landing hero, breaking rules 6 and 12** | Explicit user instruction, given the trade-off (new `ogl` dependency, hardcoded hex colors, the exact "generic AI landing page" look §11 rejected React Bits for) and offered two on-brand alternatives first. Scoped narrowly: landing hero background only, lazy-loaded with the route so it does not touch the shared initial bundle, and skipped entirely under `prefers-reduced-motion` (rule 14 upheld even though upstream doesn't). Not a precedent for using React Bits elsewhere — §11's rejection stands everywhere else. |
 | 2026-08-09 | **Staged progress (§6.10) is a connected-dot trail, not a self-overwriting line** | Explicit user instruction, referencing Claude Code's own tool-call trail as the reference. Every `event: stage` frame now appends to the pending turn instead of replacing it (`ChatTurn`'s `pending.stage?: string` → `pending.stages: string[]`); completed stages render as dimmed static dots on a `--border` connector, the current stage keeps the pulsing dot. Verified live against the real dev backend (screenshot: two-then-three stage trail rendering correctly, `retrieving…` → `assembling context…` → `generating…`). No new tokens: reuses `--signal` for the active dot exactly where the prior single-line version already used it (a pre-existing exception to rule 7, not a new one), `--border`/`--faint` for everything else. |
+| 2026-08-09 | **Light theme added, superseding the original dark-only scope (rule 9, §5.2)** | Explicit user instruction. Literal colors now live in two mirrored `[data-theme]` blocks in `theme.css` instead of a single `:root`; every component reaches them through the same tokens as before (rule 6 unchanged), so this was zero component-level rewrites except a handful of call sites (below). `--signal` and `--invalid` are independently re-picked for light, not mirrored: dark's amber measured ~2.7:1 against a near-white background (well under the 4.5:1 body-text floor `text-signal` needs in `Receipt.tsx`), so both were darkened until they cleared AA against `--color-background`; `--color-foreground`/`muted-foreground`/`faint` verified the same "worst-case surface" way rule 7's original dark ramp was (see `theme.css`'s comments for the full contrast tables). `--color-background` itself was **not** a straight lightness-mirror of dark's near-black: the first pass (oklch 0.985, ~4% chroma of dark's) read as stark, generic "SaaS white" once seen running — flagged live, not by any contrast check, since contrast was never the problem — and was pulled down to 0.96 with chroma raised to match dark's own ramp, the whole surface stack shifted with it. Default follows `prefers-color-scheme`; an explicit toggle choice (`theme/themeStore.ts`, localStorage) wins over the OS setting from then on. `index.html` carries a small inline script duplicating the store's resolution order so the correct theme applies before first paint — an import from `main.tsx` cannot run early enough to prevent a flash. **The landing hero adapts too**, not a dark-only exception: `MoltenMetal`'s fragment shader turned out to alpha-composite normally (premultiplied, over a transparent clear) rather than additively, so unlike most WebGL "glow" backgrounds it isn't structurally locked to a dark canvas — `Landing.tsx` now picks a second `color1`/`color2`/`color3`/`blackPoint`/`brightness` set for light (inverting which end of the ramp reads as "hot": white-hot core on dark, deep-violet core on light, since white would vanish into a light page), keyed off `useTheme()`. That also let the header's scroll-aware forced-dark-over-the-hero hack (an earlier pass of this same change) get simpler: it no longer needs `data-theme="dark"` at all, just the transparent-over-hero / solid-once-scrolled surface swap, because the hero it floats over now genuinely matches the page's theme. Verified live in a real browser: dark and light, at the hero and scrolled, for the landing page, the app shell (empty + error states), auth, and 404. |
