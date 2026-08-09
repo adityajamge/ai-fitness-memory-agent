@@ -15,7 +15,7 @@
  * prevent.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import type { EvidenceTrace, InsightRef, MemoryRow } from "@/api/schemas";
 import { EmptyState } from "@/components/state/EmptyState";
@@ -210,8 +210,9 @@ export function EvidencePaneBody({
   );
 }
 
-/** Desktop shell: fixed 420px column with its own header. */
-export function EvidencePane(props: EvidencePaneProps) {
+/** Desktop shell: fixed 420px column with its own header. Memoized alongside `Conversation` and
+ * `Timeline` — its props are all derived from the selected turn, none from the composer draft. */
+export const EvidencePane = memo(function EvidencePane(props: EvidencePaneProps) {
   return (
     <aside
       aria-label="Memory engine"
@@ -231,4 +232,4 @@ export function EvidencePane(props: EvidencePaneProps) {
       </div>
     </aside>
   );
-}
+});

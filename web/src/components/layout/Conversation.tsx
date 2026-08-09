@@ -9,7 +9,7 @@
  * ever be judged on belongs to a reviewer.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { m, useReducedMotion } from "motion/react";
 import type { MemoryRow } from "@/api/schemas";
 import { Answer } from "@/components/glassbox/Answer";
@@ -152,7 +152,18 @@ function TurnBlock({
   );
 }
 
-export function Conversation({ turns, scrubDay, onScrubHandled, ...rest }: ConversationProps) {
+/**
+ * Memoized: this is the most expensive tree in the app (every turn re-parses its citation
+ * markers — see `Answer`), and its props never change on a composer keystroke. Without `memo`,
+ * `AppScreen` re-rendering on every character typed drags the whole conversation along with it,
+ * which is what "typing feels heavy" actually was.
+ */
+export const Conversation = memo(function Conversation({
+  turns,
+  scrubDay,
+  onScrubHandled,
+  ...rest
+}: ConversationProps) {
   const endRef = useRef<HTMLDivElement>(null);
   const turnRefs = useRef(new Map<string, HTMLDivElement>());
   const [scrubbedId, setScrubbedId] = useState<string | null>(null);
@@ -228,4 +239,4 @@ export function Conversation({ turns, scrubDay, onScrubHandled, ...rest }: Conve
       </div>
     </div>
   );
-}
+});

@@ -11,7 +11,7 @@
  * token control, and this needs it for the graph-rule background and the signal cap alone.
  */
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useTimeline } from "@/api/queries";
 import type { TimelineDay } from "@/api/schemas";
 import { cn } from "@/lib/utils";
@@ -95,7 +95,9 @@ export interface TimelineProps {
   onScrub?: (day: string) => void;
 }
 
-export function Timeline({ onScrub }: TimelineProps) {
+// Memoized: `onScrub` is a stable setState function passed from `AppScreen`, so this rail (up to
+// 90 SVG bars, remeasured and re-bucketed) has no reason to re-render on a composer keystroke.
+export const Timeline = memo(function Timeline({ onScrub }: TimelineProps) {
   const { data, isPending, isError, refetch } = useTimeline();
   const [hover, setHover] = useState<{ day: TimelineDay; x: number } | null>(null);
   const [isMobile, setIsMobile] = useState(
@@ -319,4 +321,4 @@ export function Timeline({ onScrub }: TimelineProps) {
       </table>
     </div>
   );
-}
+});

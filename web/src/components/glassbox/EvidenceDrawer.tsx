@@ -12,6 +12,7 @@
 
 import { Drawer } from "@base-ui/react/drawer";
 import { X } from "lucide-react";
+import { memo } from "react";
 import type { EvidenceTrace, MemoryRow } from "@/api/schemas";
 import { Button } from "@/components/ui/Button";
 import { EvidencePaneBody } from "./EvidencePane";
@@ -27,7 +28,9 @@ export interface EvidenceDrawerProps {
   activeId: string | null;
 }
 
-export function EvidenceDrawer({
+/** Memoized for the same reason as `EvidencePane` — mobile's equivalent of the desktop column,
+ * with none of its props tied to the composer draft. */
+export const EvidenceDrawer = memo(function EvidenceDrawer({
   isOpen,
   onOpenChange,
   ...body
@@ -63,4 +66,4 @@ export function EvidenceDrawer({
       </Drawer.Portal>
     </Drawer.Root>
   );
-}
+});

@@ -7,6 +7,7 @@
  * each other.
  */
 
+import { useCallback } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   ApiError,
@@ -117,8 +118,13 @@ export function useSendMessage() {
 }
 
 /** The same cache invalidation `useSendMessage` does on success, for callers driving the turn
- * through the SSE transport instead of a mutation. */
+ * through the SSE transport instead of a mutation.
+ *
+ * Memoized (`useCallback`, not a fresh closure per render): `AppScreen` puts this in a dependency
+ * array for its own memoized send handler, and an unstable reference here would recreate that
+ * handler — and every memoized child it's passed to — on every unrelated re-render (typing in the
+ * composer, most of all). */
 export function useInvalidateAfterTurn() {
   const queryClient = useQueryClient();
-  return () => invalidateTurnDerivedQueries(queryClient);
+  return useCallback(() => invalidateTurnDerivedQueries(queryClient), [queryClient]);
 }

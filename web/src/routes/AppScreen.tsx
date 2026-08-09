@@ -162,6 +162,10 @@ export function AppScreen() {
     [isDesktop],
   );
 
+  // A stable identity, same reason as `sendTurn` above: `Conversation` is memoized, and an inline
+  // arrow here would recreate `onScrubHandled` (and force a re-render) on every keystroke.
+  const clearScrubDay = useCallback(() => setScrubDay(null), []);
+
   // 401 before any request has ever succeeded means "not signed in", not "expired" — route to
   // login rather than raising a notice over an app the user cannot see anyway.
   if (isUnauthorized(stats.error) && !sessionExpired) {
@@ -188,7 +192,7 @@ export function AppScreen() {
    * through to the mutation that has carried every turn since M4. A frame the graph itself
    * produced (an `error` event) is not that — it is a real turn failure and is reported as one,
    * identically on both transports. */
-  function sendTurn(message: string, replaceId?: string) {
+  const sendTurn = useCallback((message: string, replaceId?: string) => {
     if (!message) return;
 
     const pendingId = nextId();
@@ -298,19 +302,16 @@ export function AppScreen() {
         onFailure(err);
       }
     })();
-  }
+    // `turns.length` (not `turns`): only the "was this the first turn" check in `onSuccess`
+    // reads it, so the identity only needs to change when the *count* does, not on every
+    // in-place turn update (streaming stages, retries) that leaves the length untouched.
+  }, [threadId, turns.length, send.mutate, invalidateAfterTurn]);
 
   function handleSubmit() {
     const message = draft.trim();
     if (!message) return;
     setDraft("");
     sendTurn(message);
-  }
-
-  /** §9 "click a timeline day scrubs the conversation to that date" — `scrubDay` is a one-shot
-   * signal Conversation consumes, then it is cleared so the same day can be clicked again. */
-  function handleScrub(day: string) {
-    setScrubDay(day);
   }
 
   /**
@@ -340,7 +341,7 @@ export function AppScreen() {
       {/* One of the four designed empty states (§6.9) — rendered unconditionally, so a brand-new
           account shows "your memory starts here" here too rather than nothing. */}
       <div ref={timelineRef} tabIndex={-1} className="outline-none">
-        <Timeline onScrub={handleScrub} />
+        <Timeline onScrub={setScrubDay} />
       </div>
 
       <div className="flex min-h-0 flex-1">
@@ -374,7 +375,7 @@ export function AppScreen() {
               onActivateCitation={activateCitation}
               onRetry={sendTurn}
               scrubDay={scrubDay}
-              onScrubHandled={() => setScrubDay(null)}
+              onScrubHandled={clearScrubDay}
             />
           )}
 
