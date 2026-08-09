@@ -9,9 +9,9 @@
  * Four rules, each a consequence of that:
  *
  * 1. **Stated and estimated quantities never look alike.** `stated` is what the user said;
- *    `ai_estimated` is a portion the model chose. They are different *kinds* of fact, so they
- *    get different tags — and, per WCAG 1.4.1, the difference is carried by the label and
- *    border style rather than by hue.
+ *    `ai_estimated` is a portion the model chose. They are different *kinds* of fact, and the
+ *    difference is spelled out in words next to the amount (`250 g · stated`) — carried by
+ *    text, never by hue, so it survives grayscale and a screen reader alike (WCAG 1.4.1).
  * 2. **Nothing here is re-derived.** Every value is read from `payload.nutrition`, which the
  *    engine computed and froze at write time. This component does no arithmetic — not even
  *    summing the components, because the stored total is the number the answer cited and a
@@ -113,71 +113,83 @@ function ConfidenceTag({ value }: { value: string }) {
   );
 }
 
-function QuantityTag({ basis }: { basis: string }) {
-  const stated = basis === "stated";
-  return (
-    <span
-      title={
-        stated
-          ? "you gave this quantity"
-          : "the model assumed this portion — you did not state it"
-      }
-      className={cn(
-        "rounded-xs px-1.5 py-0.5 font-mono text-micro uppercase tracking-[0.08em]",
-        stated
-          ? "bg-surface-3 text-muted-foreground"
-          : "border border-dashed border-border text-faint",
-      )}
-    >
-      {stated ? "stated" : "estimated"}
-    </span>
-  );
+/**
+ * Whether the model's reading of a food adds anything over the name the user used.
+ *
+ * "chicken breast" → "chicken breast, cooked, skinless" is worth a line: it says what was
+ * assumed. "dal" → "dal" is noise. Comparing loosely (case, punctuation) rather than exactly,
+ * because the near-identical case is the common one.
+ */
+function addsMeaning(understood: string | null, item: string): boolean {
+  if (!understood) return false;
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return norm(understood) !== norm(item);
 }
 
-function ComponentRow({ component }: { component: NutritionComponent }) {
+/**
+ * One food's contribution.
+ *
+ * Density is deliberate. The first pass showed the same fact up to three times — a `STATED`
+ * tag, a `250 g` chip, and a `user stated 250 g` note all saying one thing — which made a
+ * single-food meal look like a form. Each fact now appears once:
+ *
+ * - the **quantity and how it was known** merge into the heading (`250 g · stated`)
+ * - `qty_note` renders **only for an assumed portion**, where it carries the actual assumption;
+ *   for a stated quantity it can only ever restate the heading
+ * - `understood as` renders only when it differs from what the user wrote
+ */
+function ComponentRow({ component, showConfidence }: {
+  component: NutritionComponent;
+  showConfidence: boolean;
+}) {
   const item = str(component.item) ?? "unnamed";
   const protein = num(component.protein_g);
   const qty = num(component.qty_g);
   const basis = str(component.qty_basis) ?? "ai_estimated";
+  const isStated = basis === "stated";
   const confidence = str(component.confidence_class);
   const proteinBand = band(component.range, "protein_g");
   const assumptions = arr(component.assumptions).map(str).filter(Boolean) as string[];
   const understood = str(component.understood_as);
+  // Only meaningful when the model chose the portion; for a stated amount it restates the line
+  // directly above it.
+  const qtyNote = isStated ? null : str(component.qty_note);
 
   return (
     <li className="border-t border-border py-2 first:border-t-0">
       <div className="flex items-baseline justify-between gap-3">
-        <span className="text-dense text-foreground">{item}</span>
+        <span className="min-w-0 text-dense text-foreground">
+          {item}
+          {qty !== null && (
+            <span className="ml-1.5 font-mono text-meta tabular-nums text-faint">
+              {qty} g · {isStated ? "stated" : "estimated"}
+            </span>
+          )}
+        </span>
         <span className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground">
-          {protein === null ? "—" : `${basis === "stated" ? "" : "~"}${protein} g protein`}
+          {protein === null ? "—" : `${isStated ? "" : "~"}${protein} g`}
+          {proteinBand && (
+            <span className="text-faint">
+              {" "}
+              ({proteinBand[0]}–{proteinBand[1]})
+            </span>
+          )}
         </span>
       </div>
 
-      {understood && (
-        <p className="mt-0.5 text-meta text-muted-foreground">understood as {understood}</p>
+      {addsMeaning(understood, item) && (
+        <p className="mt-0.5 text-meta text-muted-foreground">read as {understood}</p>
       )}
-
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-        <QuantityTag basis={basis} />
-        {qty !== null && (
-          <span className="font-mono text-micro tabular-nums text-faint">{qty} g</span>
-        )}
-        {confidence && <ConfidenceTag value={confidence} />}
-        {proteinBand && (
-          <span
-            title="the model's own uncertainty band"
-            className="font-mono text-micro tabular-nums text-faint"
-          >
-            range {proteinBand[0]}–{proteinBand[1]} g
-          </span>
-        )}
-      </div>
-
-      {str(component.qty_note) && (
-        <p className="mt-1 text-meta text-faint">{str(component.qty_note)}</p>
-      )}
+      {qtyNote && <p className="mt-0.5 text-meta text-faint">{qtyNote}</p>}
       {assumptions.length > 0 && (
-        <p className="mt-1 text-meta text-faint">assumes {assumptions.join(" · ")}</p>
+        <p className="mt-0.5 text-meta text-faint">assumes {assumptions.join(" · ")}</p>
+      )}
+      {/* Per-food confidence is only worth showing when the foods disagree; when they all share
+          one class the header already said it once. */}
+      {showConfidence && confidence && (
+        <div className="mt-1">
+          <ConfidenceTag value={confidence} />
+        </div>
       )}
     </li>
   );
@@ -198,6 +210,11 @@ export function NutritionDerivation({ nutrition }: NutritionDerivationProps) {
   const proteinBand = band(nutrition.range, "protein_g");
   const excluded = num(nutrition.coverage?.excluded) ?? unresolved.length;
   const modelId = str(nutrition.method?.model_id);
+  // When every food shares the meal's confidence class, the header states it once and the
+  // per-food tags are pure repetition. They earn their place only when the foods disagree —
+  // which is exactly when the reader needs to know *which* food is the weak one.
+  const mixedConfidence =
+    new Set(components.map((c) => str(c.confidence_class) ?? "")).size > 1;
 
   return (
     <div className="mt-2 rounded-md border border-border bg-surface-2">
@@ -229,19 +246,38 @@ export function NutritionDerivation({ nutrition }: NutritionDerivationProps) {
             {confidence && <ConfidenceTag value={confidence} />}
             {proteinBand && (
               <span className="font-mono text-micro tabular-nums text-faint">
-                total range {proteinBand[0]}–{proteinBand[1]} g
+                {proteinBand[0]}–{proteinBand[1]} g
               </span>
             )}
-            <span className="font-mono text-micro text-faint">
-              {components.length} counted
-              {excluded > 0 ? ` · ${excluded} excluded` : ""}
-            </span>
+            {/* A count only earns its place once there is more than one food, or something was
+                left out. "1 counted" over a one-food meal is a label for a fact the reader can
+                already see — and a meal logged before this pipeline existed carries a total and
+                no breakdown at all, where "0 counted" would read as "we counted nothing". */}
+            {(components.length > 1 || excluded > 0) && (
+              <span className="font-mono text-micro text-faint">
+                {components.length} counted
+                {excluded > 0 ? ` · ${excluded} excluded` : ""}
+              </span>
+            )}
           </div>
+
+          {/* The honest reading of a pre-pipeline row: a stored estimate whose derivation was
+              never recorded, so there is nothing to open. Saying so beats an empty panel. */}
+          {components.length === 0 && excluded === 0 && (
+            <p className="mt-2 text-meta text-faint">
+              This estimate was stored before the engine recorded per-food derivations, so there
+              is no breakdown to show.
+            </p>
+          )}
 
           {components.length > 0 && (
             <ul className="mt-2">
               {components.map((component, i) => (
-                <ComponentRow key={`${str(component.item) ?? "item"}-${i}`} component={component} />
+                <ComponentRow
+                  key={`${str(component.item) ?? "item"}-${i}`}
+                  component={component}
+                  showConfidence={mixedConfidence}
+                />
               ))}
             </ul>
           )}

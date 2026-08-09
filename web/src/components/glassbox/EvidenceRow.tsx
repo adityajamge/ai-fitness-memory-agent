@@ -21,7 +21,10 @@ import { ChevronRight } from "lucide-react";
 import { m, useReducedMotion } from "motion/react";
 import type { EvidenceSnapshot, MemoryRow } from "@/api/schemas";
 import { cn } from "@/lib/utils";
+import { DetailLevelToggle } from "./DetailLevelToggle";
+import { useDetailLevel } from "./detailLevelStore";
 import { NutritionDerivation, readNutrition } from "./NutritionDerivation";
+import { PlainPayload } from "./PlainPayload";
 
 const SEGMENTS = 4;
 
@@ -89,6 +92,7 @@ export const EvidenceRow = forwardRef<HTMLLIElement, EvidenceRowProps>(function 
   const reduce = useReducedMotion();
   const when = new Date(evidence.event_time);
   const nutrition = row ? readNutrition(row.payload) : null;
+  const detail = useDetailLevel();
 
   return (
     <m.li
@@ -130,7 +134,9 @@ export const EvidenceRow = forwardRef<HTMLLIElement, EvidenceRowProps>(function 
               type="button"
               onClick={() => setOpen((v) => !v)}
               aria-expanded={isOpen}
-              aria-label={isOpen ? "Hide raw payload" : "Show raw payload"}
+              // Not "raw payload" any more: what this opens is plain English by default, and an
+              // accessible name that promises JSON would be wrong for most readers who follow it.
+              aria-label={isOpen ? "Hide memory details" : "Show memory details"}
               className="ml-auto flex items-center gap-1 font-mono text-micro text-faint transition-colors duration-120 hover:text-muted-foreground"
             >
               <ChevronRight
@@ -153,15 +159,32 @@ export const EvidenceRow = forwardRef<HTMLLIElement, EvidenceRowProps>(function 
 
       {isOpen && row && (
         <div className="border-t border-border px-3 py-2.5">
-          {/* Above the raw JSON, not instead of it: a macro total is the one value here the
-              engine did not transcribe, so it gets a reading that explains where it came from.
-              The payload dump stays underneath — this is a lens on it, never a replacement. */}
+          {/* First, not instead: a macro total is the one value here the engine did not
+              transcribe, so it gets a reading that explains where it came from — in both views,
+              because it is already human-readable and it is the best artifact in the pane. */}
           {nutrition && <NutritionDerivation nutrition={nutrition} />}
-          <pre className="mt-2 overflow-x-auto">
-            <code className="font-mono text-micro leading-relaxed text-muted-foreground">
-              {JSON.stringify(row.payload, null, 2)}
-            </code>
-          </pre>
+
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <span className="font-mono text-micro uppercase tracking-[0.08em] text-faint">
+              {detail === "plain" ? "what this memory says" : "stored row"}
+            </span>
+            <DetailLevelToggle />
+          </div>
+
+          {/* Two renderings of one payload. Plain by default because the raw row proves the
+              claim but does not explain it; raw one keystroke away because for some readers it
+              is the only thing that would. */}
+          <div className="mt-1.5">
+            {detail === "plain" ? (
+              <PlainPayload payload={row.payload} />
+            ) : (
+              <pre className="overflow-x-auto">
+                <code className="font-mono text-micro leading-relaxed text-muted-foreground">
+                  {JSON.stringify(row.payload, null, 2)}
+                </code>
+              </pre>
+            )}
+          </div>
           {/* Surfaced rather than hidden: a superseded row is still evidence, and knowing it was
               replaced is part of the honest record. */}
           {row.status !== "active" && (

@@ -13,10 +13,20 @@
 import { useState } from "react";
 import { ChevronRight } from "lucide-react";
 import type { RetrievalStep } from "@/api/schemas";
+import { ALWAYS_HIDDEN_PARAMS, INTERNAL_PARAMS } from "@/lib/internalFields";
 import { cn } from "@/lib/utils";
+import { useDetailLevel } from "./detailLevelStore";
 
-function StepBlock({ step }: { step: RetrievalStep }) {
-  const params = Object.entries(step.params);
+function StepBlock({ step, detail }: { step: RetrievalStep; detail: "plain" | "raw" }) {
+  // `user_id` goes in both views: every row in this pane belongs to the signed-in account by
+  // construction, so printing that account's UUID beside each query tells the reader nothing
+  // and hands them an internal identifier for no reason. The `%(user_id)s` placeholder stays
+  // in the SQL above, so the property worth seeing — every query is scoped to one account —
+  // is still on screen. Engine internals (JSONB paths, the query vector) go in raw only.
+  const params = Object.entries(step.params).filter(
+    ([key]) =>
+      !ALWAYS_HIDDEN_PARAMS.has(key) && (detail === "raw" || !INTERNAL_PARAMS.has(key)),
+  );
 
   return (
     <div className="rounded-md border border-border bg-background p-3">
@@ -55,6 +65,7 @@ function StepBlock({ step }: { step: RetrievalStep }) {
 
 export function RetrievalQueries({ steps }: { steps: RetrievalStep[] }) {
   const [isOpen, setOpen] = useState(false);
+  const detail = useDetailLevel();
   if (steps.length === 0) return null;
 
   return (
@@ -82,7 +93,7 @@ export function RetrievalQueries({ steps }: { steps: RetrievalStep[] }) {
       {isOpen && (
         <div className="mt-2 flex flex-col gap-2">
           {steps.map((step, i) => (
-            <StepBlock key={i} step={step} />
+            <StepBlock key={i} step={step} detail={detail} />
           ))}
         </div>
       )}
