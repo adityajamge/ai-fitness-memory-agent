@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate } from "react-router";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import { ApiError } from "@/api/client";
 import { StreamUnavailableError, streamChat } from "@/api/chatStream";
@@ -26,11 +27,13 @@ import { Conversation } from "@/components/layout/Conversation";
 import { TopBar } from "@/components/layout/TopBar";
 import { ErrorState } from "@/components/state/ErrorState";
 import { Timeline } from "@/components/timeline/Timeline";
+import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { SessionNotice } from "@/session/SessionNotice";
 import { useSessionExpired } from "@/session/sessionStore";
 import { getActiveThreadId, startNewThread } from "@/session/threadStore";
 import type { ChatTurn } from "@/types/turn";
+import { cn } from "@/lib/utils";
 
 let localId = 0;
 const nextId = () => `local-${++localId}`;
@@ -64,6 +67,10 @@ export function AppScreen() {
   // Set by a timeline click, consumed once by Conversation's scroll-and-highlight effect (§9
   // "click a timeline day"), then cleared here so clicking the same day twice still re-triggers.
   const [scrubDay, setScrubDay] = useState<string | null>(null);
+  // The evidence pane is "FIXED and never flexing" (§5.7) — collapsing it to 0 on request is a
+  // deliberate escape hatch, not a contradiction: nothing stretches to fill the reclaimed space
+  // automatically, the conversation column just gets more margin either side of its own cap.
+  const [isPaneCollapsed, setPaneCollapsed] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
   const seeded = useRef(false);
 
@@ -346,7 +353,7 @@ export function AppScreen() {
         <Timeline onScrub={setScrubDay} />
       </div>
 
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
         <main className="flex min-w-0 flex-1 flex-col">
           {stats.isPending ? (
             <div className="mx-auto flex w-full max-w-conversation flex-col gap-4 px-4 py-8 md:px-8">
@@ -400,10 +407,69 @@ export function AppScreen() {
           </div>
         </main>
 
-        {/* Fixed 420px, never flexes: evidence rows have a natural width and stretching them on a
-            wide monitor makes them harder to read, not easier (§5.7). */}
-        <div className="hidden w-pane shrink-0 lg:block">
-          <EvidencePane {...paneProps} isBusy={isSending} />
+        {/* Fixed 420px when open — never flexes, evidence rows have a natural width and
+            stretching them on a wide monitor makes them harder to read, not easier (§5.7) — or 0
+            when the user collapses it. `overflow-hidden` clips the pane's own content during
+            that width transition instead of letting it wrap/reflow mid-animation. */}
+        <div
+          className={cn(
+            "hidden shrink-0 overflow-hidden transition-[width] duration-medium ease-move lg:block",
+            isPaneCollapsed ? "w-0" : "w-pane",
+          )}
+        >
+          <div className="h-full w-pane">
+            <EvidencePane {...paneProps} isBusy={isSending} />
+          </div>
+        </div>
+
+        {/* The handle sits ON the border between the two columns on desktop — centered on it, not
+            beside it: `right` is offset by half the button's own 32px so its CENTER, not its
+            edge, lands on the boundary. Plain `calc()` on both axes rather than `top-1/2` +
+            `-translate-y-1/2`/`translate-x-1/2`, which measurably failed to hit-test correctly
+            here (confirmed live: `elementsFromPoint` reported this button on top, yet neither a
+            real mouse click nor Playwright's own actionability check could reach it — a
+            transform-vs-hit-testing mismatch, not a stacking/z-index problem, since a direct
+            `.click()` on the same element worked and correctly flipped the state).
+
+            Below `lg` there is no border to sit on — the pane is a drawer (§5.8), and this same
+            handle becomes its manual open/close, always at the screen's right edge, rather than
+            existing only for the citation gesture. `hidden`/`lg:block` (desktop-only visibility)
+            lived on THIS wrapper during an earlier, desktop-only version of this feature, not on
+            the `Button` itself — confirmed live (390px/834px viewports) that they don't work when
+            applied directly to `Button`: its base classes always include `inline-flex`, which
+            fights a consumer's `hidden`/`lg:flex` for the `display` property since `cn` does not
+            dedupe conflicting utilities (Tailwind resolves the conflict by generated-CSS order,
+            not JSX order — the same class of bug `Button.tsx`'s own `size="icon"` comment already
+            warns about). Kept as a wrapper now that the button renders on every breakpoint, since
+            the underlying hazard (never put a bare `display`-changing className on `Button`)
+            doesn't go away just because there's no longer a breakpoint gate on this one. */}
+        <div
+          className={cn(
+            "absolute top-[calc(50%-16px)] z-10",
+            "transition-[right] duration-medium ease-move",
+            isDesktop && !isPaneCollapsed
+              ? "right-[calc(var(--container-pane)-16px)]"
+              : "-right-4",
+          )}
+        >
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            onClick={() => (isDesktop ? setPaneCollapsed((v) => !v) : setDrawerOpen((v) => !v))}
+            aria-label={
+              (isDesktop ? isPaneCollapsed : !isDrawerOpen)
+                ? "Show memory engine"
+                : "Hide memory engine"
+            }
+            aria-expanded={isDesktop ? !isPaneCollapsed : isDrawerOpen}
+          >
+            {(isDesktop ? isPaneCollapsed : !isDrawerOpen) ? (
+              <PanelRightOpen className="size-4" strokeWidth={1.5} aria-hidden="true" />
+            ) : (
+              <PanelRightClose className="size-4" strokeWidth={1.5} aria-hidden="true" />
+            )}
+          </Button>
         </div>
       </div>
 

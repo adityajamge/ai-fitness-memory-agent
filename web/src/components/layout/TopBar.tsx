@@ -63,7 +63,7 @@ export function TopBar({ isBusy = false, onNewChat }: TopBarProps) {
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border px-4 md:px-6">
       <div className="flex items-center gap-2">
-        <Logo size={20} animated={false} glowStrength={0} />
+        <Logo size={24} glowStrength={0} />
         <span className="text-dense font-medium text-foreground">AyuMind AI</span>
       </div>
 

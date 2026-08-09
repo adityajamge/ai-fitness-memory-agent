@@ -1,13 +1,20 @@
 /**
- * The evidence pane on mobile — DESIGN.md §5.8, §9.
+ * The evidence pane on mobile/tablet — DESIGN.md §5.8, §9 (amended 2026-08-09, §16 Decisions Log).
  *
- * Below `lg` there is no honest way to show three panes, so the engine becomes a bottom drawer
- * that opens **on the same gesture that activates a citation chip**. That coupling is the point:
- * the claim→proof link is the product, and it is the last thing to be compromised on a small
- * screen.
+ * Below `lg` there is no honest way to show three panes side by side, so the engine becomes a
+ * drawer instead of a fixed column — opened either by the citation gesture or by the same handle
+ * that collapses the desktop pane (`AppScreen`'s toggle). **Slides in from the right**, mirroring
+ * where the pane lives on desktop, rather than the bottom sheet this used to be — explicit
+ * instruction, since "the engine becomes a bottom drawer" was itself a considered §5.8 decision
+ * (a half-height sheet above the mobile keyboard was the original reasoning; that trade-off is
+ * gone now, not forgotten).
  *
  * Base UI `Drawer` rather than `vaul`: vaul is unmaintained, and mixing it in would add a second
- * portal/focus system next to our Dialog with documented conflicts (DESIGN.md §11).
+ * portal/focus system next to our Dialog with documented conflicts (DESIGN.md §11). Positioning a
+ * side drawer isn't a built-in variant — Base UI drives it entirely through the consumer's own
+ * CSS (`swipeDirection` only controls the swipe-to-dismiss gesture) — so `Drawer.Popup` here is
+ * positioned exactly the way `EvidencePane`'s desktop column is: `fixed`, full height, docked
+ * right, `border-l`.
  */
 
 import { Drawer } from "@base-ui/react/drawer";
@@ -15,6 +22,7 @@ import { X } from "lucide-react";
 import { memo } from "react";
 import type { EvidenceTrace, MemoryRow } from "@/api/schemas";
 import { Button } from "@/components/ui/Button";
+import { cn } from "@/lib/utils";
 import { EvidencePaneBody } from "./EvidencePane";
 
 export interface EvidenceDrawerProps {
@@ -36,17 +44,18 @@ export const EvidenceDrawer = memo(function EvidenceDrawer({
   ...body
 }: EvidenceDrawerProps) {
   return (
-    <Drawer.Root open={isOpen} onOpenChange={onOpenChange}>
+    <Drawer.Root open={isOpen} onOpenChange={onOpenChange} swipeDirection="right">
       <Drawer.Portal>
-        <Drawer.Backdrop className="fixed inset-0 z-40 bg-black/60 backdrop-blur-[2px]" />
-        <Drawer.Popup className="fixed inset-x-0 bottom-0 z-50 flex max-h-[85dvh] flex-col rounded-t-lg border-t border-border bg-surface shadow-[var(--shadow-overlay)] focus:outline-none">
-          {/* A real grab handle: Base UI's SwipeArea makes the drag gesture work rather than
-              just drawing an affordance that does nothing. */}
-          <Drawer.SwipeArea className="flex shrink-0 justify-center py-2">
-            <span aria-hidden="true" className="h-1 w-9 rounded-full bg-border-strong" />
-          </Drawer.SwipeArea>
-
-          <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 pb-3">
+        <Drawer.Backdrop className="fixed inset-0 z-40 bg-black/60 backdrop-blur-[2px] transition-opacity duration-medium ease-move data-ending-style:opacity-0 data-starting-style:opacity-0" />
+        <Drawer.Popup
+          className={cn(
+            "fixed inset-y-0 right-0 z-50 flex h-dvh w-pane max-w-[88vw] flex-col",
+            "border-l border-border bg-surface shadow-(--shadow-overlay) focus:outline-none",
+            "transition-transform duration-medium ease-move",
+            "data-ending-style:translate-x-full data-starting-style:translate-x-full",
+          )}
+        >
+          <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
             <Drawer.Title className="font-mono text-micro uppercase tracking-[0.08em] text-faint">
               Memory Engine
             </Drawer.Title>

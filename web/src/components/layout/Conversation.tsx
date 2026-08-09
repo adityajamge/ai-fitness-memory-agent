@@ -37,7 +37,7 @@ function PendingTurn({ stages, isReduced }: { stages: string[]; isReduced: boole
       className="flex gap-3"
       aria-live="polite"
     >
-      <Logo size={24} animated={false} glowStrength={0} className="mt-0.5" />
+      <Logo size={28} glowStrength={0} className="mt-0.5" />
 
       {stages.length === 0 ? (
         <span className="flex h-6 items-center">
@@ -144,7 +144,7 @@ function TurnBlock({
       transition={{ duration: reduce ? 0 : 0.24, ease: [0.2, 0, 0, 1] }}
       className="flex gap-3"
     >
-      <Logo size={24} animated={false} glowStrength={0} className="mt-0.5" />
+      <Logo size={28} glowStrength={0} className="mt-0.5" />
 
       <div className="flex min-w-0 flex-1 flex-col gap-2.5">
         {turn.receipts.map((receipt, i) => (
@@ -265,7 +265,7 @@ export const Conversation = memo(function Conversation({
           transition={{ duration: reduce ? 0 : 0.32, ease: [0.2, 0, 0, 1] }}
           className="flex flex-col items-center gap-4"
         >
-          <Logo size={64} />
+          <Logo size={112} />
           <div className="flex flex-col gap-1.5">
             <p className="text-lead text-foreground">Ask something.</p>
             <p className="max-w-[44ch] text-meta text-muted-foreground">
