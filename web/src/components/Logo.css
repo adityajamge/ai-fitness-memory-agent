@@ -1,0 +1,56 @@
+/* Keyframes for Logo.tsx — kept in their own stylesheet rather than inline `<style>` tags per
+ * instance (the source `.dc.html` export did that), matching the MoltenMetal.css precedent:
+ * `@keyframes` are global by nature, so defining them once here and referencing them by name from
+ * as many `<Logo>` instances as the page renders is both correct and the cheaper option. */
+
+@keyframes logo-beat {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  8% {
+    transform: scale(1.035);
+  }
+  16% {
+    transform: scale(1);
+  }
+  24% {
+    transform: scale(1.018);
+  }
+  34% {
+    transform: scale(1);
+  }
+}
+
+@keyframes logo-ecg-flow {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -264;
+  }
+}
+
+@keyframes logo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes logo-spin-back {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+@keyframes logo-node-glow {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(0.86);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.14);
+  }
+}

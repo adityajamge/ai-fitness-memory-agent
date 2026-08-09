@@ -16,7 +16,7 @@ import { useState, type FormEvent } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 import { ApiError, login as loginRequest, signup as signupRequest } from "@/api/client";
-import { Mark } from "@/components/Mark";
+import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
 
@@ -103,7 +103,7 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
       <div className="relative flex min-h-dvh items-center px-6 md:px-[max(6vw,48px)]">
         <div className="w-full max-w-[380px]">
           <Link to="/" aria-label="AyuMind AI home" className="inline-block">
-            <Mark size={20} interactive />
+            <Logo size={20} animated={false} glowStrength={0} />
           </Link>
 
           <h1 className="mt-8 text-h2 text-foreground">{copy.title}</h1>

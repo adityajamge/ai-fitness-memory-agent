@@ -14,13 +14,11 @@
  * disqualifying), a logo wall, pricing, a three-column icon grid, and any gradient.
  */
 
-import { useEffect, useState } from "react";
 import { m, useReducedMotion } from "motion/react";
 import { Link } from "react-router";
-import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import MoltenMetal from "@/components/effects/MoltenMetal";
+import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/Button";
-import { useTheme } from "@/theme/themeStore";
 import { cn } from "@/lib/utils";
 
 /** Scroll-triggered reveal. Fires once and never re-triggers on scroll-up (§8.5) — a section that
@@ -72,52 +70,30 @@ function Section({
   );
 }
 
-/** MoltenMetal's fragment shader alpha-composites normally (premultiplied `col * a, a` over a
- * transparent clear) rather than blending additively, so — unlike most WebGL "glow" backgrounds —
- * it isn't structurally locked to a dark canvas. What has to change per theme is which end of the
- * ramp reads as "hot": on dark, white (`color3`) is the brightest thing the canvas can show; on
- * light, white would vanish into the page, so the core needs to be the DARKEST, most saturated
- * color instead, and `blackPoint`/`brightness` are pulled back so the shape stays airy — mostly
- * transparent wisps with color accents — rather than a dark blob overwhelming a white hero. */
-const MOLTEN_THEME = {
-  dark: { color1: "#5227FF", color2: "#FF9FFC", color3: "#FFFFFF", blackPoint: 0.05, brightness: 1.3, glow: 1.6 },
-  light: { color1: "#B9A6FF", color2: "#8B2F6B", color3: "#0D0416", blackPoint: 0.14, brightness: 1.1, glow: 1.45 },
-} as const;
-
 export function Landing() {
   const reduce = useReducedMotion();
-  const theme = useTheme();
-
-  // The header floats transparently over the hero from y=0 so the animated background reads
-  // through it; below content is themeable, so past the hero it needs a real, theme-aware surface
-  // instead of staying transparent over a themed page it was never designed to blur over. Added
-  // 2026-08-09 alongside the light theme (§16 Decisions Log) — before that, every section on this
-  // page was dark, so a transparent header never had a second surface to disagree with.
-  const [isScrolled, setScrolled] = useState(false);
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 8);
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
 
   return (
-    <div className="min-h-dvh">
+    // Pinned dark regardless of the site-wide theme toggle (§16 Decisions Log, 2026-08-09,
+    // amending the light-theme work from earlier the same day): explicit instruction — the
+    // landing page keeps MoltenMetal's hardcoded-dark hero and everything below it in that same
+    // dark register, rather than the rest of the page adapting to light. `[data-theme]` is
+    // theme.css's own nesting mechanism (see its comments), the same trick that used to pin only
+    // the hero before this page went back to dark-only wholesale. `bg-background` here too, not
+    // just on individual sections: `<body>` sits outside this div and stays on the real
+    // site-wide theme, so without this a light-themed visitor could see a hairline of `<body>`'s
+    // light background at the document's bottom edge (sub-pixel layout rounding).
+    <div data-theme="dark" className="min-h-dvh bg-background">
       {/* `fixed`, not `sticky`: it needs to visually float over the hero's shader background
-          from y=0, which a sticky element (in normal flow, pushed below the hero) cannot do. */}
-      <header
-        className={cn(
-          "fixed inset-x-0 top-0 z-30 transition-colors duration-240",
-          isScrolled
-            ? "border-b border-border bg-background/90 backdrop-blur"
-            : "border-b border-transparent backdrop-blur",
-        )}
-      >
+          from y=0, which a sticky element (in normal flow, pushed below the hero) cannot do.
+          Transparent + blurred rather than a solid bar, so the animated background reads
+          *through* it — every section below is dark by construction now, so legibility holds
+          once scrolled past the hero too; there is no second surface for it to disagree with. */}
+      <header className="fixed inset-x-0 top-0 z-30 border-b border-transparent backdrop-blur transition-colors duration-240">
         <nav className="mx-auto flex h-14 w-full max-w-marketing items-center gap-3 px-6">
-          <img src="/logo.png" alt="AyuMind AI" className="h-9 w-9 shrink-0 object-contain" />
+          <Logo size={36} animated={false} glowStrength={0} />
           <span className="text-dense font-medium text-foreground">AyuMind AI</span>
           <div className="ml-auto flex items-center gap-2">
-            <ThemeToggle />
             <Link to="/login">
               <Button variant="ghost" size="sm">Sign in</Button>
             </Link>
@@ -130,8 +106,8 @@ export function Landing() {
 
       {/* ── Hero (§8.2). Left-weighted, full-bleed, no centered composition. `bg-background` is
           load-bearing, not decorative: under `prefers-reduced-motion` MoltenMetal renders nothing
-          at all (by design — see its own docstring), so this is what shows instead, and it must
-          match the real theme rather than assume dark. */}
+          at all (by design — see its own docstring), so this dark backdrop is what shows
+          instead. */}
       <div className="relative overflow-hidden bg-background">
         {/* Deliberate DESIGN.md deviation — see MoltenMetal.tsx's docstring and §16 Decisions
             Log. Skipped entirely under prefers-reduced-motion (handled inside the component).
@@ -139,13 +115,18 @@ export function Landing() {
             rather than starting below it. */}
         <div aria-hidden="true" className="pointer-events-none absolute inset-0">
           <MoltenMetal
-            {...MOLTEN_THEME[theme]}
+            color1="#5227FF"
+            color2="#FF9FFC"
+            color3="#FFFFFF"
             speed={0.35}
             scale={4}
             detail={3}
+            glow={1.6}
             coreSize={0.1}
             swirl={1}
             fold={-0.2}
+            blackPoint={0.05}
+            brightness={1.3}
             colorMode="molten"
             grain
             grainIntensity={0.05}
@@ -193,20 +174,20 @@ export function Landing() {
               </div>
             </div>
 
-            {/* Right-side mark, continuously animated — decorative only (`aria-hidden`, empty
-                alt: the header's img already carries the accessible "AyuMind AI" name), so
-                hiding it below `lg` costs nothing and keeps a tight viewport uncluttered.
-                Reduced-motion gets the same mark with no animation, never a missing image. */}
-            <m.img
-              src="/logo.png"
-              alt=""
-              aria-hidden="true"
-              className="hidden h-56 w-56 justify-self-center object-contain lg:block xl:h-72 xl:w-72"
+            {/* Right-side mark — decorative only (`Logo` defaults to `aria-hidden`; the nav's
+                visible "AyuMind AI" text already carries the name), so hiding it below `lg` costs
+                nothing and keeps a tight viewport uncluttered. `Logo`'s own animation (rings, ECG
+                flow, heartbeat scale) already honors reduced motion; this wrapper's *added* float
+                is the one extra motion layer that needs its own opt-out. */}
+            <m.div
+              className="hidden justify-self-center lg:block"
               {...(!reduce && {
                 animate: { y: [0, -18, 0], rotate: [-3, 3, -3] },
                 transition: { duration: 7, repeat: Infinity, ease: "easeInOut" as const },
               })}
-            />
+            >
+              <Logo size={288} className="h-56 w-56 xl:h-72 xl:w-72" />
+            </m.div>
           </div>
 
           {/* The hero visual IS the product: a real cited answer, not a screenshot of one. */}
@@ -415,7 +396,7 @@ GROUP BY 1 ORDER BY 1;`}</code>
 
       <footer className="border-t border-border">
         <div className="mx-auto flex w-full max-w-marketing flex-wrap items-center gap-3 px-6 py-8">
-          <img src="/logo.png" alt="AyuMind AI" className="h-5 w-5 shrink-0 object-contain" />
+          <Logo size={20} animated={false} glowStrength={0} aria-label="AyuMind AI" />
           <span className="text-meta text-faint">Your memory, structured and provable.</span>
           <a
             href="https://github.com/adityajamge/ai-fitness-memory-agent"

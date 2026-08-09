@@ -6,14 +6,14 @@
  */
 
 import { Link } from "react-router";
-import { Mark } from "@/components/Mark";
+import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/Button";
 
 export function NotFound() {
   return (
     <main className="flex min-h-dvh items-center px-6 md:px-[max(6vw,48px)]">
       <div className="max-w-[52ch]">
-        <Mark size={20} />
+        <Logo size={20} animated={false} glowStrength={0} />
         <p className="mt-8 font-mono text-micro uppercase tracking-[0.08em] text-faint">404</p>
         <h1 className="mt-2 text-h2 text-foreground">There's nothing at this address.</h1>
         <p className="mt-3 text-body text-muted-foreground">

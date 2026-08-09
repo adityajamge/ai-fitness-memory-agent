@@ -14,6 +14,7 @@ import { m, useReducedMotion } from "motion/react";
 import type { MemoryRow } from "@/api/schemas";
 import { Answer } from "@/components/glassbox/Answer";
 import { Receipt } from "@/components/glassbox/Receipt";
+import { Logo } from "@/components/Logo";
 import { ErrorState } from "@/components/state/ErrorState";
 import { cn } from "@/lib/utils";
 import type { ChatTurn } from "@/types/turn";
@@ -36,12 +37,7 @@ function PendingTurn({ stages, isReduced }: { stages: string[]; isReduced: boole
       className="flex gap-3"
       aria-live="polite"
     >
-      <img
-        src="/logo.png"
-        alt=""
-        aria-hidden="true"
-        className="mt-0.5 h-6 w-6 shrink-0 object-contain"
-      />
+      <Logo size={24} animated={false} glowStrength={0} className="mt-0.5" />
 
       {stages.length === 0 ? (
         <span className="flex h-6 items-center">
@@ -148,12 +144,7 @@ function TurnBlock({
       transition={{ duration: reduce ? 0 : 0.24, ease: [0.2, 0, 0, 1] }}
       className="flex gap-3"
     >
-      <img
-        src="/logo.png"
-        alt=""
-        aria-hidden="true"
-        className="mt-0.5 h-6 w-6 shrink-0 object-contain"
-      />
+      <Logo size={24} animated={false} glowStrength={0} className="mt-0.5" />
 
       <div className="flex min-w-0 flex-1 flex-col gap-2.5">
         {turn.receipts.map((receipt, i) => (
