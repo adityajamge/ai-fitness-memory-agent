@@ -463,22 +463,25 @@ moves.
 
 ### 5.7 Grid and layout
 
-**App (wireframe v3), desktop ≥1280px:**
+**App (wireframe v4 — thread sidebar added 2026-08-09, §16), desktop ≥1280px:**
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│ top bar            56px   mark · stats (mono) · account  │
-├──────────────────────────────────────────────────────────┤
-│ timeline strip     72px   full width, graph rule behind  │
-├───────────────────────────────┬──────────────────────────┤
-│ conversation                  │ memory engine pane       │
-│ minmax(560px, 1fr)            │ 420px fixed              │
-│                               │                          │
-│                               │                          │
-├───────────────────────────────┴──────────────────────────┤
-│ composer           auto     "Ask anything, or log it."   │
-└──────────────────────────────────────────────────────────┘
+┌────────────┬───────────────────────────────────────────────┐
+│            │ top bar            56px   mark · stats · acct │
+│  sidebar   ├───────────────────────────────────────────────┤
+│  272px     │ timeline strip     72px   full width           │
+│  fixed,    ├────────────────────────────────┬──────────────┤
+│  full      │ conversation                   │ memory engine│
+│  viewport  │ minmax(560px, 1fr)             │ 420px fixed  │
+│  height    │                                │              │
+│            ├────────────────────────────────┴──────────────┤
+│            │ composer           auto                        │
+└────────────┴───────────────────────────────────────────────┘
 ```
+
+The sidebar is a **peer of the top bar, not nested under it** — full viewport height, same as
+ChatGPT's own layout, rather than scoped to "below the header." It is fixed at **272px** and
+collapsible (a handle on its own border, same mechanism as the pane's), never a drawer on desktop.
 
 The engine pane is **fixed at 420px** and does not flex. Evidence rows have a natural width; letting
 the pane grow on a wide monitor produces stretched, unreadable rows.
@@ -506,9 +509,9 @@ Tailwind defaults are kept as tokens, but only three transitions are *designed*:
 
 | Range | Name | Layout |
 |---|---|---|
-| < 768px | **mobile** | Single column. Conversation full-width. Engine pane becomes a **right-side drawer** (amended 2026-08-09 from an original bottom sheet — §16) opened by tapping a citation chip or the pane handle. Timeline collapses to a horizontally scrollable rail. Top-bar stats collapse to a single count with a tap-to-expand sheet. |
-| 768–1279px | **tablet** | Two columns. Conversation + engine pane, but the pane is **collapsible** and defaults closed in portrait, open in landscape. Timeline full width, reduced to 48px. |
-| ≥ 1280px | **desktop** | Full three-region layout above. |
+| < 768px | **mobile** | Single column. Conversation full-width. Engine pane becomes a **right-side drawer** (amended 2026-08-09 from an original bottom sheet — §16) opened by tapping a citation chip or the pane handle; the thread sidebar (added 2026-08-09, §16) becomes a **left-side drawer** the same way, opened by its own handle. Timeline collapses to a horizontally scrollable rail. Top-bar stats collapse to a single count with a tap-to-expand sheet. |
+| 768–1279px | **tablet** | Two columns. Conversation + engine pane, but the pane is **collapsible** and defaults closed in portrait, open in landscape. The sidebar is a drawer at this width too, same as mobile — three simultaneous fixed-width columns (272 + conversation + 420) is a desktop-only claim. Timeline full width, reduced to 48px. |
+| ≥ 1280px | **desktop** | Full four-region layout above (sidebar, top bar/timeline/conversation, engine pane). |
 
 **The mobile decision is load-bearing and was made now, not later.** There is no honest way to show
 three panes on a 390px screen. Retrofitting this at M7 would mean rewriting every component; it is
@@ -1343,11 +1346,11 @@ Design decisions considered during the 2026-08-07 review and explicitly deferred
 
 | Deferred | Why |
 |---|---|
-| Light theme | ~1 day for a second designed ramp; demo, video and judging all happen on one screen. Tokens are structured so it is purely additive after the hackathon. |
+| ~~Light theme~~ **Shipped 2026-08-09** | Was ~1 day for a second designed ramp with demo/video/judging on one screen; requested explicitly, so the "purely additive" structure paid off — see §16. |
 | Reasoning lineage **graph** | A visualization project hiding in a bullet. First-to-cut per 07's build order; the text lineage list (§9, **shipped in M8**) is the shipped form. |
 | Command palette (§6.16) | Specified but cut-eligible. Ranks below every item in the Phase-6 priority list; the keyboard shortcuts stand without it. |
 | Password reset flow | Requires email delivery, which is infrastructure this project does not have and the demo does not need. |
-| Multi-thread conversation UI | `thread_id` exists in the API and the UI uses one thread. A thread switcher is product surface the demo never touches. |
+| ~~Multi-thread conversation UI~~ **Shipped 2026-08-09** | Was "the demo never touches it"; requested explicitly. `thread_id` already existing in the API (the reason this was cheap to defer) is exactly why it was cheap to build — see §16. |
 | Photo-ingest UI | **Not** this document's M7 (the timeline strip, shipped) — Phase 5's separately-numbered M7 (photo ingestion, the backend feature) is cut for the hackathon (see `TODOS.md`). The composer's camera affordance is not built in Phase 6 regardless. |
 | Onboarding tour / checklist | Rejected in favor of the single guided first turn (§9.1). A multi-step tour fights the conversation-first grammar two wireframe drafts already established. |
 | Settings / profile screen | No setting in this product changes anything a judge would see. |
@@ -1444,3 +1447,4 @@ Numbered `F-T*` to stay clear of the T1–T18 backlog in
 | 2026-08-09 | **A fifth empty state: the conversation for a returning account on a fresh thread** | Explicit user instruction, prompted by a screenshot of a real account (434 memories) showing a literal blank pane after "New chat" — `Conversation.tsx` rendered nothing at all when `turns.length === 0`, because that branch previously only existed to be skipped (`AppScreen`'s `isEmptyAccount` check routes genuinely empty accounts to `FirstRun` instead). Deliberately not a repeat of `FirstRun` — no example prompts, since this account already knows how to use the product — just `Logo` at 112px (animated; sized up from an initial 64px once seen running — small enough and singular enough on screen not to need the small/repeated-chrome calm treatment §16's Logo entry describes) plus the same two-line empty-state copy shape as every other row in §6.9's table. The one exception to that section's "never an illustration" rule, and documented as one there rather than silently. |
 | 2026-08-09 | **The engine pane gained a collapse toggle** (§5.7) | Explicit user instruction. A handle centered on the column border, built from the existing `Button` (`secondary`/`icon`, no new component) rather than a bespoke pill — `radius-full` stays reserved for the avatar (rule 10). Positioned with plain `calc()` on `top`/`right` rather than the more idiomatic `top-1/2 -translate-y-1/2`/`translate-x-1/2` combination: that measurably failed to hit-test correctly live (`elementsFromPoint` reported the button on top; neither a real mouse click nor Playwright's own actionability check could reach it, while a direct `.click()` on the same element worked and correctly flipped React state) — a transform-vs-hit-testing mismatch worth recording since the `top-1/2`/`-translate-y-1/2` pairing is used without issue elsewhere in this codebase (e.g. `Timeline.tsx`'s "now" marker), so the failure mode is specific to this combination, not that pattern generally. Collapsing sets pane width to 0 (`overflow-hidden` clips its content during the transition); nothing flexes to claim the reclaimed space, keeping §5.7's "does not flex" rule intact for the pane itself. A second bug, also caught live (screenshots at 390px/834px): the desktop-only `hidden lg:flex` visibility classes were first applied directly to the `Button`, and did nothing — `Button`'s own base classes always include `inline-flex`, which conflicts with a consumer's `display` override since `cn` does not dedupe (Tailwind resolves same-property conflicts by generated-CSS order, not JSX order — the exact class of bug `Button.tsx`'s own `size="icon"` comment already warns about). The button rendered uncollapsed on every viewport below `lg`, on top of the empty state's "Ask something." text with no way to dismiss it. Fixed by moving `hidden`/`lg:block` (and the rest of the positioning) onto a wrapping `<div>` instead — the same pattern already used one JSX block up for the pane's own visibility, which never had this problem because it was never applied to a `Button`. Extended the same day to render on every breakpoint, not desktop-only: below `lg` it now toggles `isDrawerOpen` instead of `isPaneCollapsed`, sitting at the screen's right edge since there's no column border to center on. This isn't a new deviation — §5.8 already specified "the pane handle" as one of two ways to open the mobile drawer (alongside the citation gesture) and tablet as "collapsible," neither of which had a working control on any breakpoint until this button existed at all. Still open: §5.8's "defaults closed in portrait, open in landscape" for tablet — this button makes that state reachable, but nothing sets it as a default yet. |
 | 2026-08-09 | **Mobile/tablet evidence drawer changed from a bottom sheet to a right-side sheet** (§5.8) | Explicit user instruction, after seeing the bottom sheet live and asking for it to "appear from right side, just like how on PC." Reverses the 2026-08-07 bottom-drawer decision on its own terms — that decision's stated reasoning (a half-height sheet is worse than either it or the keyboard alone) doesn't disqualify a right-side sheet, which doesn't compete with the keyboard for vertical space at all; §5.8's mobile-keyboard rules are amended in place to say so rather than left describing a drawer shape that no longer exists. Base UI's `Drawer` has no built-in side variant — `swipeDirection` only controls the swipe-to-dismiss gesture, not layout — so `Drawer.Popup` is positioned by hand exactly the way `EvidencePane`'s desktop column already is (`fixed`, full height, docked right, `border-l`, `w-pane` capped at `max-w-[88vw]` so it doesn't overflow a 360px phone). The top-of-sheet grab handle (`Drawer.SwipeArea`) is dropped entirely: it was a bottom-sheet-specific affordance with no equivalent on a side sheet, and the drawer already has two manual open/closes (the citation gesture and the same pane-handle button used on desktop) with nothing left needing a drag gesture to discover it. |
+| 2026-08-09 | **Thread sidebar shipped, un-deferring §13's "multi-thread conversation UI"** | Explicit user instruction ("just like ChatGPT... I can load that chats again"). Full-stack: `GET /api/threads` (`engine/glassbox.py::fetch_threads`, `api/routers/glassbox.py::list_threads`) is new — `turns.thread_id`/`user_id`/`created_at`/`content` already had everything needed, no migration. Two auth-required, user-scoped tests added (`api/tests/test_glassbox.py`, matching the file's own `ROUTES` sweep pattern so the route can't be added without the cross-user isolation check running against it) — all 20 tests in the file pass. `preview` is the thread's *first* user message, verbatim, never an LLM-generated title: a summary would need computing and storing somewhere, and could drift from the conversation it labels: the first thing someone actually typed cannot drift from itself. `thread_id` in the response is de-namespaced (`user_id:client_id` → `client_id`) the same way `list_turns` already documents doing, so the client only ever deals in the same raw ids it already mints and sends to `POST /api/chat`. Frontend: `Sidebar`/`SidebarDrawer` mirror `EvidencePane`/`EvidenceDrawer`'s desktop-column/mobile-drawer split exactly, on the opposite edge — collapsible via the same `calc()`-positioned wrapper-`<div>`-around-`Button` pattern (§5.7's collapse-toggle entry), `PanelLeft*` icons instead of `PanelRight*`. The sidebar is a **peer of the top bar, full viewport height** (§5.7's wireframe redrawn as v4), not nested inside the content column — ChatGPT's own layout, and the reason `AppScreen`'s root gained one more level of flex nesting. Switching threads (`AppScreen.switchToThread`, shared by "New chat" and picking a thread from the list) resets `seeded.current` to `false`: the history-seeding effect is designed to run at most once per thread by that guard (re-seeding an *open* thread would drop its receipts), so loading a *different* thread's history back in requires deliberately re-arming it, not just changing `threadId`. Verified end-to-end against the real dev backend, not mocks: two real threads created via the real chat graph, both listed most-recent-first, clicking the older one correctly swaps the conversation with no cross-thread bleed — dark and light, desktop and mobile. |

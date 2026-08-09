@@ -35,6 +35,7 @@ ROUTES = [
     ("get", lambda tid: "/api/turns"),
     ("get", lambda tid: "/api/stats"),
     ("get", lambda tid: "/api/timeline"),
+    ("get", lambda tid: "/api/threads"),
 ]
 
 
@@ -174,6 +175,44 @@ def test_turns_list_filters_by_the_caller_s_raw_thread_id(client, app_provider) 
 
     everything = client.get("/api/turns").json()["turns"]
     assert len(everything) == len(only_a) + len(only_b)
+
+
+# ── threads (sidebar) ─────────────────────────────────────────────────────────────────
+def test_threads_list_orders_by_recency_with_raw_ids_and_first_message_preview(
+    client, app_provider
+) -> None:
+    """The list a caller gets back must be usable without knowing `turns.thread_id` is
+    `user_id:thread_id` internally (same posture as `test_turns_list_filters_by_the_caller_s_
+    raw_thread_id`), ordered by whichever thread was touched most recently, and labeled by the
+    first thing the user actually typed — never a generated summary that could drift from it."""
+    _signup(client)
+    app_provider.plan_calls = [ToolCall(tool=LOG_MEMORY, arguments={"text": "lunch"})]
+    app_provider.events = [_meal_event()]
+    client.post("/api/chat", json={"message": "lunch: 200g chicken", "thread_id": "thread-a"})
+    client.post("/api/chat", json={"message": "second message", "thread_id": "thread-a"})
+    client.post("/api/chat", json={"message": "dinner: 3 eggs", "thread_id": "thread-b"})
+
+    threads = client.get("/api/threads").json()["threads"]
+
+    assert [t["thread_id"] for t in threads] == ["thread-b", "thread-a"], (
+        "most recently active thread first"
+    )
+    by_id = {t["thread_id"]: t for t in threads}
+    assert by_id["thread-a"]["preview"] == "lunch: 200g chicken", (
+        "the FIRST user message, not the latest"
+    )
+    assert by_id["thread-b"]["preview"] == "dinner: 3 eggs"
+
+
+def test_threads_list_never_shows_another_users_conversation(client, app_provider) -> None:
+    """I-28."""
+    _signup(client)
+    _log_then_ask(client, app_provider)
+
+    _logout(client)
+    _signup(client)
+
+    assert client.get("/api/threads").json()["threads"] == []
 
 
 # ── batch hydration (T16) ─────────────────────────────────────────────────────────────

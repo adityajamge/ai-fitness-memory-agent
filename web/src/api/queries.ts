@@ -13,6 +13,7 @@ import {
   ApiError,
   getMemoriesBatch,
   getStats,
+  getThreads,
   getTimeline,
   getTrace,
   getTurns,
@@ -29,6 +30,7 @@ export const queryKeys = {
   turns: (threadId?: string) => ["turns", threadId ?? "all"] as const,
   trace: (turnId: string) => ["trace", turnId] as const,
   memories: (ids: string[]) => ["memories", ...ids] as const,
+  threads: ["threads"] as const,
 };
 
 /** True when a rejection is specifically "not signed in", so callers can branch without
@@ -61,11 +63,16 @@ export function useTimeline() {
   return useQuery({ queryKey: queryKeys.timeline, queryFn: getTimeline });
 }
 
-/** Conversation history for one thread — the active thread, per `session/threadStore.ts`. Every
- * account has exactly one at a time; "New chat" swaps which thread is active rather than adding
- * a second one to read. */
+/** Conversation history for one thread — the active thread, per `session/threadStore.ts`. Only
+ * one thread is ever open in the UI at a time; the sidebar (`useThreads` below) is what lets a
+ * past thread become the active one again, not a second simultaneous read. */
 export function useTurns(threadId: string) {
   return useQuery({ queryKey: queryKeys.turns(threadId), queryFn: () => getTurns({ threadId }) });
+}
+
+/** The sidebar's data — this account's threads, most recently active first. */
+export function useThreads() {
+  return useQuery({ queryKey: queryKeys.threads, queryFn: () => getThreads() });
 }
 
 /** A turn's glass box. Enabled only for turns that have one — stage (G) is best-effort, and a
@@ -105,6 +112,9 @@ function invalidateTurnDerivedQueries(queryClient: QueryClient) {
   // only ever one active thread in the UI, but stale entries for an abandoned thread (from
   // before a "New chat") should not linger as reusable cache either.
   void queryClient.invalidateQueries({ queryKey: ["turns"] });
+  // A turn can start a brand-new thread or bump an existing one to the top of "most recently
+  // active" — the sidebar list is stale either way.
+  void queryClient.invalidateQueries({ queryKey: queryKeys.threads });
 }
 
 /** Send a turn over the plain, always-available transport (the SSE fallback target). */

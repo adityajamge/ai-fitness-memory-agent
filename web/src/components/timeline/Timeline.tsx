@@ -106,6 +106,12 @@ export const Timeline = memo(function Timeline({ onScrub }: TimelineProps) {
   const [railWidth, setRailWidth] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Hover perf: see `handleMove` below. `outerRect` is cached here rather than re-measured on
+  // every mousemove — it only actually changes on resize, so the ResizeObserver effect refreshes
+  // it alongside `railWidth`.
+  const outerRectRef = useRef<DOMRect | null>(null);
+  const pendingMoveRef = useRef<{ clientX: number; svg: SVGSVGElement } | null>(null);
+  const rafIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     const mq = window.matchMedia(MOBILE_QUERY);
@@ -116,14 +122,33 @@ export const Timeline = memo(function Timeline({ onScrub }: TimelineProps) {
 
   // Measures the rail itself, not the window — a chart embedded in a narrower column still gets
   // bars sized off the space it actually has.
+  //
+  // `[isPending]`, not `[]`: `containerRef` is only attached in the loaded branch below, not the
+  // skeleton one this component renders first (data is a real network fetch, so `isPending` is
+  // true on mount every time). An empty-deps effect runs once, sees `containerRef.current` still
+  // null, and gives up forever — `railWidth` stays 0, `contentWidth` falls back to `"100%"`, and
+  // the entire history gets squeezed to fit instead of capping at ~90 days with the rest a scroll
+  // away. Depending on `isPending` re-fires this effect exactly when the skeleton gives way to
+  // the real container, by which point the ref is populated.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const ro = new ResizeObserver(([entry]) => {
       if (entry) setRailWidth(entry.contentRect.width);
+      // Refreshed here, not on every mousemove — see `handleMove`.
+      outerRectRef.current = el.getBoundingClientRect();
     });
     ro.observe(el);
     return () => ro.disconnect();
+  }, [isPending]);
+
+  // The rAF loop this drives is per-component, not per-mount-forever, so it needs to stop when
+  // the component unmounts mid-frame (fast route change while hovering) rather than firing into
+  // a detached tree.
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current);
+    };
   }, []);
 
   const days = useMemo(() => fillRange(data?.days ?? []), [data]);
@@ -196,18 +221,45 @@ export const Timeline = memo(function Timeline({ onScrub }: TimelineProps) {
   const firstDay = days[0];
   const lastDay = days[days.length - 1];
 
-  // Index math reads the SVG's OWN rect (`event.currentTarget`), which reflects the current
-  // scroll offset of its scrolling ancestor — so this stays correct wherever the rail is
-  // scrolled to, on any breakpoint.
+  /**
+   * Rate-limited to one update per animation frame — plain per-event handling measurably felt
+   * late (reported live): raw `mousemove` can fire far faster than the screen repaints, and each
+   * call was doing two synchronous `getBoundingClientRect()` reads (forced layout) plus a
+   * `setState`, so fast mouse movement queued up more work than the browser could keep up with,
+   * and the highlight visibly trailed the cursor.
+   *
+   * The event itself is cheap to record (a ref write, no measurement); only the rAF callback that
+   * actually runs the math is throttled, and it always reads the LATEST recorded position rather
+   * than whatever position was current when the frame was scheduled — otherwise fast movement
+   * would track one frame behind instead of just missing the frames in between.
+   */
   function handleMove(event: ReactMouseEvent<SVGSVGElement>) {
-    const svgRect = event.currentTarget.getBoundingClientRect();
-    const ratio = (event.clientX - svgRect.left) / svgRect.width;
-    const index = Math.min(bars.length - 1, Math.max(0, Math.floor(ratio * bars.length)));
-    const day = bars[index];
-    // The tooltip is positioned against the OUTER (non-scrolling) container instead, so it
-    // reads correctly wherever the mouse currently is in the viewport.
-    const outerRect = containerRef.current?.getBoundingClientRect();
-    if (day && outerRect) setHover({ day, x: event.clientX - outerRect.left });
+    pendingMoveRef.current = { clientX: event.clientX, svg: event.currentTarget };
+    if (rafIdRef.current != null) return;
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = null;
+      const pending = pendingMoveRef.current;
+      const outerRect = outerRectRef.current;
+      if (!pending || !outerRect) return;
+      // The SVG's OWN rect (not cached — it moves under the cursor as the rail scrolls
+      // horizontally) is what index math needs; the OUTER, non-scrolling container's cached
+      // rect is what the tooltip's position needs, so it reads correctly wherever the mouse
+      // currently is in the viewport rather than scrolling away with the bars.
+      const svgRect = pending.svg.getBoundingClientRect();
+      const ratio = (pending.clientX - svgRect.left) / svgRect.width;
+      const index = Math.min(bars.length - 1, Math.max(0, Math.floor(ratio * bars.length)));
+      const day = bars[index];
+      if (day) setHover({ day, x: pending.clientX - outerRect.left });
+    });
+  }
+
+  function handleLeave() {
+    if (rafIdRef.current != null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    pendingMoveRef.current = null;
+    setHover(null);
   }
 
   const svgLabel = `Memory timeline: ${total} ${total === 1 ? "memory" : "memories"} across ${days.length} ${days.length === 1 ? "day" : "days"}, from ${firstDay?.day} to ${lastDay?.day}. Showing the most recent ~${VISIBLE_DAYS} days by default — scroll left for earlier history.`;
@@ -233,7 +285,7 @@ export const Timeline = memo(function Timeline({ onScrub }: TimelineProps) {
             preserveAspectRatio="none"
             className="h-full w-full"
             onMouseMove={handleMove}
-            onMouseLeave={() => setHover(null)}
+            onMouseLeave={handleLeave}
             onClick={() => hover && onScrub?.(hover.day.day)}
           >
             {bars.map((d, i) => {

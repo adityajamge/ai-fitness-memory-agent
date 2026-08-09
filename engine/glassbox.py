@@ -42,6 +42,10 @@ MAX_TURNS_PAGE = 100
 #: never needs more than a turn's worth of chips at once.
 MAX_BATCH = 200
 
+#: A thread list page (T-sidebar). Small for the same reason MAX_TURNS_PAGE is: a sidebar
+#: shows recent conversations, not a full account history.
+MAX_THREADS_PAGE = 50
+
 
 def fetch_trace(cur: psycopg.Cursor, user_id: UUID, turn_id: UUID) -> dict | None:
     """The persisted trace for a turn, plus the answer it explains.
@@ -89,6 +93,48 @@ def fetch_turns(
         {"user_id": user_id, "thread_id": thread_id, "limit": limit},
     )
     return list(reversed(cur.fetchall()))
+
+
+def fetch_threads(cur: psycopg.Cursor, user_id: UUID, *, limit: int = 20) -> list[dict]:
+    """Recent conversation threads, most recently active first (the sidebar's data).
+
+    ``preview`` is the thread's *first* user message, verbatim — never an LLM-generated title.
+    Rule 16 (no component derives structured data from model output) is about the frontend, but
+    the same instinct applies here: a summary would need to be computed and stored somewhere,
+    and would drift from the conversation it claims to label. The first message a person typed
+    cannot drift from itself.
+
+    Two passes rather than one `DISTINCT ON` sorted by recency directly, because `DISTINCT ON`
+    requires its `ORDER BY` to start with the distinct columns — sorting the *output* by
+    recency needs a second pass over the deduplicated set. ``thread_id`` here is still the
+    namespaced ``user_id:client_id`` form (see ``thread_key``); the router strips it, the same
+    split as it would have to do regardless of which query produced the value.
+    """
+    limit = max(1, min(limit, MAX_THREADS_PAGE))
+    cur.execute(
+        """
+        SELECT first_user_msg.thread_id, first_user_msg.preview, recency.last_message_at
+        FROM (
+          SELECT DISTINCT ON (t.thread_id)
+            t.thread_id,
+            t.content AS preview,
+            t.created_at
+          FROM turns t
+          WHERE t.user_id = %(user_id)s AND t.role = 'user'
+          ORDER BY t.thread_id, t.created_at ASC
+        ) first_user_msg
+        JOIN (
+          SELECT thread_id, max(created_at) AS last_message_at
+          FROM turns
+          WHERE user_id = %(user_id)s
+          GROUP BY thread_id
+        ) recency USING (thread_id)
+        ORDER BY last_message_at DESC
+        LIMIT %(limit)s
+        """,
+        {"user_id": user_id, "limit": limit},
+    )
+    return cur.fetchall()
 
 
 def fetch_memories(cur: psycopg.Cursor, user_id: UUID, ids: list[UUID]) -> list[dict]:

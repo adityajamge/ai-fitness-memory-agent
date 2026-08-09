@@ -16,6 +16,7 @@ import {
   BatchMemoriesResponse,
   ChatResponse,
   StatsResponse,
+  ThreadsResponse,
   TimelineResponse,
   TraceResponse,
   TurnsResponse,
@@ -111,6 +112,14 @@ export const getMemoriesBatch = (ids: string[]) =>
 export const getStats = () => request(`/api/stats`, StatsResponse);
 
 export const getTimeline = () => request(`/api/timeline`, TimelineResponse);
+
+/** The sidebar's data — this user's conversations, most recently active first. `thread_id` is
+ * already the raw id (the API strips the internal `user_id:` namespace), the same string this
+ * client hands `getTurns`/`POST /api/chat`. */
+export const getThreads = (limit?: number) => {
+  const qs = limit ? `?limit=${limit}` : "";
+  return request(`/api/threads${qs}`, ThreadsResponse);
+};
 
 /* ── auth ────────────────────────────────────────────────────────────────────────────────── */
 

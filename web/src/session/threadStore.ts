@@ -1,14 +1,14 @@
 /**
  * The active conversation thread.
  *
- * DESIGN.md keeps this product deliberately single-threaded (§13: a thread switcher is out of
- * scope) — this module does not change that. It only makes the one active thread *restartable*:
- * persisted in localStorage so a page reload continues the same thread instead of silently
- * minting a new one, and reset on "New chat" so a user with months of real history can start a
- * visibly empty conversation without touching a single row of it. The old thread's turns and
- * memories are untouched in the database; only what "active" points at changes, and there is no
- * UI path back to a previous thread — starting a new one is a one-way door by design, same as a
- * real "New chat" button anywhere else.
+ * Exactly one thread is ever open in the UI at a time — this module tracks *which* one, not a
+ * set. Persisted in localStorage so a page reload continues the same thread instead of silently
+ * minting a new one. "New chat" mints a fresh id (`startNewThread`); the sidebar (added
+ * 2026-08-09, §16 Decisions Log, un-deferring §13's "multi-thread conversation UI") points the
+ * same active-thread slot at an EXISTING id instead (`setActiveThread`) — same mechanism, the
+ * difference is only where the id comes from. Either way, switching never touches a row: the
+ * previously active thread's turns and memories are exactly as they were, just no longer what
+ * "active" points at.
  */
 
 const STORAGE_KEY = "ayumind.thread_id";
@@ -36,4 +36,11 @@ export function startNewThread(): string {
   const id = mintThreadId();
   window.localStorage.setItem(STORAGE_KEY, id);
   return id;
+}
+
+/** Points the active-thread slot at an existing id — the whole of "load this thread from the
+ * sidebar". No minting, no network call: the id is already real (it came from `GET /api/threads`
+ * or was already active), so this is pure bookkeeping for which thread the rest of the app reads. */
+export function setActiveThread(threadId: string): void {
+  window.localStorage.setItem(STORAGE_KEY, threadId);
 }

@@ -11,11 +11,18 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate } from "react-router";
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import { ApiError } from "@/api/client";
 import { StreamUnavailableError, streamChat } from "@/api/chatStream";
-import { isUnauthorized, useInvalidateAfterTurn, useSendMessage, useStats, useTurns } from "@/api/queries";
+import {
+  isUnauthorized,
+  useInvalidateAfterTurn,
+  useSendMessage,
+  useStats,
+  useThreads,
+  useTurns,
+} from "@/api/queries";
 import type { ChatResponse } from "@/api/schemas";
 import { FirstAskHint, FirstRun } from "@/components/FirstRun";
 import { EvidenceDrawer } from "@/components/glassbox/EvidenceDrawer";
@@ -24,6 +31,8 @@ import { useSelectedTrace } from "@/components/glassbox/useSelectedTrace";
 import { useTurnEvidence } from "@/components/glassbox/useTurnEvidence";
 import { Composer } from "@/components/layout/Composer";
 import { Conversation } from "@/components/layout/Conversation";
+import { Sidebar } from "@/components/layout/Sidebar";
+import { SidebarDrawer } from "@/components/layout/SidebarDrawer";
 import { TopBar } from "@/components/layout/TopBar";
 import { ErrorState } from "@/components/state/ErrorState";
 import { Timeline } from "@/components/timeline/Timeline";
@@ -31,7 +40,7 @@ import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { SessionNotice } from "@/session/SessionNotice";
 import { useSessionExpired } from "@/session/sessionStore";
-import { getActiveThreadId, startNewThread } from "@/session/threadStore";
+import { getActiveThreadId, setActiveThread, startNewThread } from "@/session/threadStore";
 import type { ChatTurn } from "@/types/turn";
 import { cn } from "@/lib/utils";
 
@@ -71,6 +80,12 @@ export function AppScreen() {
   // deliberate escape hatch, not a contradiction: nothing stretches to fill the reclaimed space
   // automatically, the conversation column just gets more margin either side of its own cap.
   const [isPaneCollapsed, setPaneCollapsed] = useState(false);
+  // The thread sidebar (§13, added 2026-08-09) — same collapsible-column-on-desktop,
+  // drawer-below-`lg` split as the evidence pane, mirrored on the opposite edge. Defaults open:
+  // a collapsed-by-default sidebar would make the whole feature invisible on first load.
+  const [isSidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [isSidebarDrawerOpen, setSidebarDrawerOpen] = useState(false);
+  const threads = useThreads();
   const timelineRef = useRef<HTMLDivElement>(null);
   const seeded = useRef(false);
 
@@ -324,37 +339,118 @@ export function AppScreen() {
   }
 
   /**
-   * "New chat" — starts a fresh thread without touching any stored memory.
+   * The one place the active thread changes — "New chat" and picking a thread from the sidebar
+   * both funnel through here, the only difference being where `newThreadId` comes from (freshly
+   * minted vs. an id the sidebar already had). Nothing here calls a delete endpoint or even a
+   * mutation: it swaps which thread is active (`session/threadStore.ts`), which changes
+   * `useTurns`'s query key — the thread being left is exactly as it was, just no longer the one
+   * on screen.
    *
-   * A visible reset for an account with real, permanent history (the whole point of this
-   * product) needs to be unmistakably non-destructive: nothing here calls a delete endpoint or
-   * even a mutation. It swaps which thread is active (`session/threadStore.ts`), which changes
-   * `useTurns`'s query key and clears the local conversation — the old thread's turns and
-   * memories are exactly as they were, just no longer the one on screen. There is no UI path
-   * back to it, by design (DESIGN.md §13: no thread switcher), but the data was never at risk.
+   * `seeded.current = false` is what makes switching TO an existing thread actually load its
+   * history: the seeding effect above only ever runs once per truthy value of that flag (by
+   * design — re-seeding an already-open thread would drop its receipts), so re-arming it here is
+   * what lets the effect treat the newly active thread as unseeded again.
    */
-  function handleNewChat() {
+  function switchToThread(newThreadId: string) {
     streamAbortRef.current?.abort();
-    setThreadId(startNewThread());
+    setActiveThread(newThreadId);
+    setThreadId(newThreadId);
+    seeded.current = false;
     setTurns([]);
     setSelectedTurnId(null);
     setActiveCitation(null);
     setShowAskHint(false);
     setDrawerOpen(false);
+    setSidebarDrawerOpen(false);
+  }
+
+  function handleNewChat() {
+    switchToThread(startNewThread());
+  }
+
+  /** A no-op re-click (the already-open thread) still closes the mobile drawer rather than
+   * tearing down and re-seeding a conversation that is already exactly right. */
+  function handleSelectThread(id: string) {
+    if (id === threadId) {
+      setSidebarDrawerOpen(false);
+      return;
+    }
+    switchToThread(id);
   }
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden">
-      <TopBar isBusy={isSending} onNewChat={handleNewChat} />
-
-      {/* One of the four designed empty states (§6.9) — rendered unconditionally, so a brand-new
-          account shows "your memory starts here" here too rather than nothing. */}
-      <div ref={timelineRef} tabIndex={-1} className="outline-none">
-        <Timeline onScrub={setScrubDay} />
+    <div className="relative flex h-dvh overflow-hidden">
+      {/* Sidebar column — full height, a peer of the top bar rather than nested inside the
+          content area (ChatGPT's own layout: the thread list scopes to the whole app shell, not
+          to "below the header"). Same collapsible-fixed-width treatment as the evidence pane
+          (§5.7): `w-sidebar` or `w-0`, `overflow-hidden` clipping the transition. */}
+      <div
+        className={cn(
+          "hidden shrink-0 overflow-hidden border-r border-border transition-[width] duration-medium ease-move lg:block",
+          isSidebarCollapsed ? "w-0" : "w-sidebar",
+        )}
+      >
+        <div className="h-full w-sidebar">
+          <Sidebar
+            threads={threads.data?.threads ?? []}
+            isPending={threads.isPending}
+            isError={threads.isError}
+            activeThreadId={threadId}
+            onSelect={handleSelectThread}
+            onNewChat={handleNewChat}
+            onRetry={() => void threads.refetch()}
+          />
+        </div>
       </div>
 
-      <div className="relative flex min-h-0 flex-1">
-        <main className="flex min-w-0 flex-1 flex-col">
+      {/* The handle sits ON the sidebar/content border — the same `calc()`-positioned wrapper-div
+          pattern the evidence pane's toggle uses, mirrored onto the left edge, for the same two
+          reasons recorded there (§16 Decisions Log): a transform-based `-translate-x-1/2`
+          measurably failed to hit-test correctly live, and `hidden`/`lg:block` has to live on a
+          wrapper, never directly on `Button` — its base classes always force
+          `display: inline-flex`, which silently wins over a consumer's own `display` override. */}
+      <div
+        className={cn(
+          "absolute top-[calc(50%-16px)] z-10",
+          "transition-[left] duration-medium ease-move",
+          isDesktop && !isSidebarCollapsed
+            ? "left-[calc(var(--container-sidebar)-16px)]"
+            : "-left-4",
+        )}
+      >
+        <Button
+          type="button"
+          variant="secondary"
+          size="icon"
+          onClick={() =>
+            isDesktop ? setSidebarCollapsed((v) => !v) : setSidebarDrawerOpen((v) => !v)
+          }
+          aria-label={
+            (isDesktop ? isSidebarCollapsed : !isSidebarDrawerOpen)
+              ? "Show conversations"
+              : "Hide conversations"
+          }
+          aria-expanded={isDesktop ? !isSidebarCollapsed : isSidebarDrawerOpen}
+        >
+          {(isDesktop ? isSidebarCollapsed : !isSidebarDrawerOpen) ? (
+            <PanelLeftOpen className="size-4" strokeWidth={1.5} aria-hidden="true" />
+          ) : (
+            <PanelLeftClose className="size-4" strokeWidth={1.5} aria-hidden="true" />
+          )}
+        </Button>
+      </div>
+
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <TopBar isBusy={isSending} onNewChat={handleNewChat} />
+
+        {/* One of the four designed empty states (§6.9) — rendered unconditionally, so a brand-new
+            account shows "your memory starts here" here too rather than nothing. */}
+        <div ref={timelineRef} tabIndex={-1} className="outline-none">
+          <Timeline onScrub={setScrubDay} />
+        </div>
+
+        <div className="relative flex min-h-0 flex-1">
+          <main className="flex min-w-0 flex-1 flex-col">
           {stats.isPending ? (
             <div className="mx-auto flex w-full max-w-conversation flex-col gap-4 px-4 py-8 md:px-8">
               <Skeleton className="h-4 w-40" />
@@ -472,10 +568,27 @@ export function AppScreen() {
           </Button>
         </div>
       </div>
+      </div>
 
-      {/* Below lg the same pane is a drawer, opened by the citation gesture itself (§5.8). */}
+      {/* Below lg the same pane is a drawer, opened by the citation gesture itself (§5.8), and
+          the sidebar is a drawer too, opened by its own handle (there is no equivalent gesture
+          to couple it to — "New chat" and the thread list are entry points, not a claim → proof
+          link). Two independent drawers, one per edge, sharing nothing but the breakpoint. */}
       {!isDesktop && (
-        <EvidenceDrawer isOpen={isDrawerOpen} onOpenChange={setDrawerOpen} {...paneProps} />
+        <>
+          <EvidenceDrawer isOpen={isDrawerOpen} onOpenChange={setDrawerOpen} {...paneProps} />
+          <SidebarDrawer
+            isOpen={isSidebarDrawerOpen}
+            onOpenChange={setSidebarDrawerOpen}
+            threads={threads.data?.threads ?? []}
+            isPending={threads.isPending}
+            isError={threads.isError}
+            activeThreadId={threadId}
+            onSelect={handleSelectThread}
+            onNewChat={handleNewChat}
+            onRetry={() => void threads.refetch()}
+          />
+        </>
       )}
     </div>
   );

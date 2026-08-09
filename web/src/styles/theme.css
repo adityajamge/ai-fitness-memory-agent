@@ -108,9 +108,13 @@
    *   pane         — the engine pane, FIXED and never flexing, because evidence
    *                  rows have a natural width and stretching them on a wide
    *                  monitor makes them harder to read
+   *   sidebar      — the thread list (added 2026-08-09, §16), same "fixed, never
+   *                  flexes" reasoning as pane: it is a list of short labels, not
+   *                  prose that benefits from more width
    *   marketing    — the landing grid */
   --container-conversation: 860px;
   --container-pane: 420px;
+  --container-sidebar: 272px;
   --container-marketing: 1120px;
 
   /* ── Radius ──────────────────────────────────────────────────────────────

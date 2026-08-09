@@ -164,6 +164,20 @@ export const Turn = z.object({
 
 export const TurnsResponse = z.object({ turns: z.array(Turn) });
 
+/* ── threads (GET /api/threads) — the sidebar's data ─────────────────────────────────────── */
+
+/** `thread_id` is already the raw, client-facing id (the API strips the internal
+ * `user_id:thread_id` namespacing) — the same string `session/threadStore.ts` mints and
+ * `GET /api/turns?thread_id=` accepts. `preview` is the thread's first user message, verbatim,
+ * never a generated summary (ADR-12 in miniature: it cannot drift from what it labels). */
+export const ThreadSummary = z.object({
+  thread_id: z.string(),
+  preview: z.string(),
+  last_message_at: IsoDateTime,
+});
+
+export const ThreadsResponse = z.object({ threads: z.array(ThreadSummary) });
+
 /* ── stats + timeline ────────────────────────────────────────────────────────────────────── */
 
 /**
@@ -252,6 +266,8 @@ export type CitationReport = z.infer<typeof CitationReport>;
 export type TraceResponse = z.infer<typeof TraceResponse>;
 export type Turn = z.infer<typeof Turn>;
 export type TurnsResponse = z.infer<typeof TurnsResponse>;
+export type ThreadSummary = z.infer<typeof ThreadSummary>;
+export type ThreadsResponse = z.infer<typeof ThreadsResponse>;
 export type StatsResponse = z.infer<typeof StatsResponse>;
 export type TimelineDay = z.infer<typeof TimelineDay>;
 export type TimelineResponse = z.infer<typeof TimelineResponse>;

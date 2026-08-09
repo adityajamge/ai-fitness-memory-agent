@@ -26,9 +26,11 @@ from engine.citations import validate_citations
 from engine.db import Database
 from engine.glassbox import (
     MAX_BATCH,
+    MAX_THREADS_PAGE,
     MAX_TURNS_PAGE,
     fetch_memories,
     fetch_stats,
+    fetch_threads,
     fetch_timeline,
     fetch_trace,
     fetch_turns,
@@ -123,6 +125,36 @@ def list_turns(
                 "memory_ids": [str(m) for m in (r["memory_ids"] or [])],
                 "has_trace": r["has_trace"],
                 "created_at": r["created_at"].isoformat(),
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.get("/threads")
+def list_threads(
+    request: Request,
+    limit: int = Query(default=20, ge=1, le=MAX_THREADS_PAGE),
+    user_id: UUID = Depends(get_current_user),
+) -> dict:
+    """The sidebar's data: this user's conversations, most recently active first.
+
+    Added alongside the multi-thread sidebar (DESIGN.md §13 — this was explicitly deferred at
+    the original review, then requested). ``thread_id`` here undoes the same namespacing
+    ``list_turns`` documents: the DB row is ``user_id:client_id``, and a caller that only ever
+    deals in its own raw ids should never see the internal prefix. Splitting on the first ``:``
+    is safe because `thread_key` only ever prepends exactly one, and a UUID `user_id` cannot
+    itself contain one.
+    """
+    prefix = f"{user_id}:"
+    with _db(request).transaction() as cur:
+        rows = fetch_threads(cur, user_id, limit=limit)
+    return {
+        "threads": [
+            {
+                "thread_id": r["thread_id"].removeprefix(prefix),
+                "preview": r["preview"],
+                "last_message_at": r["last_message_at"].isoformat(),
             }
             for r in rows
         ]
