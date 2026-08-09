@@ -39,11 +39,13 @@ export type ChatTurn =
   | {
       kind: "pending";
       id: string;
-      /** The latest stage label from a real `event: stage` frame (M6). Undefined until the
-       * first one arrives, or for the whole turn on the plain-transport fallback, which carries
-       * no stage information at all — §6.10 requires this be driven by real events, never a
-       * timer standing in for progress. */
-      stage?: string;
+      /** Every stage label seen so far, in arrival order, from real `event: stage` frames (M6).
+       * Empty until the first one arrives, or for the whole turn on the plain-transport
+       * fallback, which carries no stage information at all — §6.10 requires this be driven by
+       * real events, never a timer standing in for progress. Kept as a growing trail (DESIGN.md
+       * §6.10 amendment 2026-08-09) rather than overwritten, so the conversation shows the path
+       * the engine took, not just where it currently is. */
+      stages: string[];
     }
   /**
    * A turn the server could not complete.

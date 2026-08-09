@@ -719,10 +719,14 @@ Three kinds, and using the wrong one is a bug.
 3. **Spinner** — only for indeterminate actions with no known shape: sign-in, retry extraction.
    14px, 1.5px stroke, `--muted-foreground`.
 
-**The slow-Bedrock path is a designed state, not a fallback.** After 2s with no first token, a mono
-`text-meta` line appears beneath the composer: `retrieving…` then `assembling context…` then
-`generating…`, driven by real stage events, never by a timer pretending to be progress. One of the
-four required E2E paths tests this.
+**The slow-Bedrock path is a designed state, not a fallback.** In place of the pending turn, a mono
+`text-meta` trail accumulates: `retrieving…`, then `assembling context…`, then `generating…` —
+each a real `event: stage` SSE frame (M6), never a timer pretending to be progress. Amended
+2026-08-09 (Decisions Log): earlier stages stay on screen as dimmed, static dots connected by a
+`--border` line instead of being overwritten by the next one, with the current stage carrying the
+pulsing `--signal` dot (the one other place besides rule 7's fixed list this token already
+appeared, kept for continuity rather than introduced here). One of the four required E2E paths
+tests this.
 
 ### 6.11 Error states
 
@@ -1409,3 +1413,4 @@ Numbered `F-T*` to stay clear of the T1–T18 backlog in
 | 2026-08-07 | **`uncited` renders as a quiet line** (§6.6), not a chip state | The backend emits a three-way status; only two had UI. Quiet because an uncited answer is a narrator weakness, not a system failure — but never hidden, or the validator has no teeth |
 | 2026-08-07 | **Mobile keyboard + timeline rail specified** (§5.8) | The keyboard covering the composer is the classic mobile-chat failure; a 300-day rail at 390px is 1px bars. Both were unspecified |
 | 2026-08-09 | **MoltenMetal (React Bits) added to the landing hero, breaking rules 6 and 12** | Explicit user instruction, given the trade-off (new `ogl` dependency, hardcoded hex colors, the exact "generic AI landing page" look §11 rejected React Bits for) and offered two on-brand alternatives first. Scoped narrowly: landing hero background only, lazy-loaded with the route so it does not touch the shared initial bundle, and skipped entirely under `prefers-reduced-motion` (rule 14 upheld even though upstream doesn't). Not a precedent for using React Bits elsewhere — §11's rejection stands everywhere else. |
+| 2026-08-09 | **Staged progress (§6.10) is a connected-dot trail, not a self-overwriting line** | Explicit user instruction, referencing Claude Code's own tool-call trail as the reference. Every `event: stage` frame now appends to the pending turn instead of replacing it (`ChatTurn`'s `pending.stage?: string` → `pending.stages: string[]`); completed stages render as dimmed static dots on a `--border` connector, the current stage keeps the pulsing dot. Verified live against the real dev backend (screenshot: two-then-three stage trail rendering correctly, `retrieving…` → `assembling context…` → `generating…`). No new tokens: reuses `--signal` for the active dot exactly where the prior single-line version already used it (a pre-existing exception to rule 7, not a new one), `--border`/`--faint` for everything else. |

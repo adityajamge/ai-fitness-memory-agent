@@ -199,11 +199,11 @@ export function AppScreen() {
     const sentAt = new Date().toISOString();
     setTurns((prev) =>
       replaceId
-        ? prev.map((t) => (t.id === replaceId ? { kind: "pending", id: pendingId } : t))
+        ? prev.map((t) => (t.id === replaceId ? { kind: "pending", id: pendingId, stages: [] } : t))
         : [
             ...prev,
             { kind: "user", id: nextId(), content: message, createdAt: sentAt },
-            { kind: "pending", id: pendingId },
+            { kind: "pending", id: pendingId, stages: [] },
           ],
     );
     setShowAskHint(false);
@@ -272,7 +272,9 @@ export function AppScreen() {
           if (event.type === "stage") {
             setTurns((prev) =>
               prev.map((t) =>
-                t.id === pendingId && t.kind === "pending" ? { ...t, stage: event.label } : t,
+                t.id === pendingId && t.kind === "pending"
+                  ? { ...t, stages: [...t.stages, event.label] }
+                  : t,
               ),
             );
           } else {

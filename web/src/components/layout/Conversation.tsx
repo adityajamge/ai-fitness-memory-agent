@@ -19,27 +19,71 @@ import { cn } from "@/lib/utils";
 import type { ChatTurn } from "@/types/turn";
 
 /**
- * Staged progress while a turn runs — DESIGN.md §6.10, §9.1 step 3.
+ * Staged progress while a turn runs — DESIGN.md §6.10, §9.1 step 3 (amended 2026-08-09: a
+ * connected trail, not a single line that overwrites itself — see the Decisions Log).
  *
- * `stage` arrives from a real `event: stage` SSE frame (M6) and nothing else — there is no
+ * Every `stage` arrives from a real `event: stage` SSE frame (M6) and nothing else — there is no
  * elapsed-time fallback, because a timer standing in for progress is exactly what §6.10 rules
- * out. Until the first frame lands (or on the plain-transport fallback, which carries none),
- * only the pulse shows: an honest "something is happening" with no claim about what stage.
+ * out. Until the first frame lands (or on the plain-transport fallback, which carries none), only
+ * the pulse shows: an honest "something is happening" with no claim about what stage.
  */
-function PendingTurn({ stage, isReduced }: { stage: string | undefined; isReduced: boolean }) {
+function PendingTurn({ stages, isReduced }: { stages: string[]; isReduced: boolean }) {
   return (
     <m.div
       initial={isReduced ? false : { opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: isReduced ? 0 : 0.18 }}
-      className="flex items-center gap-3"
+      className="flex gap-3"
       aria-live="polite"
     >
-      <img src="/logo.png" alt="" aria-hidden="true" className="h-6 w-6 shrink-0 object-contain" />
-      <span className="flex items-center gap-2 text-meta text-faint">
-        <span className="size-1.5 animate-pulse rounded-full bg-signal" />
-        {stage && <span className="font-mono">{stage}…</span>}
-      </span>
+      <img
+        src="/logo.png"
+        alt=""
+        aria-hidden="true"
+        className="mt-0.5 h-6 w-6 shrink-0 object-contain"
+      />
+
+      {stages.length === 0 ? (
+        <span className="flex h-6 items-center">
+          <span
+            className={cn("size-1.5 rounded-full bg-signal", !isReduced && "animate-pulse")}
+          />
+        </span>
+      ) : (
+        // Each completed stage stays on screen as a dimmed, static dot; the current one keeps
+        // the pulse. The connecting line (`--border`, never `--signal` — rule 7) is what makes it
+        // read as one continuous path the engine walked, rather than a list of unrelated events.
+        <ol className="flex flex-col gap-1.5 border-l border-border py-0.5 pl-3">
+          {stages.map((label, i) => {
+            const isCurrent = i === stages.length - 1;
+            return (
+              <m.li
+                key={i}
+                initial={isReduced ? false : { opacity: 0, x: -4 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: isReduced ? 0 : 0.18 }}
+                className="relative flex items-center"
+              >
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "absolute -left-3.75 size-1.5 rounded-full",
+                    isCurrent ? cn("bg-signal", !isReduced && "animate-pulse") : "bg-faint",
+                  )}
+                />
+                <span
+                  className={cn(
+                    "font-mono text-meta",
+                    isCurrent ? "text-muted-foreground" : "text-faint",
+                  )}
+                >
+                  {label}…
+                </span>
+              </m.li>
+            );
+          })}
+        </ol>
+      )}
     </m.div>
   );
 }
@@ -71,7 +115,7 @@ function TurnBlock({
   const reduce = useReducedMotion();
 
   if (turn.kind === "pending") {
-    return <PendingTurn stage={turn.stage} isReduced={Boolean(reduce)} />;
+    return <PendingTurn stages={turn.stages} isReduced={Boolean(reduce)} />;
   }
 
   if (turn.kind === "failed") {
