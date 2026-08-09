@@ -60,14 +60,22 @@ class RetrievalSpecError(ValueError):
 class MetricDef:
     memory_type: str
     path: tuple[str, ...]  # JSONB path segments under `payload`
+    #: Where this metric's row records that its value was *estimated* rather than measured or
+    #: stated. Present only for nutrition metrics, whose values are AI-derived at ingestion
+    #: (``engine/nutrition.py``); a weight or a blood marker is transcribed, so it has no such
+    #: flag and the count is simply zero. Engine-owned like ``path`` — bound as a parameter,
+    #: never composed from anything a planner or user supplied.
+    estimated_path: tuple[str, ...] | None = None
 
+
+_NUTRITION_ESTIMATED = ("nutrition", "estimated")
 
 METRICS: dict[str, MetricDef] = {
     # meal → MealPayload.nutrition (Nutrition hot fields)
-    "protein_g": MetricDef("meal", ("nutrition", "protein_g")),
-    "carbs_g": MetricDef("meal", ("nutrition", "carbs_g")),
-    "fat_g": MetricDef("meal", ("nutrition", "fat_g")),
-    "kcal": MetricDef("meal", ("nutrition", "kcal")),
+    "protein_g": MetricDef("meal", ("nutrition", "protein_g"), _NUTRITION_ESTIMATED),
+    "carbs_g": MetricDef("meal", ("nutrition", "carbs_g"), _NUTRITION_ESTIMATED),
+    "fat_g": MetricDef("meal", ("nutrition", "fat_g"), _NUTRITION_ESTIMATED),
+    "kcal": MetricDef("meal", ("nutrition", "kcal"), _NUTRITION_ESTIMATED),
     # weight → WeightPayload
     "weight_kg": MetricDef("weight", ("weight_kg",)),
     # body_scan → BodyScanPayload (scans carry their own weight reading)
@@ -137,6 +145,11 @@ class AggregateBucket:
     value: float
     n: int
     evidence_ids: tuple[UUID, ...]
+    #: How many contributing rows carried an **estimated** value. Computed in the same
+    #: statement rather than by hydrating rows, so assembly stays pure (ADR-14.7) and the
+    #: narrator's "approximately" is rendered from data instead of guessed. Zero for every
+    #: transcribed metric, by construction.
+    n_estimated: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +159,12 @@ class AggregateResult:
 
     spec: AggregateSpec
     buckets: tuple[AggregateBucket, ...]
+    #: Foods inside the window that the nutrition stage could not estimate, so they are in
+    #: **no** bucket. Surfaced beside the total because their absence is otherwise invisible:
+    #: a meal of nothing but an unrecognised dish has no metric value at all, so it never
+    #: reaches the aggregate — and a total that quietly omits it would be wrong in the one
+    #: direction the user cannot detect.
+    excluded_foods: tuple[str, ...] = ()
 
     @property
     def is_empty(self) -> bool:
@@ -170,6 +189,7 @@ _SQL_GROUPED = (
 SELECT date_trunc(%(period)s, event_time AT TIME ZONE %(tz)s) AS bucket,
        {value} AS value,
        COUNT(*) AS n,
+       {estimated} AS n_estimated,
        array_agg(id ORDER BY event_time, id) AS evidence_ids
 """
     + _WHERE
@@ -180,10 +200,32 @@ _SQL_TOTAL = (
     """
 SELECT {value} AS value,
        COUNT(*) AS n,
+       {estimated} AS n_estimated,
        array_agg(id ORDER BY event_time, id) AS evidence_ids
 """
     + _WHERE
 )
+
+# Contributing rows whose value is flagged estimated. `{estimated}` is filled from exactly two
+# module constants below — builder-owned SQL — and the path itself is a bound parameter.
+_COUNT_ESTIMATED = "COUNT(*) FILTER (WHERE payload #>> %(est_path)s::TEXT[] = 'true')"
+_COUNT_ESTIMATED_NONE = "0"
+
+# Foods the nutrition stage declined, for rows of this type in the window. Deliberately does
+# NOT filter on the metric path: a meal whose only food was unresolvable carries no metric
+# value at all, so requiring one would hide exactly the exclusions worth reporting.
+_SQL_EXCLUDED = """
+SELECT DISTINCT food ->> 'item' AS item
+FROM memories,
+     LATERAL jsonb_array_elements(payload #> '{nutrition,unresolved}') AS food
+WHERE user_id = %(user_id)s
+  AND type = %(type)s
+  AND status = 'active'
+  AND event_time >= %(start)s
+  AND event_time < %(end)s
+  AND jsonb_typeof(payload #> '{nutrition,unresolved}') = 'array'
+ORDER BY 1
+"""
 
 
 def aggregate_memories(
@@ -202,9 +244,16 @@ def aggregate_memories(
         if spec.agg == "count"
         else f"{_AGG_FNS[spec.agg]}((payload #>> %(path)s::TEXT[])::FLOAT8)"
     )
+    estimated_expr = (
+        _COUNT_ESTIMATED if metric.estimated_path is not None else _COUNT_ESTIMATED_NONE
+    )
 
     grouped = spec.group_by != "none"
-    sql = (_SQL_GROUPED if grouped else _SQL_TOTAL).format(value=value_expr).strip()
+    sql = (
+        (_SQL_GROUPED if grouped else _SQL_TOTAL)
+        .format(value=value_expr, estimated=estimated_expr)
+        .strip()
+    )
     params: dict[str, object] = {
         "user_id": user_id,
         "type": metric.memory_type,
@@ -212,6 +261,8 @@ def aggregate_memories(
         "end": spec.end,
         "path": list(metric.path),
     }
+    if metric.estimated_path is not None:
+        params["est_path"] = list(metric.estimated_path)
     if grouped:
         params["period"] = spec.group_by
         params["tz"] = spec.tz
@@ -225,12 +276,18 @@ def aggregate_memories(
             value=float(row["value"]),
             n=int(row["n"]),
             evidence_ids=tuple(row["evidence_ids"]),
+            n_estimated=int(row["n_estimated"] or 0),
         )
         for row in rows
         if row["n"]  # the ungrouped query returns one all-NULL row when nothing matched
     )
 
-    result = AggregateResult(spec=spec, buckets=buckets)
+    excluded = (
+        _excluded_foods(cur, user_id, metric.memory_type, spec)
+        if metric.estimated_path is not None
+        else ()
+    )
+    result = AggregateResult(spec=spec, buckets=buckets, excluded_foods=excluded)
     step = RetrievalStep(
         family="aggregate",
         sql=sql,
@@ -238,6 +295,23 @@ def aggregate_memories(
         row_count=sum(b.n for b in buckets),
     )
     return result, step
+
+
+def _excluded_foods(
+    cur: psycopg.Cursor, user_id: UUID, memory_type: str, spec: AggregateSpec
+) -> tuple[str, ...]:
+    """Foods the nutrition stage declined inside the aggregate's window.
+
+    A second statement rather than a join into the aggregate: the two ask different questions
+    of different row sets (one needs a metric value, the other must *not* require one), and
+    fusing them would either drop the interesting rows or complicate the grouped query's
+    ``GROUP BY`` for a value that is not per-bucket anyway.
+    """
+    cur.execute(
+        _SQL_EXCLUDED.strip(),
+        {"user_id": user_id, "type": memory_type, "start": spec.start, "end": spec.end},
+    )
+    return tuple(row["item"] for row in cur.fetchall() if row["item"])
 
 
 def _display_params(params: dict[str, object]) -> dict[str, object]:

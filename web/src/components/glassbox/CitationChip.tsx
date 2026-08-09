@@ -19,6 +19,7 @@
 
 import type { MemoryRow } from "@/api/schemas";
 import { cn } from "@/lib/utils";
+import { isEstimated, readNutrition } from "./NutritionDerivation";
 
 /**
  * Four states, and the distinction between the last two is a correctness matter, not a nicety.
@@ -40,12 +41,19 @@ function shortDate(iso: string): string {
  * Reads only well-known numeric hot fields and falls back to the type name. Deliberately shallow:
  * this renders a label, not a summary, and inventing prose from a payload would be the same
  * mistake as reading it out of the narration.
+ *
+ * The `~` on an estimated macro is not decoration. A meal's protein is estimated by a model
+ * from the foods the user named, and a chip that renders it identically to a transcribed
+ * weight or a lab value would quietly promote an estimate to a measurement — in the one
+ * component whose entire job is to say where a number came from.
  */
 function chipLabel(row: MemoryRow): string {
   const payload = row.payload as Record<string, unknown>;
-  const nutrition = payload["nutrition"] as Record<string, unknown> | undefined;
-  const protein = nutrition?.["protein_g"];
-  if (typeof protein === "number") return `${protein}g protein`;
+  const nutrition = readNutrition(payload);
+  const protein = nutrition?.protein_g;
+  if (typeof protein === "number") {
+    return `${nutrition && isEstimated(nutrition) ? "~" : ""}${protein}g protein`;
+  }
 
   for (const key of ["body_fat_pct", "weight_kg", "duration_min", "hours"]) {
     const value = payload[key];

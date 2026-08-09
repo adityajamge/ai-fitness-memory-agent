@@ -34,9 +34,16 @@ now).
 - Input: free text, meal photos (via S3), report files, structured updates — all through
   conversation.
 - Bedrock (via the injected model interface) extracts **typed events**: infers date/time and
-  timezone, meal type, quantities, nutrition estimates. Payloads are validated through the
+  timezone, meal type, quantities. Payloads are validated through the
   **Pydantic type registry** (`engine/types.py`, one model per memory type, `extra="allow"` —
   [ADR-13.6](09-decisions.md#adr-13)).
+- **Nutrition is a separate call, not part of extraction** (amended 2026-08-09 — see the
+  nutrition entry in [TODOS.md](../../TODOS.md#temporary-architecture-decision-log-post-documentation-freeze)).
+  Extraction records only what the user said; a second forced-tool call estimates macros from
+  the model's food knowledge, and `engine/nutrition.py` bounds-checks it, computes every total,
+  and freezes the result into the row. The two need opposite instructions ("never invent" vs.
+  "infer from what you know"), and combining them is what made macro coverage a coin flip.
+  `payload.nutrition` is engine-owned and hidden from the extraction schema.
 - Every event gets: `source`, `provenance` (`live` | `reconstructed`), `confidence`,
   `summary` (for embedding), `payload` (typed JSONB), embedding where text is meaningful.
 - **Failure policy ([ADR-13.5](09-decisions.md#adr-13)) — input is never lost:** extraction

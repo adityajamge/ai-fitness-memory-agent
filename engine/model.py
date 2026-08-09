@@ -48,6 +48,14 @@ class EmbeddingError(Exception):
     backfill — never fails the turn (transaction-boundaries doc §6)."""
 
 
+class NutritionError(Exception):
+    """Raised when the nutrition estimate call fails (call error, malformed output, or no
+    tool call). Handled exactly like an embedding failure: the meal commits **without**
+    ``payload.nutrition`` and stays eligible for ``python -m cli.backfill_nutrition``. A
+    nutrition failure must never fail a turn — the user reported a meal, and losing that to a
+    *derived* value's problem would invert never-lose-input."""
+
+
 class PlanningError(Exception):
     """Raised when retrieval planning fails (call error, malformed output). The graph
     (M5) surfaces this as a failed turn — distinct from an empty plan, which is a positive
@@ -119,6 +127,37 @@ class ModelProvider(Protocol):
         """Return one normalized 512-dim vector per input text, in order. Titan V2 with
         ``normalize=true`` (ADR-13.2). Raises EmbeddingError on failure. All-or-nothing:
         either every text embeds or the call raises (transaction-boundaries doc §6)."""
+        ...
+
+    def estimate_nutrition(self, items: list[dict], *, context: str = "") -> list[dict]:
+        """Estimate per-item nutrition for one meal, using the model's own world knowledge.
+
+        **A second call, deliberately separate from ``extract_events``.** Extraction is governed
+        by "NEVER invent facts" — load-bearing for time and quantity fidelity. Estimation needs
+        the opposite instruction ("infer from what you know about food"). Both in one prompt is
+        why macro coverage was previously a coin flip: the same input produced macros, no
+        macros, and different macros across consecutive turns. One coherent instruction per call
+        fixes that, and makes the estimate independently retryable, cacheable and versionable.
+
+        ``items`` are the extracted meal items (``name``/``qty``/``qty_g``/``qty_text``);
+        ``context`` is the event's summary, for disambiguation only.
+
+        Returns **raw, untrusted component dicts** — one per input item, in any order. The
+        provider does no validation: ``engine.nutrition.build_nutrition`` bounds-checks them,
+        computes every total, and classifies confidence. The contract asks the model for three
+        things the engine cannot supply for itself:
+
+        * ``resolved: false`` when it does not recognize the food. **A decline is a valid,
+          expected answer** — the same posture as extraction's ``no_loggable_content``, and what
+          keeps the system from ever inventing nutrition it has no basis for.
+        * ``qty_basis`` — ``stated`` when the user gave the quantity, ``ai_estimated`` when the
+          model assumed a portion.
+        * ``assumptions`` and ``range`` — what it took for granted, and how wide it thinks it is.
+
+        Raises ``NutritionError`` on call failure or malformed output. A provider that cannot
+        estimate at all (no such capability) should raise it too: the meal still persists, and
+        the backfill fills the gap later.
+        """
         ...
 
     def plan(

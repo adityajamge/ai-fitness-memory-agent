@@ -20,6 +20,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 __all__ = [
     "MemoryPayload",
     "EffectScale",
+    "MealItem",
+    "Nutrition",
+    "NutritionComponent",
+    "NutritionMethod",
+    "UnresolvedFood",
     "MealPayload",
     "WorkoutPayload",
     "SleepPayload",
@@ -128,6 +133,82 @@ class MealItem(MemoryPayload):
     name: str
     qty_g: float | None = None
     qty: float | None = None
+    #: The user's own words for a quantity they did not make numeric — "some", "a bowl of",
+    #: "two-ish". Preserved verbatim because it is the *only* honest record that a quantity was
+    #: mentioned but not stated: without it, "some rice" and "rice" are indistinguishable in the
+    #: payload, and the nutrition stage cannot tell the glass box which assumption it replaced.
+    qty_text: str | None = None
+
+
+class NutritionComponent(MemoryPayload):
+    """One food's contribution to a meal's macros, as **validated by the engine** from a
+    model-authored estimate (``engine/nutrition.py``).
+
+    Every field that makes the number auditable is here rather than in prose: what the item was
+    understood to be, how its quantity was known, what was assumed, and how wide the estimate
+    is. The glass box renders this list; nothing re-derives it from the totals.
+    """
+
+    item: str
+    understood_as: str | None = None
+    #: ``ingredient`` | ``dish`` | ``packaged`` — what *kind* of food this is, which is half of
+    #: the confidence class (the other half is ``qty_basis``). A dish is inherently a wider
+    #: estimate than an ingredient, and saying so is cheaper than pretending otherwise.
+    kind: str | None = None
+    qty_g: float | None = None
+    #: ``stated`` (the user gave the quantity) | ``ai_estimated`` (the model assumed a portion).
+    #: This is the distinction the whole feature exists to keep visible.
+    qty_basis: str | None = None
+    qty_note: str | None = None
+    #: ``ai_estimated`` | ``user_stated``. Separate from ``qty_basis`` because a stated quantity
+    #: of an AI-identified food is still an AI-estimated *nutrition* value.
+    nutrition_basis: str = "ai_estimated"
+    #: ``high`` | ``medium`` | ``low`` — ``engine.nutrition.confidence_class(qty_basis, kind)``.
+    #: Stored per component so the glass box can show *which* food weakened the meal's class.
+    confidence_class: str | None = None
+    protein_g: float | None = None
+    carbs_g: float | None = None
+    fat_g: float | None = None
+    kcal: float | None = None
+    #: Per-macro ``[low, high]`` bands the model reported, widened by the engine to contain its
+    #: own point estimate. Preserved rather than collapsed: a 15–30 g range *is* the answer to
+    #: "how sure are you", and averaging it away would manufacture precision.
+    range: dict[str, list[float]] | None = None
+    assumptions: list[str] | None = None
+    #: The model's self-reported 0..1. **Advisory only** — no engine computation branches on it
+    #: (the same posture ``engine/analytics.py`` takes toward ``assertion``/``label``). The
+    #: confidence the system acts on is ``confidence_class``, derived deterministically below.
+    model_confidence: float | None = None
+    #: Set when the engine replaced the model's ``kcal`` with the Atwater sum because the two
+    #: disagreed beyond tolerance. Recorded rather than silently corrected.
+    kcal_recomputed: bool | None = None
+
+
+class UnresolvedFood(MemoryPayload):
+    """A food the model declined to estimate, or whose estimate failed validation.
+
+    It contributes **nothing** to any total. It exists so that "we don't know" is a stored,
+    displayable, countable fact rather than an absence — the difference between an answer that
+    is incomplete and an answer that is quietly wrong.
+    """
+
+    item: str
+    reason: str
+    clarifying_question: str | None = None
+
+
+class NutritionMethod(MemoryPayload):
+    """Which pipeline, model, and prompt produced a stored estimate.
+
+    Load-bearing for interpretability: a nutrition value is provider- and prompt-dependent, so a
+    number without this is a number nobody can reason about later. It is also what makes the
+    backfill idempotent — it only rewrites rows whose ``pipeline`` it recognizes as its own.
+    """
+
+    pipeline: str
+    model_id: str | None = None
+    prompt_version: str | None = None
+    estimated_at: str | None = None
 
 
 class Nutrition(MemoryPayload):
@@ -137,13 +218,35 @@ class Nutrition(MemoryPayload):
     fat_g: float | None = None
     kcal: float | None = None
     estimated: bool | None = None
+    #: ``user_stated`` | ``ai_estimated`` | ``mixed`` — the rollup of the components' bases.
+    basis: str | None = None
+    #: ``high`` | ``medium`` | ``low``, the weakest contributing component's class. Deliberately
+    #: **not** a float: a made-up decimal invites arithmetic nobody can justify, and the three
+    #: classes are a pure function of two enums (see ``engine/nutrition.py``).
+    confidence_class: str | None = None
+    #: ``{"counted": n, "excluded": n}`` — what the totals are actually over. Rendering a total
+    #: without this is how a meal with an unrecognised dish silently under-reports.
+    coverage: dict[str, int] | None = None
+    range: dict[str, list[float]] | None = None
+    #: Both default to ``None``, not ``[]``. ``payload_to_json`` drops only ``None``, so an
+    #: empty-list default would *add* ``"components": []`` and ``"unresolved": []`` to a
+    #: nutrition object this pipeline did not author — a small mutation, but a mutation, and
+    #: "never overwrite a user-provided nutrition value" has to mean the object comes back out
+    #: byte-identical to how it went in.
+    unresolved: list[UnresolvedFood] | None = None
+    components: list[NutritionComponent] | None = None
+    method: NutritionMethod | None = None
 
 
 # ── per-type payloads (hot fields typed; everything else allowed) ──────────────────────
 class MealPayload(MemoryPayload):
     meal_type: str | None = None
     items: list[MealItem] = Field(default_factory=list)
-    nutrition: Nutrition | None = None
+    #: **Engine-owned** (``json_schema_extra``): written by the nutrition stage, never by the
+    #: extraction model. The marker is read by ``agent.providers._prompts.payload_field_guide``,
+    #: which omits the field from the extraction tool's schema — two model calls writing the same
+    #: key is exactly the drift that made macro coverage a coin flip before this stage existed.
+    nutrition: Nutrition | None = Field(default=None, json_schema_extra={"engine_owned": True})
     photo_s3_key: str | None = None
 
 

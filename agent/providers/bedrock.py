@@ -33,6 +33,15 @@ from agent.providers._prompts import (
     NARRATE_SYSTEM as _NARRATE_SYSTEM,
 )
 from agent.providers._prompts import (
+    NUTRITION_PROMPT_VERSION as _NUTRITION_PROMPT_VERSION,
+)
+from agent.providers._prompts import (
+    NUTRITION_SYSTEM as _NUTRITION_SYSTEM,
+)
+from agent.providers._prompts import (
+    NUTRITION_TOOL as _NUTRITION_TOOL,
+)
+from agent.providers._prompts import (
     PLAN_SYSTEM as _PLAN_SYSTEM,
 )
 from agent.providers._prompts import (
@@ -40,7 +49,10 @@ from agent.providers._prompts import (
 )
 from agent.providers._prompts import (
     extract_tool_schema,
+    nutrition_items_prompt,
+    nutrition_tool_schema,
     parse_extracted_events,
+    parse_nutrition_components,
     render_context,
 )
 from engine.model import (
@@ -48,6 +60,7 @@ from engine.model import (
     ExtractedEvent,
     ExtractionError,
     NarrationError,
+    NutritionError,
     PlanningError,
     ToolCall,
     ToolSpec,
@@ -59,10 +72,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _tool_config() -> dict:
-    """The shared extraction tool, in Bedrock Converse's nesting (``toolSpec`` +
-    ``inputSchema.json``). The schema itself is provider-agnostic — see _prompts.py."""
-    tool = extract_tool_schema()
+def _forced_tool_config(tool: dict) -> dict:
+    """A single forced tool, in Bedrock Converse's nesting (``toolSpec`` +
+    ``inputSchema.json``). The schemas themselves are provider-agnostic — see _prompts.py."""
     return {
         "tools": [
             {
@@ -73,8 +85,12 @@ def _tool_config() -> dict:
                 }
             }
         ],
-        "toolChoice": {"tool": {"name": _EXTRACT_TOOL}},
+        "toolChoice": {"tool": {"name": tool["name"]}},
     }
+
+
+def _tool_config() -> dict:
+    return _forced_tool_config(extract_tool_schema())
 
 
 class BedrockProvider:
@@ -92,6 +108,16 @@ class BedrockProvider:
         self._embedding_model_id = embedding_model_id
         self._embed_dims = embed_dims
         self._default_tz = default_tz
+
+    # Recorded on every nutrition estimate this provider produces, so a stored number can be
+    # attributed to the exact model and instruction that generated it (engine/nutrition.py).
+    @property
+    def nutrition_model_id(self) -> str:
+        return self._extraction_model_id
+
+    @property
+    def nutrition_prompt_version(self) -> str:
+        return _NUTRITION_PROMPT_VERSION
 
     # ── extraction ────────────────────────────────────────────────────────────────────
     def extract_events(self, text: str, *, now: datetime, tz: str) -> list[ExtractedEvent]:
@@ -113,17 +139,48 @@ class BedrockProvider:
         )
 
     @staticmethod
-    def _tool_input(response: dict) -> dict:
-        """Pull the forced tool call's input object out of a Converse response."""
+    def _tool_input(response: dict, tool: str = _EXTRACT_TOOL, error=ExtractionError) -> dict:
+        """Pull a forced tool call's input object out of a Converse response."""
         try:
             content = response["output"]["message"]["content"]
         except (KeyError, TypeError) as exc:
-            raise ExtractionError(f"unexpected converse response shape: {exc}") from exc
+            raise error(f"unexpected converse response shape: {exc}") from exc
         for block in content:
-            if "toolUse" in block and block["toolUse"].get("name") == _EXTRACT_TOOL:
+            if "toolUse" in block and block["toolUse"].get("name") == tool:
                 return block["toolUse"].get("input", {})
         # Model answered without calling the forced tool — treat as an unparseable turn.
-        raise ExtractionError("model did not return a record_events tool call")
+        raise error(f"model did not return a {tool} tool call")
+
+    # ── nutrition estimation (the second, separate model call) ────────────────────────
+    def estimate_nutrition(self, items: list[dict], *, context: str = "") -> list[dict]:
+        """Estimate per-item macros from the model's own food knowledge (engine/model.py).
+
+        A distinct call from ``extract_events`` with its own system prompt, because the two
+        need opposite instructions — one must never invent, the other is asked to infer. The
+        output is raw and untrusted here; ``engine/nutrition.py`` bounds-checks it and computes
+        every total.
+        """
+        if not items:
+            raise NutritionError("no items to estimate")
+        try:
+            response = self._client.converse(
+                modelId=self._extraction_model_id,
+                system=[{"text": _NUTRITION_SYSTEM}],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [{"text": nutrition_items_prompt(items, context)}],
+                    }
+                ],
+                toolConfig=_forced_tool_config(nutrition_tool_schema()),
+                inferenceConfig={"maxTokens": 4096, "temperature": 0.0},
+            )
+        except (ClientError, BotoCoreError) as exc:
+            raise NutritionError(f"bedrock converse (nutrition) failed: {exc}") from exc
+
+        return parse_nutrition_components(
+            self._tool_input(response, _NUTRITION_TOOL, NutritionError)
+        )
 
     # ── embeddings ────────────────────────────────────────────────────────────────────
     def embed(self, texts: list[str]) -> list[list[float]]:

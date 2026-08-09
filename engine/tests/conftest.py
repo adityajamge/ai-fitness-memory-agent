@@ -21,6 +21,7 @@ from engine.model import (
     ExtractedEvent,
     ExtractionError,
     NarrationError,
+    NutritionError,
     PlanningError,
     ToolCall,
     ToolSpec,
@@ -81,11 +82,20 @@ class FakeModelProvider:
         plan_error: bool = False,
         narration: str | None = None,
         narrate_error: bool = False,
+        nutrition: list[dict] | None = None,
+        nutrition_error: bool = False,
     ) -> None:
         self.events = events or []
         self.extract_error = extract_error
         self.fail_first = fail_first
         self.embed_error = embed_error
+        # Stage (B½). Default None means "this fake estimates nothing" — it raises, which is
+        # the *failure* path, so every pre-nutrition test keeps writing meals with no nutrition
+        # key and asserting exactly what it asserted before. Opting in is explicit.
+        self.nutrition = nutrition
+        self.nutrition_error = nutrition_error
+        self.nutrition_calls = 0
+        self.last_nutrition_items: list[dict] = []
         # Phase 3 (M4) agent surfaces — scripted so the M5 graph tests can drive routing
         # (which tools plan returns) and narration deterministically.
         self.plan_calls = plan_calls if plan_calls is not None else []
@@ -111,6 +121,16 @@ class FakeModelProvider:
         if self.embed_error:
             raise EmbeddingError("forced embedding failure")
         return [_unit_vector(t) for t in texts]
+
+    def estimate_nutrition(self, items: list[dict], *, context: str = "") -> list[dict]:
+        self.nutrition_calls += 1
+        self.last_nutrition_items = list(items)
+        if self.nutrition_error or self.nutrition is None:
+            raise NutritionError("forced nutrition failure")
+        return [dict(c) for c in self.nutrition]
+
+    nutrition_model_id = "fake-model"
+    nutrition_prompt_version = "fake-prompt/v0"
 
     def plan(self, question: str, tools: list[ToolSpec], *, now, tz) -> list[ToolCall]:
         self.plan_invocations += 1

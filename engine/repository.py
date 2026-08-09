@@ -98,6 +98,52 @@ def set_embedding(
     )
 
 
+def fetch_meals_without_nutrition(
+    cur: psycopg.Cursor, user_id: UUID, limit: int
+) -> list[dict]:
+    """Active meals that carry items but no nutrition object (nutrition-backfill source).
+
+    ``payload ? 'nutrition'`` excludes anything already estimated **or** authored elsewhere, so
+    a user-stated or reviewed value is never a backfill candidate in the first place — the
+    no-overwrite rule enforced by the query rather than by the code that consumes it. Rows with
+    no items are skipped: there is nothing to estimate, and selecting them would make the
+    backfill loop forever on rows it can never fill.
+    """
+    cur.execute(
+        """
+        SELECT id, summary, payload
+        FROM memories
+        WHERE user_id = %s AND type = 'meal' AND status = 'active'
+              AND NOT (payload ? 'nutrition')
+              AND jsonb_array_length(COALESCE(payload -> 'items', '[]'::JSONB)) > 0
+        ORDER BY created_at
+        LIMIT %s
+        """,
+        [user_id, limit],
+    )
+    return cur.fetchall()
+
+
+def set_nutrition(
+    cur: psycopg.Cursor, user_id: UUID, memory_id: UUID, nutrition: dict
+) -> None:
+    """Attach a computed nutrition object to a meal that had none.
+
+    Merges into the existing payload (``||``) rather than rewriting it, and re-asserts
+    ``NOT (payload ? 'nutrition')`` in the WHERE clause so a concurrent writer that filled the
+    key first wins — the update simply matches nothing. Facts, summary and embedding are
+    untouched by construction.
+    """
+    cur.execute(
+        """
+        UPDATE memories
+        SET payload = payload || jsonb_build_object('nutrition', %s::JSONB)
+        WHERE id = %s AND user_id = %s AND NOT (payload ? 'nutrition')
+        """,
+        [Jsonb(nutrition), memory_id, user_id],
+    )
+
+
 def get_memory(cur: psycopg.Cursor, user_id: UUID, memory_id: UUID) -> dict | None:
     """Fetch a single memory scoped to its owner. Returns None if it doesn't exist OR
     belongs to another user — the two are indistinguishable to a caller by design, which

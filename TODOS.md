@@ -344,6 +344,54 @@
 > decision on **T7** in
 > [11-implementation-tasks.md](docs/office-hours/11-implementation-tasks.md).
 
+## Nutrition estimation is LLM-owned and engine-validated (accepted 2026-08-09 — IMPLEMENTED)
+
+- **Status:** ACCEPTED and **implemented** (`engine/nutrition.py`, ingestion stage B½). Listed
+  here because it touches a **stated hard constraint** and must be migrated into
+  [ADR-13](docs/office-hours/09-decisions.md#adr-13) (or a new ADR-16) rather than living only
+  in code comments. **Doc home when migrated:** 09-decisions.md, plus
+  [03-memory-engine.md §1](docs/office-hours/03-memory-engine.md) (whose "Bedrock … extracts
+  nutrition estimates" line is now wrong — extraction is explicitly forbidden from emitting
+  `payload.nutrition`).
+- **The bug that forced it:** a meal logged as *"200 gram chicken, 3 rotis, some rice, and
+  dal"* persisted with **no `nutrition` key**, so "how much protein yesterday?" hit an
+  aggregate filtering `nutrition.protein_g IS NOT NULL`, matched nothing, and answered "nothing
+  logged" — while the meal itself recalled perfectly. Root cause: macros were an unenforced
+  side effect of the *extraction* prompt, which simultaneously says "NEVER invent facts".
+  Verified on the live cluster: `"3 eggs"` produced macros, no macros, and different macros
+  (217 vs 225 kcal) across three consecutive turns.
+- **What:** two model calls with opposite, coherent instructions. `extract_events` records only
+  what the user said (items + quantities, vague amounts preserved in `MealItem.qty_text`);
+  a second forced-tool call, `estimate_nutrition`, supplies food knowledge. The engine then
+  bounds-checks, sums, and classifies. `payload.nutrition` is **engine-owned**
+  (`json_schema_extra={"engine_owned": True}`), so `payload_field_guide()` hides it from the
+  extractor — one key, one owner.
+- **No food or recipe database, by decision.** Arbitrary dishes ("Chicken Manchurian") resolve
+  from model knowledge; the engine asserts only mass balance, the Atwater relation, and a
+  protein ceiling — physics, not cuisine. `resolved: false` is a first-class outcome: the food
+  is excluded, named in `nutrition.unresolved[]` and in `AggregateResult.excluded_foods`, and
+  never assigned an invented number.
+- **Three bases stay distinguishable** end to end: `qty_basis` ∈ `stated | ai_estimated`, plus
+  exclusion. `confidence_class` (`high|medium|low`) is a pure function of `(qty_basis, kind)`;
+  the model's own `model_confidence` rides along for display and **no computation reads it**.
+- **The constraint this bends, stated plainly.** The memory layer stays provider-free —
+  storage, retrieval, ranking and consolidation still read typed JSONB only, so ADR-1 holds.
+  But **stored nutrition values are now provider- and prompt-version-dependent**: replaying the
+  same history through a different model yields different numbers. That is why every estimate
+  carries `nutrition.method` (`pipeline`, `model_id`, `prompt_version`, `estimated_at`), and
+  why the value is **frozen at write time** — aggregation never calls a model, so determinism
+  holds everywhere downstream of the write.
+- **Rejected:** a curated food table as the source of truth (cannot cover cuisines; becomes a
+  maintenance surface), and a recipe/dish database (millions of dishes; dishes decompose).
+  Both were designed in full and declined on product grounds — the intelligence belongs to the
+  LLM. A tiny canonical table remains *available* for validation only, and v1 ships without one.
+- **Open follow-up:** replay currently re-estimates any meal it ingests without reviewed
+  macros. It should route through the T8 extraction cache (keyed by content hash) so re-runs
+  stay free **and** stable — the same "one estimate per composition" property
+  [replay-architecture.md](docs/engineering/replay-architecture.md) already establishes for
+  extraction. Not blocking the core flow; `IngestionService(estimate_nutrition=False)` is the
+  interim lever.
+
 ## Write-side entity canonicalization (accepted 2026-07-23 — before Phase 4 replay)
 
 - **Status:** ACCEPTED architectural decision (not an M3 task). Extends the extraction

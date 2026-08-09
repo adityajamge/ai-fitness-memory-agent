@@ -13,6 +13,8 @@ import pytest
 
 from agent.providers._prompts import (
     EXTRACT_TOOL,
+    _describe_field,
+    _is_engine_owned,
     extract_tool_schema,
     payload_field_guide,
 )
@@ -27,11 +29,32 @@ def test_guide_covers_every_registered_memory_type() -> None:
 
 def test_guide_lists_every_typed_hot_field() -> None:
     """Drift guard: the guide is generated from the registry, so a new hot field in
-    engine/types.py must appear in the prompt without anyone editing prose."""
+    engine/types.py must appear in the prompt without anyone editing prose.
+
+    Engine-owned fields are the one exception, and they are excluded *by the marker on the
+    field* rather than by a name listed here — so this stays a drift guard rather than a
+    hand-maintained allowlist that would rot the moment someone adds another."""
     guide = payload_field_guide()
     for model in MEMORY_TYPE_REGISTRY.values():
-        for field_name in model.model_fields:
+        for field_name, field in model.model_fields.items():
+            if _is_engine_owned(field):
+                continue
             assert field_name in guide, f"{model.__name__}.{field_name} missing from the guide"
+
+
+def test_guide_omits_engine_owned_fields() -> None:
+    """`payload.nutrition` is written by the dedicated nutrition call and validated by
+    engine/nutrition.py — the extraction model must not be told it exists.
+
+    This is the fix for the bug that motivated the whole nutrition stage: with `nutrition`
+    advertised here, extraction filled it *sometimes*, under a prompt that simultaneously said
+    "NEVER invent facts". The same meal logged three times produced macros, no macros, and
+    different macros. Two model calls owning one key is the defect; this asserts there is now
+    exactly one owner."""
+    guide = payload_field_guide()
+    assert "nutrition" not in guide
+    assert "protein_g" not in guide
+    assert MealPayload.model_fields["nutrition"].json_schema_extra == {"engine_owned": True}
 
 
 def test_guide_reaches_into_nested_payload_models() -> None:
@@ -39,8 +62,10 @@ def test_guide_reaches_into_nested_payload_models() -> None:
     MealPayload.items — a top-level-only guide would not have surfaced it."""
     guide = payload_field_guide()
     assert "items: [{name" in guide  # list-of-model rendering
-    assert "nutrition: {protein_g" in guide  # single nested model rendering
-    for field_name in MealPayload.model_fields:
+    assert "retraction_condition: {metric" in guide  # single nested model rendering
+    for field_name, field in MealPayload.model_fields.items():
+        if _is_engine_owned(field):
+            continue
         assert field_name in guide
 
 
@@ -51,12 +76,22 @@ def test_guide_marks_numeric_fields_with_a_type_hint() -> None:
     guide = payload_field_guide()
     assert "qty_g:number" in guide
     assert "qty:number" in guide  # nested one level inside MealPayload.items
-    assert "protein_g:number" in guide  # nested inside MealPayload.nutrition
+    assert "pre_value:number" in guide  # nested inside InsightPayload
     assert "distance_km:number" in guide
     assert "body_fat_pct:number" in guide
-    assert "estimated:boolean" in guide
     # `name` stays bare — string is the schema's implicit default, no hint needed.
     assert "name:" not in guide
+
+
+def test_boolean_fields_get_a_type_hint() -> None:
+    """The `:boolean` half of the same rule, asserted on the renderer directly.
+
+    It used to ride on `Nutrition.estimated`, which is no longer advertised to the extraction
+    model (it is engine-owned). Pinning the renderer instead of borrowing whichever payload
+    happens to hold a bool keeps the rule covered without tying it to a field that may move."""
+    assert _describe_field("flagged", bool) == "flagged:boolean"
+    assert _describe_field("flagged", bool | None) == "flagged:boolean"  # the Optional shape
+    assert _describe_field("note", str) == "note"
 
 
 def test_extraction_tool_explains_the_number_convention() -> None:

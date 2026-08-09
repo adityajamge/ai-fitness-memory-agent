@@ -18,18 +18,29 @@ from uuid import UUID
 from engine.consolidation import ConsolidationService
 from engine.db import Database
 from engine.memory import Memory
-from engine.model import EmbeddingError, ExtractedEvent, ExtractionError, ModelProvider
+from engine.model import (
+    EmbeddingError,
+    ExtractedEvent,
+    ExtractionError,
+    ModelProvider,
+    NutritionError,
+)
+from engine.nutrition import EstimateMethod, build_nutrition, is_engine_authored
 from engine.repository import (
+    fetch_meals_without_nutrition,
     fetch_unembedded,
     get_memory,
     get_note,
     insert_memories,
     mark_superseded,
     set_embedding,
+    set_nutrition,
 )
 from engine.types import UnknownMemoryType, ValidationError, payload_to_json, validate_payload
 
 logger = logging.getLogger(__name__)
+
+_MEAL_TYPE = "meal"
 
 _NOTE_CONFIDENCE = 1.0  # we're certain the user said it; only the *parse* is incomplete
 _MSG_OK = "saved"
@@ -43,6 +54,11 @@ class MemoryRef:
     type: str
     summary: str | None
     embedding_pending: bool
+    #: A meal that committed without ``payload.nutrition`` — the estimate call failed, or the
+    #: provider cannot estimate. Mirrors ``embedding_pending`` exactly, because it is the same
+    #: kind of thing: a nullable enrichment whose absence is a backlog item
+    #: (``python -m cli.backfill_nutrition``), never a failed turn.
+    nutrition_pending: bool = False
 
 
 @dataclass(frozen=True)
@@ -71,6 +87,7 @@ class IngestionService:
         default_tz: str,
         backfill_batch: int = 32,
         consolidation: ConsolidationService | None = None,
+        estimate_nutrition: bool = True,
     ) -> None:
         self.db = db
         self.model = model
@@ -79,6 +96,10 @@ class IngestionService:
         #: Stage (F₀). Optional so the write path stands alone — every pre-Phase-5 caller and
         #: test constructs this service without one and behaves exactly as before.
         self.consolidation = consolidation
+        #: Stage (B½). On by default so every meal carries macros the moment it is logged —
+        #: which is what keeps "how much protein yesterday?" a pure SQL question. Switchable
+        #: off for bulk paths that must not spend a model call per record.
+        self.estimate_nutrition = estimate_nutrition
 
     # ── public API ────────────────────────────────────────────────────────────────────
     def ingest_text(
@@ -262,6 +283,50 @@ class IngestionService:
             embedded += 1
         return embedded
 
+    def backfill_nutrition(self, user_id: UUID, limit: int | None = None) -> int:
+        """Estimate nutrition for up to ``limit`` of the user's meals that have none.
+
+        The counterpart to ``backfill_embeddings``, and deliberately the same shape: each row's
+        UPDATE is its own short transaction so one failure does not undo the rest, and the model
+        call happens outside every transaction.
+
+        **Idempotent by construction.** The candidate query selects only rows with no
+        ``nutrition`` key at all, and the UPDATE re-asserts that condition — so a row estimated
+        by a previous run, by ingestion, by the user, or by the reviewed replay table is never a
+        candidate and can never be rewritten. Running this twice over the same account does the
+        work once; running it on a fully-estimated account does nothing and says so.
+
+        Returns the number of meals actually filled.
+        """
+        limit = limit or self.backfill_batch
+        with self.db.transaction() as cur:
+            rows = fetch_meals_without_nutrition(cur, user_id, limit)
+        if not rows:
+            return 0
+
+        filled = 0
+        for row in rows:
+            payload = row["payload"] or {}
+            items = payload.get("items")
+            if not isinstance(items, list) or not items:  # pragma: no cover — SQL excludes these
+                continue
+            try:
+                raw = self.model.estimate_nutrition(items, context=row["summary"] or "")
+            except NutritionError:
+                logger.info("nutrition backfill: estimate failed for %s; leaving it", row["id"])
+                continue
+            except Exception:  # noqa: BLE001 — one bad row must not end the sweep
+                logger.exception("nutrition backfill: unexpected error on %s", row["id"])
+                continue
+
+            nutrition = build_nutrition(raw, method=self._estimate_method())
+            if nutrition is None:
+                continue
+            with self.db.transaction() as cur:
+                set_nutrition(cur, user_id, row["id"], nutrition)
+            filled += 1
+        return filled
+
     # ── internals ─────────────────────────────────────────────────────────────────────
     def _extract_with_retry(
         self, text: str, *, now: datetime, tz: str
@@ -277,7 +342,18 @@ class IngestionService:
     ) -> list[Memory]:
         memories: list[Memory] = []
         for ev in events:
-            validated = validate_payload(ev.type, ev.payload)  # raises -> caller note-fallback
+            payload = self._with_nutrition(ev)  # stage (B½) — off-transaction, best-effort
+            try:
+                validated = validate_payload(ev.type, payload)  # raises -> caller note-fallback
+            except (ValidationError, UnknownMemoryType):
+                if payload is ev.payload:
+                    raise
+                # The enrichment is the only thing that can have changed, so it is the only
+                # suspect. Falling back to the un-enriched payload keeps a *derived* value's
+                # problem from costing the user a fact they reported — the same precedence
+                # never-lose-input applies everywhere else in this module.
+                logger.warning("nutrition enrichment produced an invalid payload; dropping it")
+                validated = validate_payload(ev.type, ev.payload)
             memories.append(
                 Memory(
                     user_id=user_id,
@@ -292,6 +368,64 @@ class IngestionService:
                 )
             )
         return memories
+
+    # ── stage (B½): nutrition estimation ──────────────────────────────────────────────
+    def _with_nutrition(self, ev: ExtractedEvent) -> dict:
+        """Attach ``payload.nutrition`` to a meal, or return the payload untouched.
+
+        **Where it sits and why.** Between validation (B) and embeddings (C): it is a model
+        call, so it must happen outside any transaction (transaction-boundaries rule 1), and it
+        must happen *before* the insert so the stored row is complete and every later question
+        is answered by SQL alone. Living in ``_build_memories`` means all four write paths —
+        ``ingest_text``, ``ingest_events``, ``ingest_events_superseding`` and
+        ``reprocess_note`` — get it from one place rather than four.
+
+        **Best-effort, exactly like embeddings.** Any failure returns the payload unchanged: the
+        meal commits, ``MemoryRef.nutrition_pending`` says so, and the backfill fills it later.
+        A derived number must never cost the user the fact they reported.
+
+        **Never overwrites what it did not write.** A payload that already carries nutrition
+        this pipeline did not author — a value the user stated, a reviewed replay-table macro
+        set — is returned untouched, no call made.
+        """
+        if not self.estimate_nutrition or ev.type != _MEAL_TYPE:
+            return ev.payload
+
+        existing = ev.payload.get("nutrition")
+        if existing is not None and not is_engine_authored(existing):
+            return ev.payload
+
+        items = ev.payload.get("items")
+        if not isinstance(items, list) or not items:
+            return ev.payload  # nothing named to estimate
+
+        try:
+            raw = self.model.estimate_nutrition(items, context=ev.summary or "")
+        except NutritionError:
+            logger.info("nutrition estimate failed; meal will commit without it (backfillable)")
+            return ev.payload
+        except Exception:  # noqa: BLE001 — a provider bug must not cost the user their meal
+            logger.exception("nutrition estimate raised unexpectedly (swallowed)")
+            return ev.payload
+
+        nutrition = build_nutrition(raw, method=self._estimate_method())
+        if nutrition is None:
+            return ev.payload
+        return {**ev.payload, "nutrition": nutrition}
+
+    def _estimate_method(self) -> EstimateMethod:
+        """Identity of the estimator, read off the provider.
+
+        ``getattr`` with an explicit ``"unknown"`` rather than a Protocol requirement: the two
+        attributes are provider *metadata*, and demanding them would break every test fake for
+        no safety gain. "unknown" is honest and still tells a later reader that this row was
+        written by this pipeline — which is all the backfill's idempotence depends on.
+        """
+        return EstimateMethod(
+            model_id=str(getattr(self.model, "nutrition_model_id", "unknown")),
+            prompt_version=str(getattr(self.model, "nutrition_prompt_version", "unknown")),
+            estimated_at=datetime.now(timezone.utc),
+        )
 
     def _persist_validated(self, user_id: UUID, memories: list[Memory]) -> Receipt:
         """Shared (C)-(F) tail: embed, commit in one transaction, build the receipt from
@@ -414,6 +548,7 @@ class IngestionService:
                 type=m.type,
                 summary=m.summary,
                 embedding_pending=(m.summary is not None and m.embedding is None),
+                nutrition_pending=(m.type == _MEAL_TYPE and not m.payload.get("nutrition")),
             )
             for m in memories
         ]

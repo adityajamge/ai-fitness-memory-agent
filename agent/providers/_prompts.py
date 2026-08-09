@@ -20,7 +20,8 @@ from typing import TYPE_CHECKING, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
-from engine.model import ExtractedEvent, ExtractionError
+from engine.model import ExtractedEvent, ExtractionError, NutritionError
+from engine.nutrition import FOOD_KINDS, QTY_BASES
 from engine.types import MEMORY_TYPE_REGISTRY
 
 if TYPE_CHECKING:
@@ -36,6 +37,11 @@ SYSTEM_PROMPT = (
     "relative expressions ('yesterday', 'this morning') using the provided current time and "
     "timezone. NEVER invent facts: if a quantity or time is uncertain, lower confidence and, "
     "for time, leave event_time null (the system will estimate it).\n\n"
+    "For meals, record WHAT the user said they ate and HOW MUCH — nothing more. Never estimate "
+    "calories or macronutrients: a separate step does that, and a number invented here would "
+    "silently compete with it. When the user gives a vague quantity ('some rice', 'a bowl of "
+    "dal'), put their own words in the item's qty_text and leave qty/qty_g empty rather than "
+    "guessing a number — the later step needs to know the quantity was vague.\n\n"
     "When you return NO events you must say why, using no_loggable_content:\n"
     "- Set no_loggable_content=true ONLY when the message genuinely has nothing to log — "
     "small talk, a question, a greeting ('thanks', 'how much protein did I eat?').\n"
@@ -61,6 +67,51 @@ PLAN_SYSTEM = (
     "NO tools. Calling nothing is a valid, deliberate answer — do not force a tool."
 )
 
+#: Version of the nutrition instruction below, stored on every estimate it produces
+#: (``engine.nutrition.EstimateMethod``). Bump it whenever a change to ``NUTRITION_SYSTEM`` or
+#: ``nutrition_tool_schema`` would produce different numbers from the same meal — that is what
+#: makes a stored value attributable to the exact instruction that generated it, and what tells
+#: a future recompute sweep which rows are stale.
+NUTRITION_PROMPT_VERSION = "nutrition/2026-08-09"
+
+NUTRITION_TOOL = "record_nutrition"
+
+NUTRITION_SYSTEM = (
+    "You estimate the nutrition of foods a user logged, using your own knowledge of food, "
+    "cuisines, recipes and typical portions. Return results ONLY through the record_nutrition "
+    "tool, with exactly one component per input item, in the same order.\n\n"
+    "This is the opposite of transcription: you SHOULD use world knowledge here. You are "
+    "expected to recognise dishes from any cuisine — 'chicken manchurian', 'poha', 'pad thai' — "
+    "without anyone giving you a recipe, and to reason about how they are usually prepared. "
+    "There is no local food database; your knowledge is the source.\n\n"
+    "For every item decide two things SEPARATELY:\n"
+    "1. WHAT it is — set understood_as (your reading of the food, e.g. 'chicken breast, "
+    "cooked, skinless') and kind ('ingredient' for a single food, 'dish' for a prepared or "
+    "composite dish, 'packaged' for a branded/packaged product).\n"
+    "2. HOW MUCH of it — set qty_g in grams and qty_basis:\n"
+    "   - 'stated' ONLY when the user's own words fix the amount: '200g chicken' (200 g), "
+    "'3 rotis' (a count you convert to grams using a typical unit weight), '2 eggs'.\n"
+    "   - 'ai_estimated' whenever YOU chose the amount: 'some rice', 'a bowl of dal', or no "
+    "quantity at all. Say what you assumed in qty_note, e.g. 'no quantity given — assumed one "
+    "katori ≈ 150 g cooked'.\n"
+    "   Converting a stated count to grams is still 'stated' — the user fixed the amount; you "
+    "only changed the unit. Note the unit weight you used in qty_note.\n\n"
+    "Then give protein_g, carbs_g, fat_g and kcal for THAT quantity (not per 100 g). Keep them "
+    "consistent with each other: kcal should be about 4x protein + 4x carbs + 9x fat.\n\n"
+    "Be honest about uncertainty instead of hiding it:\n"
+    "- assumptions: list what you took for granted ('deep-fried preparation', 'skinless "
+    "breast', 'restaurant-style portion'). Required for any dish.\n"
+    "- range: give [low, high] bounds for protein_g and kcal whenever qty_basis is "
+    "'ai_estimated' or kind is 'dish'. A wide range is a useful answer; false precision is not.\n"
+    "- model_confidence: 0..1, your own sense of how well you know this one.\n\n"
+    "When you genuinely cannot estimate a food — you do not recognise it, or it is too "
+    "underspecified to be worth a number ('grandma's special curry', 'that thing from the "
+    "canteen') — set resolved=false with a short reason and a clarifying_question you would "
+    "ask the user. DO NOT GUESS. An excluded item is reported to the user as excluded; an "
+    "invented number would be indistinguishable from a real one. Declining is always better "
+    "than inventing, and it is the one thing here you cannot get wrong by admitting it."
+)
+
 NARRATE_SYSTEM = (
     "You are a fitness memory companion. Answer the user's question using ONLY the evidence "
     "provided — never invent numbers, dates, or facts. Every factual claim must carry a "
@@ -79,6 +130,10 @@ NARRATE_SYSTEM = (
     "data, just reply naturally and briefly. Do NOT mention evidence, memories, or missing "
     "data — there was nothing to look up, and saying so would be confusing.\n"
     "- If the turn only reported something to log, acknowledge what was recorded.\n"
+    "- Numbers marked as estimated MUST be spoken as estimates — say 'approximately' or "
+    "'about', never a bare figure. If the evidence says some foods were excluded from a "
+    "total, name them and say they are not included. Never present an estimated total as "
+    "exact, and never quietly drop the exclusion.\n"
     "Be concise and factual."
 )
 
@@ -117,14 +172,34 @@ def _describe_field(field_name: str, annotation) -> str:
     return f"{field_name}:{kind}" if kind else field_name
 
 
+def _is_engine_owned(field) -> bool:
+    """Whether a payload field is written by the engine rather than by the extraction model.
+
+    Marked at the field with ``json_schema_extra={"engine_owned": True}`` (engine/types.py).
+    ``payload.nutrition`` is the first: it is produced by the dedicated nutrition call and
+    validated by ``engine/nutrition.py``. Advertising it here too would put **two model calls in
+    charge of one key**, which is exactly the drift that made macro coverage a coin flip — the
+    extractor filled it sometimes, with different values each time, under a prompt that also
+    told it never to invent facts.
+    """
+    extra = getattr(field, "json_schema_extra", None)
+    return isinstance(extra, dict) and bool(extra.get("engine_owned"))
+
+
 def _describe_payload(model: type[BaseModel]) -> str:
     parts: list[str] = []
     for field_name, field in model.model_fields.items():
+        if _is_engine_owned(field):
+            continue
         nested, is_list = _nested_model(field.annotation)
         if nested is None:
             parts.append(_describe_field(field_name, field.annotation))
             continue
-        inner = ", ".join(_describe_field(n, f.annotation) for n, f in nested.model_fields.items())
+        inner = ", ".join(
+            _describe_field(n, f.annotation)
+            for n, f in nested.model_fields.items()
+            if not _is_engine_owned(f)
+        )
         parts.append(f"{field_name}: [{{{inner}}}]" if is_list else f"{field_name}: {{{inner}}}")
     return ", ".join(parts)
 
@@ -229,6 +304,175 @@ def extract_tool_schema() -> dict:
     }
 
 
+def nutrition_tool_schema() -> dict:
+    """The forced nutrition tool, in the neutral ``{name, description, input_schema}`` shape.
+
+    Mirrors ``extract_tool_schema`` — providers reshape it for their wire format. Every field is
+    typed here so a malformed estimate is caught at the schema boundary rather than becoming a
+    silently-wrong number downstream; ``engine/nutrition.py`` then bounds-checks whatever
+    survives, because a schema can enforce *shape* but not *possibility*.
+    """
+    macro_range = {
+        "type": "array",
+        "items": {"type": "number"},
+        "minItems": 2,
+        "maxItems": 2,
+        "description": "[low, high] for this macro, in the same units.",
+    }
+    return {
+        "name": NUTRITION_TOOL,
+        "description": (
+            "Record a nutrition estimate for each food item in the meal — one component per "
+            "input item, same order."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "components": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "item": {
+                                "type": "string",
+                                "description": "The input item name, echoed back verbatim.",
+                            },
+                            "resolved": {
+                                "type": "boolean",
+                                "description": (
+                                    "True if you can estimate this food. FALSE if you do not "
+                                    "recognise it or it is too vague to estimate — never guess."
+                                ),
+                            },
+                            "understood_as": {
+                                "type": "string",
+                                "description": (
+                                    "What you took this food to be, e.g. 'chicken breast, "
+                                    "cooked, skinless'. Shown to the user."
+                                ),
+                            },
+                            "kind": {
+                                "type": "string",
+                                "enum": sorted(FOOD_KINDS),
+                                "description": (
+                                    "'ingredient' (a single food), 'dish' (prepared/composite), "
+                                    "or 'packaged' (branded product)."
+                                ),
+                            },
+                            "qty_g": {
+                                "type": "number",
+                                "description": "Total grams of this food, for the whole item.",
+                            },
+                            "qty_basis": {
+                                "type": "string",
+                                "enum": sorted(QTY_BASES),
+                                "description": (
+                                    "'stated' if the user's words fixed the amount (including a "
+                                    "count you converted to grams); 'ai_estimated' if you chose "
+                                    "the portion yourself."
+                                ),
+                            },
+                            "qty_note": {
+                                "type": "string",
+                                "description": (
+                                    "The portion assumption or unit weight you used, in one "
+                                    "short phrase. Required when qty_basis is 'ai_estimated'."
+                                ),
+                            },
+                            "protein_g": {"type": "number"},
+                            "carbs_g": {"type": "number"},
+                            "fat_g": {"type": "number"},
+                            "kcal": {"type": "number"},
+                            "range": {
+                                "type": "object",
+                                "properties": {
+                                    "protein_g": macro_range,
+                                    "kcal": macro_range,
+                                },
+                                "description": (
+                                    "Uncertainty bounds. Required when qty_basis is "
+                                    "'ai_estimated' or kind is 'dish'."
+                                ),
+                            },
+                            "assumptions": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": (
+                                    "What you took for granted about preparation or portion. "
+                                    "Required for any dish."
+                                ),
+                            },
+                            "model_confidence": {
+                                "type": "number",
+                                "description": "Your own 0..1 confidence in this component.",
+                            },
+                            "reason": {
+                                "type": "string",
+                                "description": (
+                                    "Why you could not estimate it. Required when "
+                                    "resolved=false, e.g. 'unrecognized_dish'."
+                                ),
+                            },
+                            "clarifying_question": {
+                                "type": "string",
+                                "description": (
+                                    "What you would ask the user to make this estimable. Use "
+                                    "when resolved=false."
+                                ),
+                            },
+                        },
+                        "required": ["item", "resolved"],
+                    },
+                }
+            },
+            "required": ["components"],
+        },
+    }
+
+
+def nutrition_items_prompt(items: list[dict], context: str = "") -> str:
+    """Render the extracted meal items into the user-message half of the nutrition call.
+
+    Quantities are passed through exactly as extraction recorded them — a count, a gram figure,
+    the user's own vague words, or nothing at all — because *which of those it is* determines
+    ``qty_basis``, and paraphrasing here would destroy the distinction before the model sees it.
+    """
+    lines: list[str] = []
+    if context.strip():
+        lines.append(f"Meal: {context.strip()}")
+        lines.append("")
+    lines.append("Items:")
+    for item in items:
+        name = str(item.get("name") or "").strip() or "(unnamed)"
+        parts: list[str] = []
+        if item.get("qty_g") is not None:
+            parts.append(f"{item['qty_g']} g stated")
+        if item.get("qty") is not None:
+            parts.append(f"count: {item['qty']}")
+        if item.get("qty_text"):
+            parts.append(f'user said "{item["qty_text"]}"')
+        detail = "; ".join(parts) if parts else "no quantity given"
+        lines.append(f"- {name} ({detail})")
+    return "\n".join(lines)
+
+
+def parse_nutrition_components(tool_input: dict) -> list[dict]:
+    """Pull the raw component list out of the nutrition tool's input.
+
+    Deliberately shallow: it enforces only that a list of objects came back. Validating the
+    numbers is ``engine/nutrition.py``'s job, and doing any of it here would split one contract
+    across two layers — the provider boundary stays a transport boundary.
+
+    An empty list raises: unlike extraction, there is no legitimate "nothing to estimate" case
+    (we only call this when the meal has items), so an empty result means the call went wrong
+    and the row should stay eligible for backfill rather than be marked as estimated-with-nothing.
+    """
+    components = tool_input.get("components")
+    if not isinstance(components, list) or not components:
+        raise NutritionError(f"nutrition tool returned no components ({components!r})")
+    return [c for c in components if isinstance(c, dict)]
+
+
 def parse_extracted_events(
     tool_input: dict, *, now: datetime, tz: str, default_tz: str
 ) -> list[ExtractedEvent]:
@@ -304,7 +548,28 @@ def render_context(question: str, context: ContextBlock) -> str:
             for bucket in agg.buckets:
                 label = bucket.bucket or "total"
                 cites = " ".join(f"[{i}]" for i in bucket.evidence_ids)
-                lines.append(f"    {label}: {bucket.value:g} (n={bucket.n}) — {cites}")
+                # The estimated qualifier is rendered from the *data* — the count of
+                # contributing rows whose value was AI-estimated — never left to the model to
+                # infer. Assembly renders display copy once, deterministically (DESIGN rule 16);
+                # a narrator deciding for itself when to hedge would hedge inconsistently.
+                mark = ""
+                if bucket.n_estimated:
+                    mark = (
+                        " [ESTIMATED — say 'approximately'"
+                        + (
+                            f"; {bucket.n_estimated} of {bucket.n} contributing entries are "
+                            "AI-estimated]"
+                            if bucket.n_estimated < bucket.n
+                            else "]"
+                        )
+                    )
+                lines.append(f"    {label}: {bucket.value:g} (n={bucket.n}){mark} — {cites}")
+            if agg.excluded_foods:
+                named = ", ".join(sorted(agg.excluded_foods))
+                lines.append(
+                    f"    NOT INCLUDED in the total (no reliable nutrition data): {named}. "
+                    "Tell the user these are excluded."
+                )
         lines.append("")
 
     if context.counts:

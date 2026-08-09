@@ -21,6 +21,7 @@ import { ChevronRight } from "lucide-react";
 import { m, useReducedMotion } from "motion/react";
 import type { EvidenceSnapshot, MemoryRow } from "@/api/schemas";
 import { cn } from "@/lib/utils";
+import { NutritionDerivation, readNutrition } from "./NutritionDerivation";
 
 const SEGMENTS = 4;
 
@@ -87,6 +88,7 @@ export const EvidenceRow = forwardRef<HTMLLIElement, EvidenceRowProps>(function 
   const [isOpen, setOpen] = useState(false);
   const reduce = useReducedMotion();
   const when = new Date(evidence.event_time);
+  const nutrition = row ? readNutrition(row.payload) : null;
 
   return (
     <m.li
@@ -151,7 +153,11 @@ export const EvidenceRow = forwardRef<HTMLLIElement, EvidenceRowProps>(function 
 
       {isOpen && row && (
         <div className="border-t border-border px-3 py-2.5">
-          <pre className="overflow-x-auto">
+          {/* Above the raw JSON, not instead of it: a macro total is the one value here the
+              engine did not transcribe, so it gets a reading that explains where it came from.
+              The payload dump stays underneath — this is a lens on it, never a replacement. */}
+          {nutrition && <NutritionDerivation nutrition={nutrition} />}
+          <pre className="mt-2 overflow-x-auto">
             <code className="font-mono text-micro leading-relaxed text-muted-foreground">
               {JSON.stringify(row.payload, null, 2)}
             </code>

@@ -44,10 +44,16 @@ import anthropic
 from agent.providers._prompts import (
     EXTRACT_TOOL,
     NARRATE_SYSTEM,
+    NUTRITION_PROMPT_VERSION,
+    NUTRITION_SYSTEM,
+    NUTRITION_TOOL,
     PLAN_SYSTEM,
     SYSTEM_PROMPT,
     extract_tool_schema,
+    nutrition_items_prompt,
+    nutrition_tool_schema,
     parse_extracted_events,
+    parse_nutrition_components,
     render_context,
 )
 from engine.model import (
@@ -55,6 +61,7 @@ from engine.model import (
     ExtractedEvent,
     ExtractionError,
     NarrationError,
+    NutritionError,
     PlanningError,
     ToolCall,
     ToolSpec,
@@ -136,6 +143,39 @@ class ClaudeAPIProvider:
         _reject_refusal(response, ExtractionError)
         tool_input = _tool_input(response, EXTRACT_TOOL, ExtractionError)
         return parse_extracted_events(tool_input, now=now, tz=tz, default_tz=self._default_tz)
+
+    # Recorded on every nutrition estimate this provider produces (engine/nutrition.py).
+    @property
+    def nutrition_model_id(self) -> str:
+        return self._model_id
+
+    @property
+    def nutrition_prompt_version(self) -> str:
+        return NUTRITION_PROMPT_VERSION
+
+    # ── nutrition estimation (the second, separate model call) ────────────────────────
+    def estimate_nutrition(self, items: list[dict], *, context: str = "") -> list[dict]:
+        """Same forced-tool contract as the Bedrock provider — one component per input item,
+        declines expressed as ``resolved: false`` rather than invented numbers."""
+        if not items:
+            raise NutritionError("no items to estimate")
+        try:
+            response = self._client.messages.create(
+                model=self._model_id,
+                max_tokens=_MAX_TOKENS_STRUCTURED,
+                system=NUTRITION_SYSTEM,
+                messages=[
+                    {"role": "user", "content": nutrition_items_prompt(items, context)}
+                ],
+                tools=[nutrition_tool_schema()],
+                tool_choice={"type": "tool", "name": NUTRITION_TOOL},
+                **self._effort_kwargs(),
+            )
+        except anthropic.APIError as exc:
+            raise NutritionError(f"claude api nutrition estimate failed: {exc}") from exc
+
+        _reject_refusal(response, NutritionError)
+        return parse_nutrition_components(_tool_input(response, NUTRITION_TOOL, NutritionError))
 
     # ── embeddings (unsupported — see module docstring) ───────────────────────────────
     def embed(self, texts: list[str]) -> list[list[float]]:

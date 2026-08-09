@@ -63,6 +63,19 @@ class CompositeProvider:
     def narrate(self, question: str, context: ContextBlock) -> str:
         return self._llm.narrate(question, context)
 
+    def estimate_nutrition(self, items: list[dict], *, context: str = "") -> list[dict]:
+        return self._llm.estimate_nutrition(items, context=context)
+
+    @property
+    def nutrition_model_id(self) -> str:
+        """Delegated so a stored estimate names the model that actually produced it, not the
+        composite wrapper — the whole point of recording it (``engine/nutrition.py``)."""
+        return str(getattr(self._llm, "nutrition_model_id", "unknown"))
+
+    @property
+    def nutrition_prompt_version(self) -> str:
+        return str(getattr(self._llm, "nutrition_prompt_version", "unknown"))
+
     # ── embedding role ────────────────────────────────────────────────────────────────
     def embed(self, texts: list[str]) -> list[list[float]]:
         return self._embedder.embed(texts)
