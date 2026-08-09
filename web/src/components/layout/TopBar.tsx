@@ -45,13 +45,9 @@ function ConnectionDots({ isBusy, isError }: { isBusy: boolean; isError: boolean
 
 export interface TopBarProps {
   isBusy?: boolean;
-  /** Starts a fresh conversation thread — see `session/threadStore.ts`. Non-destructive: no
-   * memory or turn is deleted, only which thread is on screen changes (§13, no thread switcher,
-   * so there is no UI path back once clicked). Optional so a bare `<TopBar />` never crashes. */
-  onNewChat?: () => void;
 }
 
-export function TopBar({ isBusy = false, onNewChat }: TopBarProps) {
+export function TopBar({ isBusy = false }: TopBarProps) {
   const navigate = useNavigate();
   const { data, isPending, isError } = useStats();
 
@@ -107,12 +103,6 @@ export function TopBar({ isBusy = false, onNewChat }: TopBarProps) {
           Database
           <ConnectionDots isBusy={isBusy} isError={isError} />
         </span>
-
-        {onNewChat && (
-          <Button variant="ghost" size="sm" onClick={onNewChat}>
-            New chat
-          </Button>
-        )}
 
         <ThemeToggle />
 

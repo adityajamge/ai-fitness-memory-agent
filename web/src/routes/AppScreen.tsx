@@ -379,78 +379,77 @@ export function AppScreen() {
   }
 
   return (
-    <div className="relative flex h-dvh overflow-hidden">
-      {/* Sidebar column — full height, a peer of the top bar rather than nested inside the
-          content area (ChatGPT's own layout: the thread list scopes to the whole app shell, not
-          to "below the header"). Same collapsible-fixed-width treatment as the evidence pane
-          (§5.7): `w-sidebar` or `w-0`, `overflow-hidden` clipping the transition. */}
-      <div
-        className={cn(
-          "hidden shrink-0 overflow-hidden border-r border-border transition-[width] duration-medium ease-move lg:block",
-          isSidebarCollapsed ? "w-0" : "w-sidebar",
-        )}
-      >
-        <div className="h-full w-sidebar">
-          <Sidebar
-            threads={threads.data?.threads ?? []}
-            isPending={threads.isPending}
-            isError={threads.isError}
-            activeThreadId={threadId}
-            onSelect={handleSelectThread}
-            onNewChat={handleNewChat}
-            onRetry={() => void threads.refetch()}
-          />
-        </div>
+    <div className="relative flex h-dvh flex-col overflow-hidden">
+      <TopBar isBusy={isSending} />
+
+      {/* One of the four designed empty states (§6.9) — rendered unconditionally, so a brand-new
+          account shows "your memory starts here" here too rather than nothing. */}
+      <div ref={timelineRef} tabIndex={-1} className="outline-none">
+        <Timeline onScrub={setScrubDay} />
       </div>
 
-      {/* The handle sits ON the sidebar/content border — the same `calc()`-positioned wrapper-div
-          pattern the evidence pane's toggle uses, mirrored onto the left edge, for the same two
-          reasons recorded there (§16 Decisions Log): a transform-based `-translate-x-1/2`
-          measurably failed to hit-test correctly live, and `hidden`/`lg:block` has to live on a
-          wrapper, never directly on `Button` — its base classes always force
-          `display: inline-flex`, which silently wins over a consumer's own `display` override. */}
-      <div
-        className={cn(
-          "absolute top-[calc(50%-16px)] z-10",
-          "transition-[left] duration-medium ease-move",
-          isDesktop && !isSidebarCollapsed
-            ? "left-[calc(var(--container-sidebar)-16px)]"
-            : "-left-4",
-        )}
-      >
-        <Button
-          type="button"
-          variant="secondary"
-          size="icon"
-          onClick={() =>
-            isDesktop ? setSidebarCollapsed((v) => !v) : setSidebarDrawerOpen((v) => !v)
-          }
-          aria-label={
-            (isDesktop ? isSidebarCollapsed : !isSidebarDrawerOpen)
-              ? "Show conversations"
-              : "Hide conversations"
-          }
-          aria-expanded={isDesktop ? !isSidebarCollapsed : isSidebarDrawerOpen}
-        >
-          {(isDesktop ? isSidebarCollapsed : !isSidebarDrawerOpen) ? (
-            <PanelLeftOpen className="size-4" strokeWidth={1.5} aria-hidden="true" />
-          ) : (
-            <PanelLeftClose className="size-4" strokeWidth={1.5} aria-hidden="true" />
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        {/* Sidebar column — sits below the header/timeline, in the same row as the conversation
+            and the evidence pane, mirroring that pane's split rather than spanning the full app
+            height above it (§16 Decisions Log). Same collapsible-fixed-width treatment as the
+            evidence pane (§5.7): `w-sidebar` or `w-0`, `overflow-hidden` clipping the transition. */}
+        <div
+          className={cn(
+            "hidden shrink-0 overflow-hidden border-r border-border transition-[width] duration-medium ease-move lg:block",
+            isSidebarCollapsed ? "w-0" : "w-sidebar",
           )}
-        </Button>
-      </div>
-
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <TopBar isBusy={isSending} onNewChat={handleNewChat} />
-
-        {/* One of the four designed empty states (§6.9) — rendered unconditionally, so a brand-new
-            account shows "your memory starts here" here too rather than nothing. */}
-        <div ref={timelineRef} tabIndex={-1} className="outline-none">
-          <Timeline onScrub={setScrubDay} />
+        >
+          <div className="h-full w-sidebar">
+            <Sidebar
+              threads={threads.data?.threads ?? []}
+              isPending={threads.isPending}
+              isError={threads.isError}
+              activeThreadId={threadId}
+              onSelect={handleSelectThread}
+              onNewChat={handleNewChat}
+              onRetry={() => void threads.refetch()}
+            />
+          </div>
         </div>
 
-        <div className="relative flex min-h-0 flex-1">
-          <main className="flex min-w-0 flex-1 flex-col">
+        {/* The handle sits ON the sidebar/content border — the same `calc()`-positioned wrapper-div
+            pattern the evidence pane's toggle uses, mirrored onto the left edge, for the same two
+            reasons recorded there (§16 Decisions Log): a transform-based `-translate-x-1/2`
+            measurably failed to hit-test correctly live, and `hidden`/`lg:block` has to live on a
+            wrapper, never directly on `Button` — its base classes always force
+            `display: inline-flex`, which silently wins over a consumer's own `display` override. */}
+        <div
+          className={cn(
+            "absolute top-[calc(50%-16px)] z-10",
+            "transition-[left] duration-medium ease-move",
+            isDesktop && !isSidebarCollapsed
+              ? "left-[calc(var(--container-sidebar)-16px)]"
+              : "-left-4",
+          )}
+        >
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            onClick={() =>
+              isDesktop ? setSidebarCollapsed((v) => !v) : setSidebarDrawerOpen((v) => !v)
+            }
+            aria-label={
+              (isDesktop ? isSidebarCollapsed : !isSidebarDrawerOpen)
+                ? "Show conversations"
+                : "Hide conversations"
+            }
+            aria-expanded={isDesktop ? !isSidebarCollapsed : isSidebarDrawerOpen}
+          >
+            {(isDesktop ? isSidebarCollapsed : !isSidebarDrawerOpen) ? (
+              <PanelLeftOpen className="size-4" strokeWidth={1.5} aria-hidden="true" />
+            ) : (
+              <PanelLeftClose className="size-4" strokeWidth={1.5} aria-hidden="true" />
+            )}
+          </Button>
+        </div>
+
+        <main className="flex min-w-0 flex-1 flex-col">
           {stats.isPending ? (
             <div className="mx-auto flex w-full max-w-conversation flex-col gap-4 px-4 py-8 md:px-8">
               <Skeleton className="h-4 w-40" />
@@ -567,7 +566,6 @@ export function AppScreen() {
             )}
           </Button>
         </div>
-      </div>
       </div>
 
       {/* Below lg the same pane is a drawer, opened by the citation gesture itself (§5.8), and
