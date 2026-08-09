@@ -1139,7 +1139,7 @@ the glass box lie.
 | Click an evidence row | Expands to full payload JSON in mono, with `radius-md` and a copy button |
 | Click `how this was retrieved` | Expands the executed SQL and vector queries in `<pre><code>`, with the parameter values shown |
 | Click an insight | Shows lineage: the hypothesis, its supporting memory IDs, its confidence, and its retraction condition. Lineage is **rendered, never cited** (Q1, resolved narrow) |
-| Click a timeline day | Scrubs the conversation to that date |
+| Click a timeline day | Scrubs the conversation to that date and loads that day's answer into the engine pane (same as clicking a citation chip, minus the row highlight) |
 | Hover a provenance tag | Tooltip: `live` = captured as it happened; `reconstructed` = rebuilt from records, with an estimated timestamp |
 
 ### Transitions

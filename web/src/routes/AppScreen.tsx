@@ -188,6 +188,19 @@ export function AppScreen() {
   // arrow here would recreate `onScrubHandled` (and force a re-render) on every keystroke.
   const clearScrubDay = useCallback(() => setScrubDay(null), []);
 
+  // Clicking a timeline bar doesn't just scroll to that day — it loads that day's memory into
+  // the engine pane, the same way clicking a citation chip does (`activateCitation` above).
+  // `activeCitation` is cleared rather than left pointing at a chip from whatever turn was
+  // selected before: a scrub is "show me this day", not "show me this specific citation".
+  const handleScrubMatched = useCallback(
+    (turnId: string) => {
+      setSelectedTurnId(turnId);
+      setActiveCitation(null);
+      if (!isDesktop) setDrawerOpen(true);
+    },
+    [isDesktop],
+  );
+
   // 401 before any request has ever succeeded means "not signed in", not "expired" — route to
   // login rather than raising a notice over an app the user cannot see anyway.
   if (isUnauthorized(stats.error) && !sessionExpired) {
@@ -480,6 +493,7 @@ export function AppScreen() {
               onRetry={sendTurn}
               scrubDay={scrubDay}
               onScrubHandled={clearScrubDay}
+              onScrubMatched={handleScrubMatched}
             />
           )}
 

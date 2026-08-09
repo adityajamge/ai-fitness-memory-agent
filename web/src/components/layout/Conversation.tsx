@@ -96,6 +96,9 @@ export interface ConversationProps {
   /** Called once the scrub has been acted on, so `AppScreen` can clear it and the same day can
    * be clicked again later. */
   onScrubHandled?: () => void;
+  /** Fired with the matched turn's id so `AppScreen` can select it — clicking a timeline bar
+   * loads that day's memory into the engine pane, not just scrolls to it. */
+  onScrubMatched?: (turnId: string) => void;
 }
 
 function TurnBlock({
@@ -197,6 +200,7 @@ export const Conversation = memo(function Conversation({
   turns,
   scrubDay,
   onScrubHandled,
+  onScrubMatched,
   ...rest
 }: ConversationProps) {
   const endRef = useRef<HTMLDivElement>(null);
@@ -244,12 +248,21 @@ export const Conversation = memo(function Conversation({
       });
       setScrubbedId(match.id);
       const timer = setTimeout(() => setScrubbedId(null), 1400);
+      // The assistant turn, specifically — it's the one carrying the trace/receipts, so it's
+      // what `onScrubMatched` needs to load that day's memory into the engine pane. A day whose
+      // only match is the user's message (its answer hasn't loaded, or was clipped from the
+      // in-memory `turns` list) has nothing to select, so it's left alone rather than pointing
+      // the pane at a turn with no evidence.
+      const evidenceTurn = match.kind === "assistant" ? match : turns.find(
+        (t) => t.kind === "assistant" && t.createdAt?.slice(0, 10) === scrubDay,
+      );
+      if (evidenceTurn) onScrubMatched?.(evidenceTurn.id);
       onScrubHandled?.();
       return () => clearTimeout(timer);
     }
     onScrubHandled?.();
     return undefined;
-  }, [scrubDay, turns, reduce, onScrubHandled]);
+  }, [scrubDay, turns, reduce, onScrubHandled, onScrubMatched]);
 
   // A returning user (this only renders once `AppScreen` has already ruled out an empty
   // account — see its `isEmptyAccount` branch) starting a fresh thread otherwise saw nothing
