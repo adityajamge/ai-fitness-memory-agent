@@ -11,7 +11,15 @@
  * token control, and this needs it for the graph-rule background and the signal cap alone.
  */
 
-import { memo, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type WheelEvent as ReactWheelEvent,
+} from "react";
 import { useTimeline } from "@/api/queries";
 import type { TimelineDay } from "@/api/schemas";
 import { cn } from "@/lib/utils";
@@ -265,6 +273,18 @@ export const Timeline = memo(function Timeline({ onScrub }: TimelineProps) {
     setHover(null);
   }
 
+  // A plain vertical mouse wheel does nothing on an `overflow-x-auto` element by default —
+  // only shift+wheel or a trackpad's horizontal axis does. The rail has no vertical scroll of
+  // its own, so redirect ordinary wheel input into horizontal movement instead of leaving it
+  // dead. Skipped when the gesture is already horizontal (trackpad / shift+wheel) so that isn't
+  // double-applied.
+  function handleWheel(event: ReactWheelEvent<HTMLDivElement>) {
+    const el = scrollRef.current;
+    if (!el || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+    event.preventDefault();
+    el.scrollLeft += event.deltaY;
+  }
+
   const svgLabel = `Memory timeline: ${total} ${total === 1 ? "memory" : "memories"} across ${days.length} ${days.length === 1 ? "day" : "days"}, from ${firstDay?.day} to ${lastDay?.day}. Showing the most recent ~${VISIBLE_DAYS} days by default — scroll left for earlier history.`;
 
   return (
@@ -276,7 +296,11 @@ export const Timeline = memo(function Timeline({ onScrub }: TimelineProps) {
       {/* The scrolling viewport — every breakpoint scrolls now, landed on "now" by default
           (the effect above) rather than stretching the whole history to fit and rendering a
           long account as a wall of empty grid with all its real bars in a 2%-wide sliver. */}
-      <div ref={scrollRef} className="scrollbar-none flex h-full justify-end overflow-x-auto">
+      <div
+        ref={scrollRef}
+        onWheel={handleWheel}
+        className="scrollbar-none flex h-full justify-end overflow-x-auto"
+      >
         {/* `barPx * bars.length` (see `contentWidth`) — bar width is derived from the rail's
             measured width, not a hardcoded constant, so it holds at any viewport size.
             `shrink-0`: the flex parent's `justify-end` would otherwise squeeze this below its
