@@ -18,6 +18,7 @@ import { StreamUnavailableError, streamChat } from "@/api/chatStream";
 import {
   isUnauthorized,
   useInvalidateAfterTurn,
+  useMemoriesByDay,
   useSendMessage,
   useStats,
   useThreads,
@@ -76,6 +77,13 @@ export function AppScreen() {
   // Set by a timeline click, consumed once by Conversation's scroll-and-highlight effect (§9
   // "click a timeline day"), then cleared here so clicking the same day twice still re-triggers.
   const [scrubDay, setScrubDay] = useState<string | null>(null);
+  // The OTHER thing a timeline click does: puts the engine pane into "day view" — every memory
+  // logged that day, not a turn's retrieval trace (a bar has no query behind it). Persists past
+  // the one-shot `scrubDay` above until the user sends a new turn, clicks a citation, or exits
+  // explicitly; unlike `scrubDay` there is nothing to "consume once", since the pane just renders
+  // whatever this is set to.
+  const [dayView, setDayView] = useState<string | null>(null);
+  const dayMemories = useMemoriesByDay(dayView);
   // The evidence pane is "FIXED and never flexing" (§5.7) — collapsing it to 0 on request is a
   // deliberate escape hatch, not a contradiction: nothing stretches to fill the reclaimed space
   // automatically, the conversation column just gets more margin either side of its own cap.
@@ -179,6 +187,9 @@ export function AppScreen() {
       // happens to be loaded.
       setSelectedTurnId(turnId);
       setActiveCitation((current) => (current === id ? null : id));
+      // A citation is more specific than "show me this whole day" — exits day view rather than
+      // leaving the pane torn between two things it could be showing.
+      setDayView(null);
       if (!isDesktop) setDrawerOpen(true);
     },
     [isDesktop],
@@ -188,18 +199,21 @@ export function AppScreen() {
   // arrow here would recreate `onScrubHandled` (and force a re-render) on every keystroke.
   const clearScrubDay = useCallback(() => setScrubDay(null), []);
 
-  // Clicking a timeline bar doesn't just scroll to that day — it loads that day's memory into
-  // the engine pane, the same way clicking a citation chip does (`activateCitation` above).
-  // `activeCitation` is cleared rather than left pointing at a chip from whatever turn was
-  // selected before: a scrub is "show me this day", not "show me this specific citation".
-  const handleScrubMatched = useCallback(
-    (turnId: string) => {
-      setSelectedTurnId(turnId);
-      setActiveCitation(null);
+  // Clicking a timeline bar: scrolls the conversation to that day (`scrubDay`, handled by
+  // `Conversation`) AND puts the engine pane into day view — every memory logged that day, not
+  // whichever turn's trace happened to be selected before. The two are independent (a day with
+  // no matching turn in the loaded conversation still gets a day view), which is why this sets
+  // both rather than routing one through the other.
+  const handleScrub = useCallback(
+    (day: string) => {
+      setScrubDay(day);
+      setDayView(day);
       if (!isDesktop) setDrawerOpen(true);
     },
     [isDesktop],
   );
+
+  const exitDayView = useCallback(() => setDayView(null), []);
 
   // 401 before any request has ever succeeded means "not signed in", not "expired" — route to
   // login rather than raising a notice over an app the user cannot see anyway.
@@ -215,6 +229,14 @@ export function AppScreen() {
     missingCount: missing.size,
     hasTurns: turns.length > 0,
     activeId: activeCitation,
+    dayView: dayView
+      ? {
+          day: dayView,
+          memories: dayMemories.data?.memories ?? [],
+          isLoading: dayMemories.isPending,
+          onExit: exitDayView,
+        }
+      : null,
   };
 
   /** `replaceId` is set when retrying: the failed turn becomes the new pending one in place,
@@ -246,6 +268,9 @@ export function AppScreen() {
     // a highlight at a row that is no longer on screen.
     setActiveCitation(null);
     setSelectedTurnId(null);
+    // A fresh turn is exactly what "following conversation" means — day view was a detour from
+    // that, and asking something new is the clearest signal the detour is over.
+    setDayView(null);
 
     const onSuccess = (response: ChatResponse) => {
       setThreadId(response.thread_id);
@@ -372,6 +397,7 @@ export function AppScreen() {
     setTurns([]);
     setSelectedTurnId(null);
     setActiveCitation(null);
+    setDayView(null);
     setShowAskHint(false);
     setDrawerOpen(false);
     setSidebarDrawerOpen(false);
@@ -398,7 +424,7 @@ export function AppScreen() {
       {/* One of the four designed empty states (§6.9) — rendered unconditionally, so a brand-new
           account shows "your memory starts here" here too rather than nothing. */}
       <div ref={timelineRef} tabIndex={-1} className="outline-none">
-        <Timeline onScrub={setScrubDay} />
+        <Timeline onScrub={handleScrub} />
       </div>
 
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
@@ -493,7 +519,6 @@ export function AppScreen() {
               onRetry={sendTurn}
               scrubDay={scrubDay}
               onScrubHandled={clearScrubDay}
-              onScrubMatched={handleScrubMatched}
             />
           )}
 

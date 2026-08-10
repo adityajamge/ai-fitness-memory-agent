@@ -15,6 +15,7 @@ build glass-box data.
 
 from __future__ import annotations
 
+from datetime import date
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -29,6 +30,7 @@ from engine.glassbox import (
     MAX_THREADS_PAGE,
     MAX_TURNS_PAGE,
     fetch_memories,
+    fetch_memories_by_day,
     fetch_stats,
     fetch_threads,
     fetch_timeline,
@@ -209,3 +211,23 @@ def get_timeline(request: Request, user_id: UUID = Depends(get_current_user)) ->
             for r in rows
         ]
     }
+
+
+@router.get("/memories/by-day/{day}")
+def memories_by_day(
+    day: date, request: Request, user_id: UUID = Depends(get_current_user)
+) -> dict:
+    """Every memory logged on one day (DESIGN.md §9 "click a timeline day").
+
+    A raw listing, not a retrieval trace — clicking a bar has no query to show, just the rows
+    that made it that height. ``day`` is the caller's local YYYY-MM-DD, matched against
+    ``event_time`` the same way ``fetch_timeline`` groups it into that bar in the first place.
+
+    Two path segments (``by-day/{day}``), not a query string: ``GET /api/memories/{memory_id}``
+    (``ingest.py``) is also a single segment under ``/memories``, and Starlette matches routes
+    in registration order rather than preferring a literal segment over a path parameter — a
+    query-string version collided with it and 422'd on ``memory_id`` failing to parse as a UUID.
+    """
+    with _db(request).transaction() as cur:
+        rows = fetch_memories_by_day(cur, user_id, day)
+    return {"day": day.isoformat(), "memories": [_memory_json(r) for r in rows]}

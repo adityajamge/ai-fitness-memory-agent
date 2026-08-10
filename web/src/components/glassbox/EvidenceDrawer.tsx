@@ -23,7 +23,7 @@ import { memo } from "react";
 import type { EvidenceTrace, MemoryRow } from "@/api/schemas";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
-import { EvidencePaneBody } from "./EvidencePane";
+import { EvidencePaneBody, type DayView } from "./EvidencePane";
 
 export interface EvidenceDrawerProps {
   isOpen: boolean;
@@ -34,6 +34,7 @@ export interface EvidenceDrawerProps {
   missingCount: number;
   hasTurns: boolean;
   activeId: string | null;
+  dayView: DayView | null;
 }
 
 /** Memoized for the same reason as `EvidencePane` — mobile's equivalent of the desktop column,

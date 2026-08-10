@@ -1131,6 +1131,14 @@ turn` rather than showing stale rows from the previous one. **Showing the previo
 next to a new answer would be the single worst bug this product could ship**, because it would make
 the glass box lie.
 
+**Day view (added 2026-08-09, §16 Decisions Log) is the one deliberate departure from "follows
+the conversation."** Clicking a timeline bar has no turn to follow — the memories on that day may
+span multiple threads, or have no chat turn behind them at all — so the pane instead shows a raw
+listing for that calendar day, fetched by `GET /api/memories/by-day/{day}` rather than derived from
+any trace. It says so in its own header (the date, not "following conversation") and exits back to
+the normal turn-following behavior on the next turn, a citation click, or its own explicit exit —
+never silently, and never mixed with trace rows in the same view.
+
 ### Glass-box interactions
 
 | Interaction | Result |
@@ -1139,7 +1147,7 @@ the glass box lie.
 | Click an evidence row | Expands to full payload JSON in mono, with `radius-md` and a copy button |
 | Click `how this was retrieved` | Expands the executed SQL and vector queries in `<pre><code>`, with the parameter values shown |
 | Click an insight | Shows lineage: the hypothesis, its supporting memory IDs, its confidence, and its retraction condition. Lineage is **rendered, never cited** (Q1, resolved narrow) |
-| Click a timeline day | Scrubs the conversation to that date and loads that day's answer into the engine pane (same as clicking a citation chip, minus the row highlight) |
+| Click a timeline day | Scrubs the conversation to that date AND puts the engine pane into **day view**: every memory logged that day (a raw listing, not a retrieval trace — a bar has no query behind it), with a count and a "back to conversation" exit. Day view persists until a new turn is sent, a citation chip is clicked, or the exit is used |
 | Hover a provenance tag | Tooltip: `live` = captured as it happened; `reconstructed` = rebuilt from records, with an estimated timestamp |
 
 ### Transitions

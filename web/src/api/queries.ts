@@ -12,6 +12,7 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tansta
 import {
   ApiError,
   getMemoriesBatch,
+  getMemoriesByDay,
   getStats,
   getThreads,
   getTimeline,
@@ -30,6 +31,7 @@ export const queryKeys = {
   turns: (threadId?: string) => ["turns", threadId ?? "all"] as const,
   trace: (turnId: string) => ["trace", turnId] as const,
   memories: (ids: string[]) => ["memories", ...ids] as const,
+  memoriesByDay: (day: string) => ["memories-by-day", day] as const,
   threads: ["threads"] as const,
 };
 
@@ -94,6 +96,16 @@ export function useMemories(ids: string[]) {
   });
 }
 
+/** Every memory logged on one day — the timeline bar's drill-down (§9 "click a timeline day").
+ * A raw listing, not a turn's trace, so it is fetched independently of `useSelectedTrace`. */
+export function useMemoriesByDay(day: string | null) {
+  return useQuery({
+    queryKey: queryKeys.memoriesByDay(day ?? ""),
+    queryFn: () => getMemoriesByDay(day as string),
+    enabled: Boolean(day),
+  });
+}
+
 /**
  * Every derived surface, invalidated together, because one message can change all of them at
  * once: an ingest turn creates memories (stats, timeline), records turns (history), and may
@@ -107,6 +119,10 @@ export function useMemories(ids: string[]) {
 function invalidateTurnDerivedQueries(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: queryKeys.stats });
   void queryClient.invalidateQueries({ queryKey: queryKeys.timeline });
+  // Prefix match across every cached day, the same reason the "turns" invalidation below is a
+  // bare prefix: a new memory can land on a day whose list is already cached from an earlier
+  // timeline click.
+  void queryClient.invalidateQueries({ queryKey: ["memories-by-day"] });
   // The bare "turns" prefix, not `queryKeys.turns(id)` for one specific thread: TanStack Query
   // matches by prefix, so this invalidates every thread's cached history in one call. There is
   // only ever one active thread in the UI, but stale entries for an abandoned thread (from

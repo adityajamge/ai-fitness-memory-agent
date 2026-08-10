@@ -22,6 +22,7 @@ takes, and what makes cross-user probing a dead end.
 
 from __future__ import annotations
 
+from datetime import date
 from uuid import UUID
 
 import psycopg
@@ -174,6 +175,29 @@ def fetch_stats(cur: psycopg.Cursor, user_id: UUID) -> dict:
         {"user_id": user_id},
     )
     return cur.fetchone()
+
+
+def fetch_memories_by_day(cur: psycopg.Cursor, user_id: UUID, day: date) -> list[dict]:
+    """Every memory logged on one calendar day — DESIGN.md §9 "click a timeline day".
+
+    Not a retrieval trace: there is no query to show, so this is a raw listing rather than
+    something routed through ``fetch_trace``. The ``WHERE`` clause deliberately mirrors
+    ``fetch_timeline``'s per-day count (same ``status <> 'superseded'``, same
+    ``date_trunc('day', event_time)``) so a bar showing N and this endpoint returning N rows
+    is the same predicate, not two definitions of "that day" that can drift apart.
+    """
+    cur.execute(
+        f"""
+        SELECT {_ROW_COLS} FROM memories
+        WHERE user_id = %(user_id)s
+          AND status <> 'superseded'
+          AND date_trunc('day', event_time)::DATE = %(day)s
+        ORDER BY event_time
+        LIMIT %(limit)s
+        """,
+        {"user_id": user_id, "day": day, "limit": MAX_BATCH},
+    )
+    return cur.fetchall()
 
 
 def fetch_timeline(cur: psycopg.Cursor, user_id: UUID) -> list[dict]:

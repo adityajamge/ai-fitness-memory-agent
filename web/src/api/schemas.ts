@@ -201,6 +201,13 @@ export const TimelineDay = z.object({
 
 export const TimelineResponse = z.object({ days: z.array(TimelineDay) });
 
+/** `GET /api/memories/by-day/{day}` — a raw listing, not a retrieval trace: clicking a
+ * timeline bar has no query to show, just the rows that made it that height. */
+export const DayMemoriesResponse = z.object({
+  day: z.string(),
+  memories: z.array(MemoryRow),
+});
+
 /* ── auth (POST /api/auth/{signup,login,logout}) ─────────────────────────────────────────── */
 
 export const AuthResponse = z.object({
@@ -271,3 +278,4 @@ export type ThreadsResponse = z.infer<typeof ThreadsResponse>;
 export type StatsResponse = z.infer<typeof StatsResponse>;
 export type TimelineDay = z.infer<typeof TimelineDay>;
 export type TimelineResponse = z.infer<typeof TimelineResponse>;
+export type DayMemoriesResponse = z.infer<typeof DayMemoriesResponse>;

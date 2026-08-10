@@ -36,6 +36,7 @@ ROUTES = [
     ("get", lambda tid: "/api/stats"),
     ("get", lambda tid: "/api/timeline"),
     ("get", lambda tid: "/api/threads"),
+    ("get", lambda tid: "/api/memories/by-day/2026-01-01"),
 ]
 
 
@@ -292,3 +293,52 @@ def test_stats_and_timeline_count_only_the_callers_memories(client, app_provider
 
     assert client.get("/api/stats").json()["memories"] == 0
     assert client.get("/api/timeline").json()["days"] == []
+
+
+# ── memories by day (timeline drill-down) ──────────────────────────────────────────────
+def test_memories_by_day_returns_that_days_rows(client, app_provider) -> None:
+    _signup(client)
+    _log_then_ask(client, app_provider)
+    day = NOW.date().isoformat()
+
+    response = client.get(f"/api/memories/by-day/{day}")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+
+    assert payload["day"] == day
+    assert len(payload["memories"]) == 1
+    assert payload["memories"][0]["type"] == "meal"
+    assert payload["memories"][0]["payload"], "day view carries the payload a row renders"
+
+
+def test_memories_by_day_matches_the_timelines_own_count(client, app_provider) -> None:
+    """Same predicate as `fetch_timeline`'s per-day count — a bar showing N and this endpoint
+    returning N rows must not be two definitions of "that day" that can drift apart."""
+    _signup(client)
+    _log_then_ask(client, app_provider)
+    day = NOW.date().isoformat()
+
+    bar = next(d for d in client.get("/api/timeline").json()["days"] if d["day"] == day)
+    by_day = client.get(f"/api/memories/by-day/{day}").json()
+
+    assert len(by_day["memories"]) == bar["n"]
+
+
+def test_memories_by_day_is_empty_for_a_day_with_nothing_logged(client) -> None:
+    _signup(client)
+    assert client.get("/api/memories/by-day/2020-01-01").json() == {
+        "day": "2020-01-01",
+        "memories": [],
+    }
+
+
+def test_memories_by_day_never_returns_another_users_memory(client, app_provider) -> None:
+    """I-28."""
+    _signup(client)
+    _log_then_ask(client, app_provider)
+    day = NOW.date().isoformat()
+
+    _logout(client)
+    _signup(client)
+
+    assert client.get(f"/api/memories/by-day/{day}").json()["memories"] == []

@@ -15,6 +15,7 @@ import {
   AuthResponse,
   BatchMemoriesResponse,
   ChatResponse,
+  DayMemoriesResponse,
   StatsResponse,
   ThreadsResponse,
   TimelineResponse,
@@ -112,6 +113,11 @@ export const getMemoriesBatch = (ids: string[]) =>
 export const getStats = () => request(`/api/stats`, StatsResponse);
 
 export const getTimeline = () => request(`/api/timeline`, TimelineResponse);
+
+/** Every memory logged on one day (§9 "click a timeline day") — a raw listing, not a turn's
+ * retrieval trace, since a bar has no query behind it, just the rows that made it that height. */
+export const getMemoriesByDay = (day: string) =>
+  request(`/api/memories/by-day/${day}`, DayMemoriesResponse);
 
 /** The sidebar's data — this user's conversations, most recently active first. `thread_id` is
  * already the raw id (the API strips the internal `user_id:` namespace), the same string this

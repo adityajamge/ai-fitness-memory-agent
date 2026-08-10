@@ -23,6 +23,30 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { ConfidenceMeter, EvidenceRow } from "./EvidenceRow";
 import { RetrievalQueries } from "./RetrievalQueries";
 
+/** UTC day label for both the pane header and the drawer body — `Aug 6, 2026`, matching the
+ * timeline's own hover tooltip format (`Timeline.tsx`) rather than inventing a second one. */
+export function formatDayLabel(day: string): string {
+  return new Date(`${day}T00:00:00Z`).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/** The engine pane's OTHER state (§9 "click a timeline day"): every memory logged on one day,
+ * not a turn's retrieval trace — a bar has no query behind it, just the rows that made it that
+ * height. Independent of `trace`/`rows` below; set, `AppScreen` stops passing a `trace` the pane
+ * would otherwise fall back to. */
+export interface DayView {
+  day: string;
+  memories: MemoryRow[];
+  isLoading: boolean;
+  /** Back to "following conversation" — the citation gesture and sending a new turn also do
+   * this, but there is otherwise no way out of day view once in it. */
+  onExit: () => void;
+}
+
 /**
  * One consulted insight, expandable to its lineage — DESIGN.md §9 "click an insight": "shows
  * lineage: the hypothesis, its supporting memory IDs, its confidence, and its retraction
@@ -90,6 +114,8 @@ export interface EvidencePaneProps {
   hasTurns: boolean;
   /** The memory a citation chip is currently pointing at, or null. */
   activeId: string | null;
+  /** Non-null when a timeline bar was clicked — overrides everything below it (§9). */
+  dayView: DayView | null;
 }
 
 export function EvidencePaneBody({
@@ -99,6 +125,7 @@ export function EvidencePaneBody({
   missingCount,
   hasTurns,
   activeId,
+  dayView,
 }: Omit<EvidencePaneProps, "isBusy">) {
   const reduce = useReducedMotion();
   const activeRef = useRef<HTMLLIElement>(null);
@@ -113,6 +140,49 @@ export function EvidencePaneBody({
       block: "nearest",
     });
   }, [activeId, reduce]);
+
+  // Checked first, ahead of `hasTurns`: a day view needs no turn at all (an ingest-only memory,
+  // or one logged in a different thread) — it is a raw listing, not a turn's trace.
+  if (dayView) {
+    const label = formatDayLabel(dayView.day);
+
+    if (dayView.isLoading) {
+      return (
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-16 w-full" />
+        </div>
+      );
+    }
+
+    return (
+      <>
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <p className="font-mono text-micro uppercase tracking-[0.08em] text-faint">
+            {label} · {dayView.memories.length}{" "}
+            {dayView.memories.length === 1 ? "memory" : "memories"}
+          </p>
+          <button
+            type="button"
+            onClick={dayView.onExit}
+            className="shrink-0 font-mono text-micro text-faint underline underline-offset-2 hover:text-muted-foreground"
+          >
+            back to conversation
+          </button>
+        </div>
+
+        {dayView.memories.length === 0 ? (
+          <EmptyState size="pane" title="Nothing logged this day." body={`No memories on ${label}.`} />
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {dayView.memories.map((memory, i) => (
+              <EvidenceRow key={memory.id} evidence={memory} row={memory} index={i} />
+            ))}
+          </ul>
+        )}
+      </>
+    );
+  }
 
   if (!hasTurns) {
     return (
@@ -223,7 +293,7 @@ export const EvidencePane = memo(function EvidencePane(props: EvidencePaneProps)
           Memory Engine
         </h2>
         <span className="rounded-xs border border-border px-1.5 py-0.5 font-mono text-micro uppercase tracking-[0.08em] text-muted-foreground">
-          {props.isBusy ? "working" : "following conversation"}
+          {props.dayView ? formatDayLabel(props.dayView.day) : props.isBusy ? "working" : "following conversation"}
         </span>
       </div>
 
