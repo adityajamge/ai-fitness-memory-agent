@@ -318,6 +318,41 @@
     color: var(--color-foreground);
   }
 
+  /* Thin, token-driven scrollbar replacing default browser chrome across every
+   * scrollable surface (thread sidebar, conversation column, engine pane) in
+   * both themes. Track is transparent so it reads as part of the surface
+   * beneath it, not a separate lane; only the thumb reads as "scrollbar."
+   * `.scrollbar-none` below is unlayered and still wins where a scrollbar
+   * must stay fully hidden (the timeline rail). */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--color-border-strong);
+    border-radius: var(--radius-lg);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-faint);
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
   /* Headings balance rather than orphan. */
   h1,
   h2,

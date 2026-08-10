@@ -10,7 +10,7 @@
  */
 
 import { memo, useEffect, useRef, useState } from "react";
-import { m, useReducedMotion } from "motion/react";
+import { AnimatePresence, m, useReducedMotion } from "motion/react";
 import type { MemoryRow } from "@/api/schemas";
 import { Answer } from "@/components/glassbox/Answer";
 import { Receipt } from "@/components/glassbox/Receipt";
@@ -20,8 +20,8 @@ import { cn } from "@/lib/utils";
 import type { ChatTurn } from "@/types/turn";
 
 /**
- * Staged progress while a turn runs — DESIGN.md §6.10, §9.1 step 3 (amended 2026-08-09: a
- * connected trail, not a single line that overwrites itself — see the Decisions Log).
+ * Staged progress while a turn runs — DESIGN.md §6.10, §9.1 step 3 (amended 2026-08-10: a single
+ * line that swaps to the latest stage, not a stacked/connected trail — see the Decisions Log).
  *
  * Every `stage` arrives from a real `event: stage` SSE frame (M6) and nothing else — there is no
  * elapsed-time fallback, because a timer standing in for progress is exactly what §6.10 rules
@@ -29,57 +29,40 @@ import type { ChatTurn } from "@/types/turn";
  * the pulse shows: an honest "something is happening" with no claim about what stage.
  */
 function PendingTurn({ stages, isReduced }: { stages: string[]; isReduced: boolean }) {
+  const current = stages.length > 0 ? stages[stages.length - 1] : null;
+
   return (
     <m.div
       initial={isReduced ? false : { opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: isReduced ? 0 : 0.18 }}
-      className="flex gap-3"
+      className="flex items-center gap-3"
       aria-live="polite"
     >
-      <Logo size={28} glowStrength={0} className="mt-0.5" />
+      <Logo size={36} glowStrength={0} />
 
-      {stages.length === 0 ? (
-        <span className="flex h-6 items-center">
-          <span
-            className={cn("size-1.5 rounded-full bg-signal", !isReduced && "animate-pulse")}
-          />
-        </span>
-      ) : (
-        // Each completed stage stays on screen as a dimmed, static dot; the current one keeps
-        // the pulse. The connecting line (`--border`, never `--signal` — rule 7) is what makes it
-        // read as one continuous path the engine walked, rather than a list of unrelated events.
-        <ol className="flex flex-col gap-1.5 border-l border-border py-0.5 pl-3">
-          {stages.map((label, i) => {
-            const isCurrent = i === stages.length - 1;
-            return (
-              <m.li
-                key={i}
-                initial={isReduced ? false : { opacity: 0, x: -4 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: isReduced ? 0 : 0.18 }}
-                className="relative flex items-center"
-              >
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "absolute -left-3.75 size-1.5 rounded-full",
-                    isCurrent ? cn("bg-signal", !isReduced && "animate-pulse") : "bg-faint",
-                  )}
-                />
-                <span
-                  className={cn(
-                    "font-mono text-meta",
-                    isCurrent ? "text-muted-foreground" : "text-faint",
-                  )}
-                >
-                  {label}…
-                </span>
-              </m.li>
-            );
-          })}
-        </ol>
-      )}
+      <span className="flex h-9 items-center gap-2">
+        <span
+          aria-hidden="true"
+          className={cn("size-1.5 shrink-0 rounded-full bg-signal", !isReduced && "animate-pulse")}
+        />
+        {/* Only the latest stage is ever on screen — it replaces the previous one in place
+            rather than joining a running list. */}
+        <AnimatePresence mode="wait" initial={false}>
+          {current && (
+            <m.span
+              key={current}
+              initial={isReduced ? false : { opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: isReduced ? 1 : 0, y: isReduced ? 0 : -4 }}
+              transition={{ duration: isReduced ? 0 : 0.18 }}
+              className="font-mono text-meta text-muted-foreground"
+            >
+              {current}…
+            </m.span>
+          )}
+        </AnimatePresence>
+      </span>
     </m.div>
   );
 }
@@ -144,7 +127,10 @@ function TurnBlock({
       transition={{ duration: reduce ? 0 : 0.24, ease: [0.2, 0, 0, 1] }}
       className="flex gap-3"
     >
-      <Logo size={28} glowStrength={0} className="mt-0.5" />
+      {/* No logo once the answer is finished — the mark is reserved for the "generating" state
+          in PendingTurn. This spacer just holds its 36px column so the answer text doesn't
+          reflow sideways when the turn settles from pending to complete. */}
+      <div className="w-9 shrink-0" aria-hidden="true" />
 
       <div className="flex min-w-0 flex-1 flex-col gap-2.5">
         {turn.receipts.map((receipt, i) => (
