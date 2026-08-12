@@ -325,6 +325,23 @@
 
 ## Phase 6 — Evidence Traces & Glass-Box UI *(~5–7 days)* — **ACTIVE**
 
+> **Status 2026-08-13: Profile & goals moved into a dialog/sidebar pattern (`d2df0eb`'s
+> follow-up, `7817e4f`).** Two changes, both explicit instruction, both scoped to the two
+> screens Phase 6 already shipped — no new surface, no new route. **(1)** `/app/profile` now
+> opens as a Base UI dialog over the current screen on desktop (React Router's
+> background-location pattern; chat/Today stays mounted underneath) and as its existing full
+> page on mobile, where floating a dialog over a phone screen has no honest form. **(2)** Account
+> controls (Profile, Sign out) left the top bar entirely for a ChatGPT-style row at the bottom of
+> the left sidebar, which required un-scoping the thread sidebar from Chat-only — extracted into
+> `ThreadSidebarRail` so `/app/today` carries the identical rail. Full detail, including the
+> Tailwind/`Button`-composition footguns hit and re-avoided along the way, is in
+> [DESIGN.md §16's Decisions Log](../DESIGN.md#16-decisions-log) (§6.13, §6.19, new §6.21) — not
+> duplicated here. Verified: `tsc`/build clean, 5 targeted Playwright checks plus a full 15/15
+> re-run of both Definition-of-Done specs after the `AppScreen`/`Today` restructure (a batch-run
+> flake mid-session reproduced as the same recurring CockroachDB Cloud test-cluster connectivity
+> issue noted elsewhere in this doc, not a regression — every failing case passed clean in
+> isolation).
+>
 > **Status 2026-08-12: Today shipped (`8aed61a`) — the first surface added after 07's build
 > order.** Not part of the original plan: it comes from the competitive research approved
 > 2026-08-12 (P0 #1), which found that all five products studied — MyFitnessPal, Google Health
