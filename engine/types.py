@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -33,6 +33,8 @@ __all__ = [
     "BloodReportPayload",
     "SupplementPayload",
     "NotePayload",
+    "ProfileChangePayload",
+    "ENGINE_ONLY_TYPES",
     "InsightPayload",
     "RetractionCondition",
     "INSIGHT_KINDS",
@@ -287,6 +289,22 @@ class NotePayload(MemoryPayload):
     text: str
 
 
+class ProfileChangePayload(MemoryPayload):
+    """A history-worthy `user_profile` field just changed (ADR-17.1).
+
+    Written in the same transaction as the `user_profile` row update it describes, never on
+    its own. ``old_value``/``new_value`` are ``Any`` because the fields this covers span types
+    (a goal string, a target float, an allergy list) and the payload's job is to record what
+    changed, not to re-type the profile schema a second time. ``old_value`` is ``None`` for a
+    field's first-ever value, not a sentinel for "no change" — a payload is never written for a
+    no-op update in the first place.
+    """
+
+    field: str
+    old_value: Any = None
+    new_value: Any = None
+
+
 class RetractionCondition(MemoryPayload):
     """What would make the engine withdraw a claim (ADR-13.11, pinned by §4.14).
 
@@ -406,8 +424,18 @@ MEMORY_TYPE_REGISTRY: dict[str, type[MemoryPayload]] = {
     "blood_report": BloodReportPayload,
     "supplement": SupplementPayload,
     "note": NotePayload,
+    "profile_change": ProfileChangePayload,
     "insight": InsightPayload,
 }
+
+#: Types the extraction model must never be offered (ADR-17.1). ``profile_change`` is written
+#: only by the profile router, inside the same transaction as the `user_profile` update it
+#: describes — unlike every other type here, its payload validates with a single required
+#: string field, so unlike ``insight`` (whose coherence check makes an accidental extraction
+#: near-impossible) it would validate trivially if a stray extraction ever proposed one. Read
+#: paths (lookup/recall/timeline) are unaffected — a `profile_change` memory is still legitimate,
+#: citable evidence once it exists; this only closes the *write* path that could invent one.
+ENGINE_ONLY_TYPES: frozenset[str] = frozenset({"profile_change"})
 
 
 class UnknownMemoryType(ValueError):

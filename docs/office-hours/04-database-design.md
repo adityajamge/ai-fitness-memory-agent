@@ -23,7 +23,8 @@ CREATE TABLE memories (
   event_time    TIMESTAMPTZ NOT NULL,   -- when it happened (may be estimated)
   tz            TEXT NOT NULL,          -- user's timezone at event time
   type          TEXT NOT NULL,          -- 'meal' | 'workout' | 'sleep' | 'body_scan' | 'weight'
-                                        -- | 'blood_report' | 'supplement' | 'note' | 'insight' | ...
+                                        -- | 'blood_report' | 'supplement' | 'note' | 'insight'
+                                        -- | 'profile_change' | ...
   source        TEXT NOT NULL,          -- 'chat' | 'photo_upload' | 'file_upload' | 'replay'
                                         -- | 'consolidation' (derived rows) | ...
   provenance    TEXT NOT NULL,          -- 'live' | 'reconstructed'
@@ -45,9 +46,22 @@ auth with opaque session tokens — simple by design, ADR-13.15), `turns` (per-t
 memory IDs) + `evidence_traces` (the **persisted `EvidenceTrace`** per answer/ingestion turn,
 JSONB referencing memory IDs, never copying payloads — written in the same transaction as the
 turn; see [03-memory-engine.md](03-memory-engine.md#6-evidence-trace-builder-adr-12)),
-`user_profile` (goals, allergies, injuries, preferences). LangGraph's PostgresSaver
-checkpoint tables also live here but hold **graph execution state only** — the UI never
-renders from them.
+`user_profile` — the fast current-state cache (ADR-17): identity (`display_name`,
+`date_of_birth`, `sex`, `height_cm`, `units`), goals/targets (`primary_goal`, `activity_level`,
+`target_weight_kg`, `protein_target_g`, `calorie_target_kcal`, `targets_are_custom`),
+`dietary_preference`, `allergies`, `injuries`, `onboarded_at`. One row per user, read once per
+turn; **not** where current weight lives (see the `weight` memory type and ADR-17.2) and not a
+history — every write to a history-worthy field (goals, targets, activity level, dietary
+preference, allergies) also writes a `profile_change` memory in the same transaction, so a claim
+about "was the target hit" can be judged against the target active *on that date*, not today's.
+LangGraph's PostgresSaver checkpoint tables also live here but hold **graph execution state
+only** — the UI never renders from them.
+
+**`profile_change` payload** (see [ADR-17](09-decisions.md#adr-17)): `{field, old_value,
+new_value}` — one memory per changed history-worthy field, `source='profile'` or `'onboarding'`,
+`confidence=1.0`. It carries no `nutrition`/`items`/etc.; it exists purely so a profile edit is
+citable, dated, evidence-grade material like every other fact in this system, instead of a
+silent mutation.
 
 ## Bi-temporality
 

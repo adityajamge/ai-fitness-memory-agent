@@ -27,6 +27,7 @@ from api.routers import auth as auth_router
 from api.routers import chat as chat_router
 from api.routers import glassbox as glassbox_router
 from api.routers import ingest as ingest_router
+from api.routers import profile as profile_router
 from api.spa import mount_spa
 from engine.config import Settings, load_settings
 from engine.consolidation import ConsolidationService
@@ -129,6 +130,7 @@ def create_app(
     app.include_router(ingest_router.router)
     app.include_router(chat_router.router)
     app.include_router(glassbox_router.router)
+    app.include_router(profile_router.router)
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:

@@ -26,6 +26,10 @@ async function seedAccount(page: Page): Promise<void> {
   await page.getByRole("textbox", { name: "Email" }).fill(uniqueEmail());
   await page.getByRole("textbox", { name: "Password" }).fill("e2e-password-123");
   await page.getByRole("button", { name: "Create account" }).click();
+  // Signup now routes through the one-time profile intake first (DESIGN.md §6.19, ADR-17);
+  // skip it — this suite is about the glass box, not onboarding.
+  await expect(page).toHaveURL(/\/onboarding$/);
+  await page.getByRole("button", { name: "Skip for now" }).click();
   await expect(page).toHaveURL(/\/app$/);
 
   // Protein is stated explicitly. Extraction is a live model call, and asking it to *infer*

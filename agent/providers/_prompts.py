@@ -22,7 +22,14 @@ from pydantic import BaseModel
 
 from engine.model import ExtractedEvent, ExtractionError, NutritionError
 from engine.nutrition import FOOD_KINDS, QTY_BASES
-from engine.types import MEMORY_TYPE_REGISTRY
+from engine.types import ENGINE_ONLY_TYPES, MEMORY_TYPE_REGISTRY
+
+#: The types the extraction model may propose — the full registry minus ``ENGINE_ONLY_TYPES``
+#: (ADR-17.1). Computed once so the extraction schema and the field guide can't independently
+#: drift on which types they exclude.
+_EXTRACTABLE_TYPES: dict = {
+    k: v for k, v in MEMORY_TYPE_REGISTRY.items() if k not in ENGINE_ONLY_TYPES
+}
 
 if TYPE_CHECKING:
     from engine.assembly import ContextBlock
@@ -134,6 +141,10 @@ NARRATE_SYSTEM = (
     "'about', never a bare figure. If the evidence says some foods were excluded from a "
     "total, name them and say they are not included. Never present an estimated total as "
     "exact, and never quietly drop the exclusion.\n"
+    "- A 'User profile' line, if present, gives the user's name, goal, and nutrition targets "
+    "for personalization — you may reference it by name (e.g. comparing a logged total against "
+    "their target). It is NOT evidence: never wrap a profile number in a [memory-id] citation "
+    "marker, only numbers that come from the evidence below.\n"
     "Be concise and factual."
 )
 
@@ -220,7 +231,7 @@ def payload_field_guide() -> str:
     """
     return "\n".join(
         f"  {name}: {{{_describe_payload(model)}}}"
-        for name, model in sorted(MEMORY_TYPE_REGISTRY.items())
+        for name, model in sorted(_EXTRACTABLE_TYPES.items())
     )
 
 
@@ -240,7 +251,7 @@ def extract_tool_schema() -> dict:
                         "properties": {
                             "type": {
                                 "type": "string",
-                                "enum": sorted(MEMORY_TYPE_REGISTRY.keys()),
+                                "enum": sorted(_EXTRACTABLE_TYPES.keys()),
                             },
                             # ISO-8601 timestamp; null if not inferable.
                             "event_time": {"type": ["string", "null"]},
@@ -534,6 +545,10 @@ def render_context(question: str, context: ContextBlock) -> str:
     structured context → text at the narrate boundary). Memory ids are shown inline so the
     model can cite them; payloads are never dumped (summaries/values carry the meaning)."""
     lines: list[str] = [f"Question: {question}", ""]
+
+    if context.profile_note:
+        lines.append(f"User profile: {context.profile_note}")
+        lines.append("")
 
     if context.aggregates:
         lines.append("Computed aggregates:")

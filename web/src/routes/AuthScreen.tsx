@@ -70,7 +70,10 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
     setSubmitting(true);
     try {
       await (mode === "signup" ? signupRequest : loginRequest)(email, password);
-      navigate("/app", { replace: true });
+      // Signup routes through the one-time intake screen (DESIGN.md §6.19, ADR-17) before the
+      // guided first turn; login goes straight in — onboarding is a signup follow-up, not a
+      // gate re-enforced on every session, and "Skip for now" means skipping stays skipped.
+      navigate(mode === "signup" ? "/onboarding" : "/app", { replace: true });
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 409) {

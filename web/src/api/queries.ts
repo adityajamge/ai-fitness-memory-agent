@@ -13,12 +13,17 @@ import {
   ApiError,
   getMemoriesBatch,
   getMemoriesByDay,
+  getProfile,
   getStats,
   getThreads,
   getTimeline,
   getTrace,
   getTurns,
   sendMessage,
+  submitOnboarding,
+  updateProfile,
+  type OnboardingInput,
+  type ProfileEditInput,
 } from "./client";
 import { markAuthenticated } from "@/session/sessionStore";
 
@@ -33,6 +38,7 @@ export const queryKeys = {
   memories: (ids: string[]) => ["memories", ...ids] as const,
   memoriesByDay: (day: string) => ["memories-by-day", day] as const,
   threads: ["threads"] as const,
+  profile: ["profile"] as const,
 };
 
 /** True when a rejection is specifically "not signed in", so callers can branch without
@@ -153,4 +159,29 @@ export function useSendMessage() {
 export function useInvalidateAfterTurn() {
   const queryClient = useQueryClient();
   return useCallback(() => invalidateTurnDerivedQueries(queryClient), [queryClient]);
+}
+
+/* ── profile (ADR-17) ─────────────────────────────────────────────────────────────────────── */
+
+/** The onboarding screen and Profile settings share this one query — the intake screen reads
+ * it to decide whether it should even render (§6.19: `/onboarding` redirects once
+ * `has_onboarded` is true, like a used-up link). */
+export function useProfile() {
+  return useQuery({ queryKey: queryKeys.profile, queryFn: getProfile });
+}
+
+export function useSubmitOnboarding() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: OnboardingInput) => submitOnboarding(body),
+    onSuccess: (profile) => queryClient.setQueryData(queryKeys.profile, profile),
+  });
+}
+
+export function useUpdateProfile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ProfileEditInput) => updateProfile(body),
+    onSuccess: (profile) => queryClient.setQueryData(queryKeys.profile, profile),
+  });
 }

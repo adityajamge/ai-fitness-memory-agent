@@ -21,6 +21,12 @@ const AppScreen = lazy(() =>
 const AuthScreen = lazy(() =>
   import("./routes/AuthScreen").then((m) => ({ default: m.AuthScreen })),
 );
+const Onboarding = lazy(() =>
+  import("./routes/Onboarding").then((m) => ({ default: m.Onboarding })),
+);
+const ProfileSettings = lazy(() =>
+  import("./routes/ProfileSettings").then((m) => ({ default: m.ProfileSettings })),
+);
 const NotFound = lazy(() => import("./routes/NotFound").then((m) => ({ default: m.NotFound })));
 
 /** Deliberately blank, not a spinner. These chunks resolve in tens of milliseconds on a warm
@@ -33,6 +39,8 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/app" element={<AppScreen />} />
+        <Route path="/app/profile" element={<ProfileSettings />} />
+        <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/login" element={<AuthScreen mode="login" />} />
         <Route path="/signup" element={<AuthScreen mode="signup" />} />
         <Route path="*" element={<NotFound />} />

@@ -55,15 +55,52 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions (user_id);
 
--- ── user_profile: goals, allergies, injuries, preferences ─────────────────────────────
+-- ── user_profile: current-state cache + goal/target history via profile_change memories ──
+-- (ADR-17, docs/office-hours/09-decisions.md#adr-17). Reshaped 2026-08-11 from the original
+-- {goals, allergies, injuries, preferences} stub, which shipped in Phase 2 with no reader or
+-- writer. Current weight is deliberately NOT a column here — it stays a first-class `weight`
+-- memory (ADR-17.2); this table never duplicates it.
 CREATE TABLE IF NOT EXISTS user_profile (
-    user_id     UUID PRIMARY KEY REFERENCES users (id),
-    goals       JSONB,
-    allergies   JSONB,
-    injuries    JSONB,
-    preferences JSONB,
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    user_id              UUID PRIMARY KEY REFERENCES users (id),
+    display_name         TEXT,
+    date_of_birth        DATE,
+    sex                  TEXT,                            -- 'male' | 'female' | NULL (skipped)
+    height_cm            FLOAT,
+    units                TEXT NOT NULL DEFAULT 'metric',   -- 'metric' | 'imperial' — display only
+    primary_goal         TEXT,     -- 'lose_fat' | 'build_muscle' | 'recomp' | 'maintain' | 'general_health'
+    activity_level       TEXT,     -- 'sedentary' | 'light' | 'moderate' | 'very_active' | 'athlete'
+    target_weight_kg     FLOAT,
+    dietary_preference   TEXT,
+    allergies            JSONB,    -- list[str]
+    injuries             TEXT,
+    protein_target_g     FLOAT,
+    calorie_target_kcal  FLOAT,
+    targets_are_custom   BOOLEAN NOT NULL DEFAULT false,   -- true once the user overrides the computed suggestion
+    onboarded_at         TIMESTAMPTZ,                      -- NULL until the intake screen is submitted or skipped
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Idempotent reshape for a cluster where the table was already created with the old columns
+-- (`CREATE TABLE IF NOT EXISTS` above is a no-op there). Safe because the table has never been
+-- written to (T4/audit finding, 2026-08-11): no data migration, only a shape migration.
+ALTER TABLE user_profile ADD COLUMN IF NOT EXISTS display_name TEXT;
+ALTER TABLE user_profile ADD COLUMN IF NOT EXISTS date_of_birth DATE;
+ALTER TABLE user_profile ADD COLUMN IF NOT EXISTS sex TEXT;
+ALTER TABLE user_profile ADD COLUMN IF NOT EXISTS height_cm FLOAT;
+ALTER TABLE user_profile ADD COLUMN IF NOT EXISTS units TEXT NOT NULL DEFAULT 'metric';
+ALTER TABLE user_profile ADD COLUMN IF NOT EXISTS primary_goal TEXT;
+ALTER TABLE user_profile ADD COLUMN IF NOT EXISTS activity_level TEXT;
+ALTER TABLE user_profile ADD COLUMN IF NOT EXISTS target_weight_kg FLOAT;
+ALTER TABLE user_profile ADD COLUMN IF NOT EXISTS dietary_preference TEXT;
+ALTER TABLE user_profile ADD COLUMN IF NOT EXISTS protein_target_g FLOAT;
+ALTER TABLE user_profile ADD COLUMN IF NOT EXISTS calorie_target_kcal FLOAT;
+ALTER TABLE user_profile ADD COLUMN IF NOT EXISTS targets_are_custom BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE user_profile ADD COLUMN IF NOT EXISTS onboarded_at TIMESTAMPTZ;
+-- injuries changes shape (JSONB -> TEXT free text, DESIGN.md §6.19); drop+re-add rather than
+-- ALTER COLUMN TYPE since the column has never held data.
+ALTER TABLE user_profile DROP COLUMN IF EXISTS injuries;
+ALTER TABLE user_profile ADD COLUMN IF NOT EXISTS injuries TEXT;
+ALTER TABLE user_profile DROP COLUMN IF EXISTS goals;
+ALTER TABLE user_profile DROP COLUMN IF EXISTS preferences;
 
 -- ── turns + evidence_traces: source of truth for UI rendering (ADR-13.14) ──────────────
 -- Created now so the schema is complete, but NOT written by Phase 2. T7 (Phase 6) writes

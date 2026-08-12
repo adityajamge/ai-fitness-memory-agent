@@ -26,6 +26,7 @@ from engine.model import (
     NutritionError,
 )
 from engine.nutrition import EstimateMethod, build_nutrition, is_engine_authored
+from engine.profile import get_profile
 from engine.repository import (
     fetch_meals_without_nutrition,
     fetch_unembedded,
@@ -341,8 +342,13 @@ class IngestionService:
         self, user_id: UUID, events: list[ExtractedEvent], source: str, provenance: str
     ) -> list[Memory]:
         memories: list[Memory] = []
+        # Fetched once per turn, not once per meal — same profile applies to every event in a
+        # batch, and most turns log zero meals at all (ADR-17.5).
+        dietary_note = (
+            self._dietary_note(user_id) if any(ev.type == _MEAL_TYPE for ev in events) else ""
+        )
         for ev in events:
-            payload = self._with_nutrition(ev)  # stage (B½) — off-transaction, best-effort
+            payload = self._with_nutrition(ev, dietary_note)  # stage (B½) — off-tx, best-effort
             try:
                 validated = validate_payload(ev.type, payload)  # raises -> caller note-fallback
             except (ValidationError, UnknownMemoryType):
@@ -369,8 +375,27 @@ class IngestionService:
             )
         return memories
 
+    def _dietary_note(self, user_id: UUID) -> str:
+        """The user's dietary preference/allergies, rendered as one line of prompt context
+        (ADR-17.5). Best-effort like every other enrichment here: a lookup failure must not
+        cost the user their meal, so it returns "" rather than raising."""
+        try:
+            with self.db.transaction() as cur:
+                profile = get_profile(cur, user_id)
+        except Exception:  # noqa: BLE001 — enrichment must never break ingestion
+            logger.exception("dietary context lookup failed (swallowed)")
+            return ""
+        parts: list[str] = []
+        if profile.dietary_preference:
+            parts.append(f"User dietary preference: {profile.dietary_preference}.")
+        if profile.allergies:
+            parts.append(
+                f"Allergies/restrictions to flag if present: {', '.join(profile.allergies)}."
+            )
+        return " ".join(parts)
+
     # ── stage (B½): nutrition estimation ──────────────────────────────────────────────
-    def _with_nutrition(self, ev: ExtractedEvent) -> dict:
+    def _with_nutrition(self, ev: ExtractedEvent, dietary_note: str = "") -> dict:
         """Attach ``payload.nutrition`` to a meal, or return the payload untouched.
 
         **Where it sits and why.** Between validation (B) and embeddings (C): it is a model
@@ -387,6 +412,10 @@ class IngestionService:
         **Never overwrites what it did not write.** A payload that already carries nutrition
         this pipeline did not author — a value the user stated, a reviewed replay-table macro
         set — is returned untouched, no call made.
+
+        ``dietary_note`` folds the user's dietary preference/allergies (if any) into the
+        existing free-text ``context`` argument (ADR-17.5) — ``ModelProvider.estimate_nutrition``
+        keeps its signature; only what this method sends through it changes.
         """
         if not self.estimate_nutrition or ev.type != _MEAL_TYPE:
             return ev.payload
@@ -399,8 +428,9 @@ class IngestionService:
         if not isinstance(items, list) or not items:
             return ev.payload  # nothing named to estimate
 
+        context = "\n".join(part for part in (ev.summary or "", dietary_note) if part)
         try:
-            raw = self.model.estimate_nutrition(items, context=ev.summary or "")
+            raw = self.model.estimate_nutrition(items, context=context)
         except NutritionError:
             logger.info("nutrition estimate failed; meal will commit without it (backfillable)")
             return ev.payload

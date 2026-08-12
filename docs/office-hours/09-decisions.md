@@ -662,6 +662,85 @@ must be deliberate. A citable surface is far easier to widen later than to narro
 cut on 2026-08-06. Invariant **I-23** (a photo turn persists something for every outcome) stands
 in §5 as unimplemented, not withdrawn. Remaining work is in [TODOS.md](../../TODOS.md).
 
+## ADR-17 — User profile & onboarding — *accepted 2026-08-11*
+
+Follows an audit of the identity/account system: signup collected only email+password, the
+`user_profile` table had existed in `schema.sql` since Phase 2 with zero readers or writers, and
+no memory type or engine module carried any notion of a goal, a target, or a current state — only
+typed events. This ADR is the architecture behind the fix. It **supersedes** two rows of
+DESIGN.md §13 ("onboarding tour/checklist" and "settings/profile screen" — both were rejected
+before personalization existed as a requirement; see DESIGN.md's 2026-08-11 Decisions Log entry
+and new §6.19) and stays within ADR-13.4's account model: account creation is unchanged, still
+email+password, still empty by construction.
+
+**17.1 Two-layer model: current-state cache + append-only history, not one mutable row.** The
+inactive `user_profile` table is activated as the fast current-state read — one row per user,
+read once per turn. But a plain `UPDATE` on it would make "was I hitting my target in July"
+unanswerable correctly once August sets a new one, which is exactly the failure mode a glass-box
+product cannot afford silently. Every field whose value could gate a historical comparison
+(`primary_goal`, `activity_level`, `target_weight_kg`, `dietary_preference`, `allergies`,
+`protein_target_g`, `calorie_target_kcal`) writes a **tenth memory type**, `profile_change`
+(`{field, old_value, new_value}`), in the same transaction as the `user_profile` row update —
+mirroring the `turns` + `evidence_traces` same-transaction pattern already established in
+`schema.sql`. Identity fields with no historical-comparison role (`display_name`,
+`date_of_birth`, `sex`, `height_cm`, `units`) are plain mutable columns with no history
+requirement.
+
+**17.2 Current weight stays a first-class `weight` memory, never a profile column.** The obvious
+shortcut — a `user_profile.current_weight_kg` field, written by both onboarding and chat — would
+create two sources of truth for the same fact the moment they drift. Onboarding's "what do you
+weigh now" and Profile settings' "update your weight" both write through
+`IngestionService.ingest_events` with `source="onboarding"` / `source="profile"`, exactly the path
+a chat-logged weight already takes. "Current weight" for the target calculator is defined as *the
+latest active `weight` memory* (`engine.repository.latest_weight`), never a cached column.
+
+**17.3 No new memory-ownership or auth concept.** `user_profile.user_id` is scoped by the same
+`get_current_user` boundary (ADR-13.4) every other table uses; there is no second identity
+system, no microservice, no new session mechanism. The profile router (`api/routers/profile.py`)
+is a thin FastAPI router in the same style as `api/routers/auth.py`.
+
+**17.4 Target calculation is a pure function, engine-owned, its basis always rendered.**
+`engine.profile.compute_targets` (Mifflin-St Jeor BMR × activity multiplier × goal adjustment,
+protein at a per-kg-bodyweight heuristic keyed to the goal) takes plain typed arguments and
+returns `None` when inputs are insufficient — no DB, no model call, same purity contract as
+`engine/nutrition.py` and `engine/insights.py`'s `EffectScale`. It returns a human-readable
+`basis` string alongside the numbers, because a computed number with no visible provenance is
+exactly what §16.3's "labeled heuristic, never a probability" rule (and DESIGN.md's mono-means-
+database-value convention) exists to prevent elsewhere in this system. Sex, when the user skips
+it, is not guessed: the formula falls back to a sex-averaged BMR and the basis string says so —
+the same "unknown → widen and mark it, never silently assume" posture `engine/nutrition.py`
+already applies to quantity/confidence.
+
+**17.5 Profile context reaches the model at two narrow, additive seams — never a protocol
+change.** Both `agent/providers/bedrock.py` and `agent/providers/claude_api.py` implement
+`narrate()` by calling `agent.providers._prompts.render_context(question, context)`, so a new
+optional `ContextBlock.profile_note: str | None` field (populated by `agent/graph.py`'s
+`assemble_node`, via `dataclasses.replace` **after** `assemble()` returns) reaches both providers
+for free, with zero change to the `ModelProvider` Protocol and zero change to `assemble()`'s own
+purity contract (`engine/assembly.py`'s docstring: "never touches the database" — the DB read
+happens in the graph node, not inside assembly). Profile numbers are prose context, not evidence:
+they are deliberately **not** added to `ContextBlock.citable_ids()`, so `NARRATE_SYSTEM` is
+amended to say a target may be mentioned by name but never wrapped in a `[memory-id]` marker —
+`engine/citations.py`'s validator only checks markers that exist, so this cannot produce a false
+`invalid` verdict. Nutrition estimation gets the same treatment on the ingestion side:
+`IngestionService._with_nutrition` reads the caller's dietary preference/allergies from
+`user_profile` and folds them into the existing free-text `context` argument of
+`estimate_nutrition` — the provider-facing method signature is unchanged.
+
+**17.6 Required onboarding is the minimum the target calculator needs, nothing more.** Name, date
+of birth, sex (genuinely skippable — §17.4), height, current weight, primary goal, activity
+level. Optional: units, target weight, dietary preference, allergies. Never collected: medical
+history, medications, phone, address, emergency contacts, wearable credentials — out of scope for
+what this product computes or needs, and liability-adjacent scope creep the audit flagged
+explicitly.
+
+### Open — do not treat as settled
+
+**Target-adherence insights** ("you hit your protein target 80% of days since Aug 3") are enabled
+by this foundation — `profile_change` gives a target's active-on-date history to join against —
+but are not built. They are Nutrition/Insights product-surface work, deliberately deferred to the
+research pass that follows this milestone.
+
 ## Standing assumptions (verify, don't trust)
 
 1. The builder's real history contains a demo-worthy causal story (Assignment verifies; a

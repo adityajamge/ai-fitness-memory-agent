@@ -16,6 +16,7 @@ import {
   BatchMemoriesResponse,
   ChatResponse,
   DayMemoriesResponse,
+  ProfileResponse,
   StatsResponse,
   ThreadsResponse,
   TimelineResponse,
@@ -146,6 +147,47 @@ export const login = (email: string, password: string) =>
 export const logout = async (): Promise<void> => {
   await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
 };
+
+/* ── profile (ADR-17, DESIGN.md §6.19) ───────────────────────────────────────────────────── */
+
+/**
+ * Every field optional — only the ones present are applied server-side (a real PATCH, not a
+ * full-replace with implicit nulling). `weight_kg` is never a stored profile field (ADR-17.2):
+ * present, it writes a new `weight` memory, the same path a chat-logged weight takes.
+ */
+export interface ProfileEditInput {
+  display_name?: string;
+  date_of_birth?: string; // YYYY-MM-DD
+  sex?: "male" | "female";
+  height_cm?: number;
+  units?: "metric" | "imperial";
+  primary_goal?: string;
+  activity_level?: string;
+  target_weight_kg?: number;
+  dietary_preference?: string;
+  allergies?: string[];
+  injuries?: string;
+  protein_target_g?: number;
+  calorie_target_kcal?: number;
+  weight_kg?: number;
+}
+
+export interface OnboardingInput extends ProfileEditInput {
+  /** The "Skip for now" escape hatch (§6.19) — submits whatever was filled and marks
+   * onboarding done regardless of which required fields are present. */
+  skipped?: boolean;
+}
+
+export const getProfile = () => request(`/api/profile`, ProfileResponse);
+
+export const updateProfile = (body: ProfileEditInput) =>
+  request(`/api/profile`, ProfileResponse, { method: "PATCH", body: JSON.stringify(body) });
+
+export const submitOnboarding = (body: OnboardingInput) =>
+  request(`/api/profile/onboarding`, ProfileResponse, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 
 /* ── conversation ────────────────────────────────────────────────────────────────────────── */
 

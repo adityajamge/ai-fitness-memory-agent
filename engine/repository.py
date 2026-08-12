@@ -376,3 +376,24 @@ def get_note(cur: psycopg.Cursor, user_id: UUID, note_id: UUID) -> dict | None:
         [note_id, user_id],
     )
     return cur.fetchone()
+
+
+def latest_weight(cur: psycopg.Cursor, user_id: UUID) -> dict | None:
+    """The user's most recent active ``weight`` memory, or ``None`` if they have never logged
+    one. This is the *only* definition of "current weight" the profile/target calculator uses
+    (ADR-17.2) — there is no cached weight column on ``user_profile`` to drift from it."""
+    cur.execute(
+        """
+        SELECT id, weight_kg, event_time
+        FROM (
+            SELECT id, (payload ->> 'weight_kg')::FLOAT AS weight_kg, event_time
+            FROM memories
+            WHERE user_id = %s AND type = 'weight' AND status = 'active'
+        ) AS w
+        WHERE weight_kg IS NOT NULL
+        ORDER BY event_time DESC
+        LIMIT 1
+        """,
+        [user_id],
+    )
+    return cur.fetchone()

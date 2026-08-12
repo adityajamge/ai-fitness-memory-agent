@@ -18,13 +18,26 @@ from agent.providers._prompts import (
     extract_tool_schema,
     payload_field_guide,
 )
-from engine.types import MEMORY_TYPE_REGISTRY, MealPayload
+from engine.types import ENGINE_ONLY_TYPES, MEMORY_TYPE_REGISTRY, MealPayload
+
+#: Types the extraction model may be offered — the registry minus ENGINE_ONLY_TYPES (ADR-17.1:
+#: `profile_change` is written only by the profile router, and its trivially-satisfiable payload
+#: shape means it must never be a type the extractor can propose).
+_EXTRACTABLE = {k: v for k, v in MEMORY_TYPE_REGISTRY.items() if k not in ENGINE_ONLY_TYPES}
 
 
-def test_guide_covers_every_registered_memory_type() -> None:
+def test_guide_covers_every_extractable_memory_type() -> None:
     guide = payload_field_guide()
-    for memory_type in MEMORY_TYPE_REGISTRY:
+    for memory_type in _EXTRACTABLE:
         assert f"{memory_type}:" in guide, memory_type
+
+
+def test_guide_omits_engine_only_types() -> None:
+    """`profile_change` must never reach the extraction prompt (ADR-17.1) — unlike `insight`,
+    its payload has no coherence check, so a stray extraction would validate trivially."""
+    guide = payload_field_guide()
+    for memory_type in ENGINE_ONLY_TYPES:
+        assert f"{memory_type}:" not in guide, memory_type
 
 
 def test_guide_lists_every_typed_hot_field() -> None:
@@ -33,9 +46,11 @@ def test_guide_lists_every_typed_hot_field() -> None:
 
     Engine-owned fields are the one exception, and they are excluded *by the marker on the
     field* rather than by a name listed here — so this stays a drift guard rather than a
-    hand-maintained allowlist that would rot the moment someone adds another."""
+    hand-maintained allowlist that would rot the moment someone adds another. Scoped to
+    ``_EXTRACTABLE`` for the same reason as the test above: an ``ENGINE_ONLY_TYPES`` field is
+    correctly absent from the guide, not a drift bug."""
     guide = payload_field_guide()
-    for model in MEMORY_TYPE_REGISTRY.values():
+    for model in _EXTRACTABLE.values():
         for field_name, field in model.model_fields.items():
             if _is_engine_owned(field):
                 continue

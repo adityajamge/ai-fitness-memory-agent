@@ -20,6 +20,11 @@ async function signUp(page: Page): Promise<void> {
   await page.getByRole("textbox", { name: "Email" }).fill(uniqueEmail());
   await page.getByRole("textbox", { name: "Password" }).fill("e2e-password-123");
   await page.getByRole("button", { name: "Create account" }).click();
+  // Signup now routes through the one-time profile intake (DESIGN.md §6.19, ADR-17) before the
+  // guided first turn. These tests are about the empty-account FirstRun experience, not
+  // onboarding itself, so skip it — exactly what a judge who wants straight to the product would do.
+  await expect(page).toHaveURL(/\/onboarding$/);
+  await page.getByRole("button", { name: "Skip for now" }).click();
   await expect(page).toHaveURL(/\/app$/);
 }
 
@@ -118,7 +123,7 @@ test.describe("marketing and auth", () => {
       await page.getByRole("textbox", { name: "Email" }).fill(email);
       await page.getByRole("textbox", { name: "Password" }).fill("e2e-password-123");
       await page.getByRole("button", { name: "Create account" }).click();
-      if (attempt === 1) await expect(page).toHaveURL(/\/app$/);
+      if (attempt === 1) await expect(page).toHaveURL(/\/onboarding$/);
     }
     await expect(page.getByText("that email already has an account")).toBeVisible();
     await expect(page).toHaveURL(/\/signup$/);

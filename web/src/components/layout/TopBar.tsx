@@ -106,6 +106,9 @@ export function TopBar({ isBusy = false }: TopBarProps) {
 
         <ThemeToggle />
 
+        <Button variant="ghost" size="sm" onClick={() => navigate("/app/profile")}>
+          Profile
+        </Button>
         <Button variant="ghost" size="sm" onClick={handleSignOut}>
           Sign out
         </Button>

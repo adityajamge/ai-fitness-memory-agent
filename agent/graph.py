@@ -22,7 +22,7 @@ module changes.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Annotated, Any, TypedDict
 from uuid import UUID
@@ -52,6 +52,8 @@ from engine.db import Database
 from engine.ingestion import IngestionService, Receipt
 from engine.insights import SeriesKey, UnknownSeries
 from engine.model import EmbeddingError, ModelProvider, ToolCall
+from engine.profile import get_profile, render_profile_note
+from engine.repository import latest_weight
 from engine.trace import EvidenceTrace
 from engine.turns import TurnRecord, persist_turn
 
@@ -278,9 +280,20 @@ def build_graph(
 
     def assemble_node(state: GraphState, config: RunnableConfig) -> dict:
         """Merge, rank, and emit the trace — always as a pair (ADR-12). Runs on every turn,
-        so a turn that narrates always has a context and a trace, even when both are empty."""
+        so a turn that narrates always has a context and a trace, even when both are empty.
+
+        Attaches ``ContextBlock.profile_note`` **after** ``assemble()`` returns (ADR-17.5):
+        assembly itself stays DB-free by construction, so the profile read happens here, in
+        the graph, and is folded in with ``dataclasses.replace`` rather than a parameter on
+        ``assemble()``.
+        """
         carrier = carrier_of(config)
-        carrier.context, carrier.trace = assemble(state["question"], carrier.outcomes)
+        context, carrier.trace = assemble(state["question"], carrier.outcomes)
+        user_id = UUID(state["user_id"])
+        with db.transaction() as cur:
+            profile = get_profile(cur, user_id)
+            weight_row = latest_weight(cur, user_id)
+        carrier.context = replace(context, profile_note=render_profile_note(profile, weight_row))
         return {}
 
     def narrate_node(state: GraphState, config: RunnableConfig) -> dict:

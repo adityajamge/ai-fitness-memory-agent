@@ -92,6 +92,12 @@ class ContextBlock:
     #: are never subject to the raw-event budget — an insight that answers the question is the
     #: last thing that should be crowded out by the events it summarises (06, tier axis).
     insights: tuple[InsightRow, ...] = ()
+    #: A short rendering of the user's profile (name/goal/targets/dietary notes), attached by
+    #: the graph **after** ``assemble()`` returns (ADR-17.5) — never set by this module, which
+    #: stays DB-free by construction. Prose context for the narrator, not evidence: deliberately
+    #: excluded from ``citable_ids()`` below, since a target is not a memory the narrator may
+    #: cite by id.
+    profile_note: str | None = None
 
     @property
     def is_empty(self) -> bool:

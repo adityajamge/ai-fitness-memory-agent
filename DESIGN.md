@@ -804,9 +804,12 @@ is no sidebar, no tab bar, no nested routing.
 **Top bar (56px):** mark + wordmark (left) · stats in mono (center-right) · connection indicator ·
 account menu (right). The connection indicator is three 4px dots showing CockroachDB health:
 `--faint` idle, `--signal` on active query, `--invalid` on error. It is the top bar's one
-piece of ornament and it is functional.
+piece of ornament and it is functional. Two `ghost`/`sm` controls sit at the far right: `Profile`
+(→ `/app/profile`, §6.19) beside the existing `Sign out` — still not a nav bar, two adjacent
+actions, not a dropdown menu (no third item has ever needed one).
 
-Routes: `/` (landing), `/app` (the product), `/login`, `/signup`. That is all.
+Routes: `/` (landing), `/app` (the product), `/app/profile` (§6.19), `/onboarding` (§6.19),
+`/login`, `/signup`. That is all.
 
 ### 6.14 Icons
 
@@ -911,6 +914,74 @@ strictly better than a results list. Adding a search box would be admitting the 
 
 The one exception is inside the command palette, which searches turns and memories by substring for
 navigation, not for recall.
+
+### 6.19 Profile intake & Profile settings *(added 2026-08-11, supersedes §13's original rejections)*
+
+Two surfaces, one data model (ADR-17). Same visual grammar as §6.17 — no wizard chrome, no card,
+no progress dots — because a profile form dressed as a SaaS "step 2 of 4" is exactly the generic
+pattern §3 exists to rule out.
+
+**`/onboarding` — the intake screen.** Shown once, immediately after signup succeeds, before the
+guided first turn. Left-weighted layout identical to §6.17 (same `max-width: 380px`, same
+left-of-center position, no `--surface` panel). Not a route the user returns to: once
+`onboarded_at` is set, `/onboarding` redirects to `/app` like a used-up link.
+
+Anatomy, top to bottom:
+
+```
+[mark]
+
+Tell us a bit about you                   text-h2, --foreground
+So AyuMind can compute targets            text-lead, --muted-foreground
+that are actually yours.
+
+NAME · DATE OF BIRTH · SEX (skippable)    required, compact grid
+HEIGHT · CURRENT WEIGHT                   required
+GOAL (card-select, 5 options)             required
+ACTIVITY LEVEL (5-rung selector)          required
+
+~148g protein · ~2,150 kcal               font-mono, --signal, appears live
+based on your profile — adjust anytime    text-meta, --faint (the calculation basis,
+                                           expandable to the full basis string)
+
+▸ More about you (optional)               disclosure, collapsed by default
+  UNITS · TARGET WEIGHT · DIET · ALLERGIES
+
+[ Continue ]                              button/primary, full width, lg
+Skip for now                              text-dense, --muted-foreground, link
+```
+
+The computed target line is the payoff, not a confirmation step: it renders the moment the
+required fields resolve to a computable target (§6.15's mono-for-database-values rule extends
+here — a target is an engine-computed number, so it is mono, same as an evidence figure). Tapping
+it expands the one-line basis ("Mifflin-St Jeor BMR (male, age 29) × moderate activity (1.55×) …")
+— never a bare number with no explanation, per DESIGN.md's broken-rules warning about hardcoded
+values standing without provenance.
+
+**Skip is real.** It submits whatever was filled (even nothing but the email already on file) and
+sets `onboarded_at`. No field blocks it, and skipping never revisits the user with a nag — the
+account behaves exactly as an unskipped one with fewer inputs, same as every other honest-empty
+state in this product (§6.9).
+
+**`/app/profile` — Profile & goals.** Reached from the account menu (§6.13's top-bar right side,
+where the menu already lives). Same page shell as `/onboarding` reused for editing rather than a
+distinct settings-screen design — sections: Identity, Goals, Nutrition targets, Dietary
+preferences & allergies, Injuries/notes, and a closing explainer line: *"Your protein target uses
+your weight, activity level, and goal. Changing it here only affects targets going forward — past
+days are judged against the target that was active then."* That sentence is not decoration; it is
+the user-facing statement of the historical-integrity rule ADR-17 enforces structurally
+(`profile_change` history).
+
+Editing **current weight** here submits through the same path as logging it in chat — a new
+`weight` memory, not a mutated field — so the input control is intentionally styled like a
+compact log entry ("log a new weight"), not a settings field, to avoid implying it overwrites
+something.
+
+**Rules.** Every required field carries a visible label (§6.17's placeholder-as-label ban
+applies here too). The suggested-target line always reflects the *current* form state, live,
+without a submit round-trip — it is pure client-side arithmetic mirroring `engine/profile.py`'s
+formula, confirmed by the server response after submit. No field on either screen collects
+anything from §13's medical-history/phone/address/wearable-credentials "should not collect" list.
 
 ---
 
@@ -1367,8 +1438,8 @@ Design decisions considered during the 2026-08-07 review and explicitly deferred
 | Password reset flow | Requires email delivery, which is infrastructure this project does not have and the demo does not need. |
 | ~~Multi-thread conversation UI~~ **Shipped 2026-08-09** | Was "the demo never touches it"; requested explicitly. `thread_id` already existing in the API (the reason this was cheap to defer) is exactly why it was cheap to build — see §16. |
 | Photo-ingest UI | **Not** this document's M7 (the timeline strip, shipped) — Phase 5's separately-numbered M7 (photo ingestion, the backend feature) is cut for the hackathon (see `TODOS.md`). The composer's camera affordance is not built in Phase 6 regardless. |
-| Onboarding tour / checklist | Rejected in favor of the single guided first turn (§9.1). A multi-step tour fights the conversation-first grammar two wireframe drafts already established. |
-| Settings / profile screen | No setting in this product changes anything a judge would see. |
+| ~~Onboarding tour / checklist~~ **Superseded 2026-08-11** | The *tour* stays rejected — no steps, no progress dots, no dismissible chrome, and the guided first turn (§9.1) is unchanged. What shipped instead is a one-screen profile **intake** (§6.19), a different object: it collects facts the engine needs, once, and is never shown again — not a walkthrough of the UI. |
+| ~~Settings / profile screen~~ **Superseded 2026-08-11** | The original rationale — "no setting in this product changes anything a judge would see" — stopped being true the moment profile data started feeding computed nutrition targets. A profile screen that changes the number in `EvidencePane` **is** something a judge sees. Ships scoped to identity/goals/targets only (§6.19) — this is not a general settings surface. |
 
 ## 14. What already exists
 
@@ -1466,3 +1537,4 @@ Numbered `F-T*` to stay clear of the T1–T18 backlog in
 | 2026-08-09 | **Thread sidebar moved below the top bar/timeline, amending wireframe v4's full-height column** (§5.7) | Explicit user instruction, after seeing the sidebar span the full viewport height above the timeline while the engine pane on the opposite edge started below it — the asymmetry read as unintentional. `AppScreen.tsx`'s root flips from a row (`sidebar` \| `top bar+timeline+content`) to a column (`top bar` → `timeline` → `row of sidebar+conversation+pane`): `TopBar` and `Timeline` are now direct children of the root, full width, and the sidebar column plus its collapse handle move into the same `relative flex min-h-0 flex-1` row that already held the conversation and the engine pane — the handle's `calc()` math is unchanged since it was already sized off the sidebar's own width variable, not the ancestor's. Mobile/tablet drawer behavior (§5.8) is unaffected; drawers were never scoped to "below the header" in the first place. **The top bar's own "New chat" button was removed in the same pass** — `ThreadList` (`Sidebar.tsx`) already renders one, and with the sidebar now visually adjacent to the conversation instead of a disconnected ChatGPT-style rail, having the same action in two places read as redundant rather than a deliberate belt-and-suspenders control. `TopBarProps.onNewChat` and its call site were deleted rather than left as unused dead code. |
 | 2026-08-10 | **Custom scrollbar, token-driven, replacing default browser chrome everywhere** | Explicit user instruction ("three scrollbars... traditional browser scrollbar... improve the design, for both white and black theme"), covering the thread sidebar, the conversation column, and the engine pane at once rather than three one-off fixes. Added globally in `theme.css`'s `@layer base` — a universal `*` rule (`scrollbar-width: thin`, `scrollbar-color: var(--color-border-strong) transparent` for Firefox) plus `::-webkit-scrollbar*` pseudo-elements for Chromium/Safari (10px track, `--color-border-strong` thumb on a transparent track, `padding-box`-clipped 2px inset border so the thumb reads as inset rather than edge-to-edge, `--color-faint` on hover). No new tokens (rule 6 intact): both colors already existed for borders/muted text and simply carry over per-theme automatically, same as every other token consumer. `.scrollbar-none` (the timeline rail's fully-hidden scrollbar, unlayered) still wins over this by cascade-layer ordering, unchanged. |
 | 2026-08-10 | **Staged progress (§6.10) simplified from a connected-dot trail to a single swapping line** | Explicit user instruction ("I dont want this connected dots vertically, simply in one line... remove that connected dots design"), reversing the 2026-08-09 decision on its own terms once seen running — that version's stacked `<ol>` of dimmed dots read as more machinery than the moment needed. `PendingTurn` (`Conversation.tsx`) now tracks only the latest stage (`stages[stages.length - 1]`) and swaps it via `AnimatePresence mode="wait"` (fade + 4px vertical slide, `exit` values collapsed to a no-op under reduced motion rather than passed as `undefined`, since `exactOptionalPropertyTypes` rejects an explicit `undefined` on a required prop) instead of appending to a growing list. The `--border`-connector and per-stage dimmed dots are gone; the single pulsing `--signal` dot now means "still working" rather than marking one specific stage. Landed together with two related, same-session changes to the same component: the pending-state `Logo` grew from 28px to 36px (reported live as "looking so small"), and the completed-turn `Logo` was removed outright — replaced by a 36px spacer `<div>` so the answer column doesn't reflow sideways when a turn settles from pending to complete — since a heartbeat/spin mark next to a *finished* answer was reading as decoration rather than "generating," the opposite of what the mark is for. |
+| 2026-08-11 | **Profile/onboarding foundation approved, superseding §13's "onboarding tour" and "settings/profile screen" rejections** | Explicit user instruction, following an audit of the identity/account system (email+password only, no health profile) and the unused `user_profile` schema stub. §6.19 is the new component spec; ADR-17 ([09-decisions.md](docs/office-hours/09-decisions.md#adr-17)) is the backing architecture decision. Account creation itself is unchanged (email+password, no new required field) — the addition is a one-screen intake **after** signup and a small profile settings surface, both scoped to fields that feed a computed nutrition target or the agent's context, never a general settings page. Current weight remains a `weight` memory, never a mutable profile column (principle carried from the audit: one fact, one source of truth). Goal/target/preference changes write a `profile_change` memory alongside the `user_profile` row update, in the same transaction — the mechanism that keeps "you hit your target" honest against the target that was active on that historical day, not today's. |
