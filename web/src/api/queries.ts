@@ -17,6 +17,7 @@ import {
   getStats,
   getThreads,
   getTimeline,
+  getToday,
   getTrace,
   getTurns,
   sendMessage,
@@ -30,6 +31,7 @@ import { markAuthenticated } from "@/session/sessionStore";
 export const queryKeys = {
   stats: ["stats"] as const,
   timeline: ["timeline"] as const,
+  today: ["today"] as const,
   // Keyed by thread so "New chat" (a new thread id) never reads the previous thread's cached
   // history — each thread gets its own cache entry under the shared "turns" prefix, which is
   // also what lets invalidateTurnDerivedQueries below invalidate all of them with one call.
@@ -69,6 +71,19 @@ export function useStats() {
 
 export function useTimeline() {
   return useQuery({ queryKey: queryKeys.timeline, queryFn: getTimeline });
+}
+
+/**
+ * The home screen's single read.
+ *
+ * `staleTime: 0` overrides the app-wide 60s default, and the reason is specific to this query:
+ * every other cached thing here is immutable once written (a trace never changes, a memory row
+ * only changes when superseded), whereas Today is a *view of now* — it rolls over at local
+ * midnight and moves every time a meal is logged. A minute of staleness on a trace is free; a
+ * minute of staleness on "today's protein" is a wrong number on the most-seen screen.
+ */
+export function useToday() {
+  return useQuery({ queryKey: queryKeys.today, queryFn: getToday, staleTime: 0 });
 }
 
 /** Conversation history for one thread — the active thread, per `session/threadStore.ts`. Only
@@ -125,6 +140,10 @@ export function useMemoriesByDay(day: string | null) {
 function invalidateTurnDerivedQueries(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: queryKeys.stats });
   void queryClient.invalidateQueries({ queryKey: queryKeys.timeline });
+  // Today reads targets, both day totals, coverage, the newest insight and the recent strip —
+  // an ingest turn can move every one of them at once, so it invalidates with the rest rather
+  // than waiting for a remount.
+  void queryClient.invalidateQueries({ queryKey: queryKeys.today });
   // Prefix match across every cached day, the same reason the "turns" invalidation below is a
   // bare prefix: a new memory can land on a day whose list is already cached from an earlier
   // timeline click.
@@ -182,6 +201,13 @@ export function useUpdateProfile() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: ProfileEditInput) => updateProfile(body),
-    onSuccess: (profile) => queryClient.setQueryData(queryKeys.profile, profile),
+    onSuccess: (profile) => {
+      queryClient.setQueryData(queryKeys.profile, profile);
+      // A profile edit can move a target (directly, or by recomputation after a weight change)
+      // and `weight_kg` writes a real memory — so Today's targets, weight and stats are all
+      // stale. Invalidated rather than patched: the server owns those numbers.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.today });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+    },
   });
 }

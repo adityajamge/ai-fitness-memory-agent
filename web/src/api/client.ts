@@ -20,6 +20,7 @@ import {
   StatsResponse,
   ThreadsResponse,
   TimelineResponse,
+  TodayResponse,
   TraceResponse,
   TurnsResponse,
 } from "./schemas";
@@ -114,6 +115,17 @@ export const getMemoriesBatch = (ids: string[]) =>
 export const getStats = () => request(`/api/stats`, StatsResponse);
 
 export const getTimeline = () => request(`/api/timeline`, TimelineResponse);
+
+/**
+ * The home screen, in **one** round trip.
+ *
+ * Today needs stats, targets, two days of two metrics, coverage, a weight, an insight and a
+ * recent list. Composing that client-side from six existing endpoints would be the N+1 mistake
+ * at page level — and over the cross-region link this system actually runs on, the difference
+ * between a home screen that paints and one that assembles itself while the user watches.
+ * Every number in the response is computed by `engine/today.py`; nothing is derived here.
+ */
+export const getToday = () => request(`/api/today`, TodayResponse);
 
 /** Every memory logged on one day (§9 "click a timeline day") — a raw listing, not a turn's
  * retrieval trace, since a bar has no query behind it, just the rows that made it that height. */

@@ -109,7 +109,13 @@ def _edit_updates(body: ProfileEdit) -> dict[str, Any]:
 
 
 def _log_weight(
-    ingestion: IngestionService, user_id: UUID, weight_kg: float, now: datetime, tz: str, *, source: str
+    ingestion: IngestionService,
+    user_id: UUID,
+    weight_kg: float,
+    now: datetime,
+    tz: str,
+    *,
+    source: str,
 ) -> None:
     ingestion.ingest_events(
         user_id,
@@ -173,7 +179,9 @@ def _profile_json(
     }
 
 
-def _refresh_computed_targets(cur, user_id: UUID, profile: Profile, *, now: datetime, tz: str) -> Profile:
+def _refresh_computed_targets(
+    cur, user_id: UUID, profile: Profile, *, now: datetime, tz: str
+) -> Profile:
     """When targets are not a manual override, recompute them from the just-applied profile
     state and write the result — itself a `profile_change` if it moved (ADR-17.1). Keeps the
     stored target current with weight/goal/activity edits without ever touching it once the
@@ -222,7 +230,9 @@ def edit_profile(
         _log_weight(ingestion, user_id, body.weight_kg, now, tz, source="profile")
 
     with db.transaction() as cur:
-        profile = apply_profile_update(cur, user_id, _edit_updates(body), now=now, tz=tz, source="profile")
+        profile = apply_profile_update(
+            cur, user_id, _edit_updates(body), now=now, tz=tz, source="profile"
+        )
         profile = _refresh_computed_targets(cur, user_id, profile, now=now, tz=tz)
         weight_row = latest_weight(cur, user_id)
     suggested = _suggestion_for(profile, weight_row["weight_kg"] if weight_row else None)

@@ -70,10 +70,15 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
     setSubmitting(true);
     try {
       await (mode === "signup" ? signupRequest : loginRequest)(email, password);
-      // Signup routes through the one-time intake screen (DESIGN.md §6.19, ADR-17) before the
-      // guided first turn; login goes straight in — onboarding is a signup follow-up, not a
-      // gate re-enforced on every session, and "Skip for now" means skipping stays skipped.
-      navigate(mode === "signup" ? "/onboarding" : "/app", { replace: true });
+      // Signup routes through the one-time intake screen (DESIGN.md §6.19, ADR-17) and on into
+      // the guided first turn — onboarding is a signup follow-up, not a gate re-enforced on
+      // every session, and "Skip for now" means skipping stays skipped.
+      //
+      // Login lands on **Today**, not the conversation: a returning account has memory, and the
+      // briefing is what someone opening the app wants to see before they have a question. A
+      // brand-new account goes the other way (via /onboarding → /app) because Today has nothing
+      // to brief on an empty history.
+      navigate(mode === "signup" ? "/onboarding" : "/app/today", { replace: true });
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 409) {

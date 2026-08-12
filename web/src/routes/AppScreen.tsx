@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Navigate } from "react-router";
+import { Navigate, useLocation, useNavigate } from "react-router";
 import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import { ApiError } from "@/api/client";
@@ -52,6 +52,8 @@ const nextId = () => `local-${++localId}`;
 const DESKTOP_QUERY = "(min-width: 1024px)";
 
 export function AppScreen() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const stats = useStats();
   const send = useSendMessage();
   const invalidateAfterTurn = useInvalidateAfterTurn();
@@ -368,6 +370,33 @@ export function AppScreen() {
     // reads it, so the identity only needs to change when the *count* does, not on every
     // in-place turn update (streaming stages, retries) that leaves the length untouched.
   }, [threadId, turns.length, send.mutate, invalidateAfterTurn]);
+
+  /**
+   * The handoff from Today (`routes/Today.tsx`).
+   *
+   * Today has **no send path and no day view of its own** — it navigates here carrying one of
+   * two things in `location.state`, and this effect completes the action. That keeps exactly
+   * one turn pipeline and exactly one day-view renderer in the product, which is the whole
+   * reason Today was allowed to grow a composer at all.
+   *
+   * - `state.draft` — the message typed on Today, sent through the same `sendTurn` every other
+   *   turn uses, so receipts, the trace and citation validation all follow for free.
+   * - `state.day` — a memory or insight clicked on Today, landing in the pane's day view.
+   *
+   * **The state is cleared before acting.** A `replace` navigation strips it, so a browser back
+   * or a refresh cannot resend the message. That clear, not the dependency array, is the guard:
+   * `sendTurn`'s identity changes with `turns.length`, so depending on it would re-fire this on
+   * every reply. Keyed on `location.key` instead — one run per navigation, which is exactly the
+   * event being handled.
+   */
+  useEffect(() => {
+    const handoff = location.state as { draft?: string; day?: string } | null;
+    if (!handoff?.draft && !handoff?.day) return;
+    void navigate(location.pathname, { replace: true, state: null });
+    if (handoff.draft) sendTurn(handoff.draft);
+    if (handoff.day) handleScrub(handoff.day);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key]);
 
   function handleSubmit() {
     const message = draft.trim();

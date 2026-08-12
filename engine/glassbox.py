@@ -47,6 +47,15 @@ MAX_BATCH = 200
 #: shows recent conversations, not a full account history.
 MAX_THREADS_PAGE = 50
 
+#: Today's recent-memory strip. Deliberately tiny: it is a *browse affordance and a receipt*,
+#: not a diary — DESIGN.md's Today spec calls for "a small number", and a scrolling list here
+#: would rebuild the day-view the timeline already owns.
+RECENT_MEMORIES = 8
+
+#: Memory types that are real memories but not *health events the user logged* — see
+#: ``fetch_recent_memories`` for why each one is here.
+RECENT_EXCLUDED_TYPES = ("insight", "profile_change")
+
 
 def fetch_trace(cur: psycopg.Cursor, user_id: UUID, turn_id: UUID) -> dict | None:
     """The persisted trace for a turn, plus the answer it explains.
@@ -198,6 +207,69 @@ def fetch_memories_by_day(cur: psycopg.Cursor, user_id: UUID, day: date) -> list
         {"user_id": user_id, "day": day, "limit": MAX_BATCH},
     )
     return cur.fetchall()
+
+
+def fetch_recent_memories(
+    cur: psycopg.Cursor, user_id: UUID, limit: int = RECENT_MEMORIES
+) -> list[dict]:
+    """The newest **health events the user logged**, newest first (Today's receipt strip).
+
+    Two exclusions, both load-bearing, both about what "logged" honestly means:
+
+    - ``insight`` — the same distinction ``Receipt`` draws between ``created`` and ``insights``.
+      The user reported a meal; an insight is a claim the *engine* made about it. Listing them
+      together would tell someone they logged something they never said.
+    - ``profile_change`` — a settings edit is a real memory and belongs in the profile history
+      (ADR-17.1), but it is not a health event, and it arrives in **bursts**: filling in the
+      onboarding form writes one row per field, so a single visit to Profile buries a week of
+      meals under "activity level set to moderate". Verified in the browser before this filter
+      existed — four of the eight rows were one form submission.
+
+    Ordered by ``event_time`` rather than ``created_at``: this answers "what happened
+    recently", not "what did the database learn recently", and a reconstructed history is full
+    of rows whose two clocks disagree by months (04's bi-temporal model).
+    """
+    cur.execute(
+        f"""
+        SELECT {_ROW_COLS} FROM memories
+        WHERE user_id = %(user_id)s
+          AND status = 'active'
+          AND type <> ALL(%(excluded)s)
+        ORDER BY event_time DESC, id DESC
+        LIMIT %(limit)s
+        """,
+        {
+            "user_id": user_id,
+            "excluded": list(RECENT_EXCLUDED_TYPES),
+            "limit": min(limit, RECENT_MEMORIES),
+        },
+    )
+    return cur.fetchall()
+
+
+def fetch_latest_insight(cur: psycopg.Cursor, user_id: UUID) -> dict | None:
+    """The newest **active** insight, or ``None`` — Today's "what changed" slot.
+
+    Ordered by ``created_at`` (when the engine derived the claim), not ``event_time`` (the
+    window the claim is about). "What changed" means *what did the engine most recently
+    conclude*, and over a reconstructed history those two orderings disagree wildly — a claim
+    derived this morning about last May would sort near the bottom by ``event_time``.
+
+    Retracted and superseded rows are excluded by ``status = 'active'``: a withdrawn claim is
+    kept in the table for audit (ADR-9, I-20) but must never be presented as current.
+    """
+    cur.execute(
+        f"""
+        SELECT {_ROW_COLS} FROM memories
+        WHERE user_id = %(user_id)s
+          AND status = 'active'
+          AND type = 'insight'
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        """,
+        {"user_id": user_id},
+    )
+    return cur.fetchone()
 
 
 def fetch_timeline(cur: psycopg.Cursor, user_id: UUID) -> list[dict]:

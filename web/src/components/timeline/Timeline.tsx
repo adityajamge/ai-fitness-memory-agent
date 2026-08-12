@@ -377,8 +377,18 @@ export const Timeline = memo(function Timeline({ onScrub }: TimelineProps) {
       )}
 
       {/* The accessible form of the chart (§6.15): a visually-hidden table of the underlying
-          values, alongside the SVG's role="img" summary — not a substitute for it. */}
-      <table className="sr-only">
+          values, alongside the SVG's role="img" summary — not a substitute for it.
+
+          `sr-only` goes on a **wrapper div, never on the <table> itself**. The utility hides an
+          element by pinning it to 1x1 and clipping it, and a `<table>` refuses to be 1x1: it
+          sizes to its content regardless. The result was invisible but not weightless — a
+          114-day account produced a clipped, absolutely-positioned 2,784px box that pushed
+          `document.scrollHeight` to nearly three screens of empty scroll below the page. It
+          went unnoticed while the only consumer was `AppScreen`, whose shell is
+          `h-dvh overflow-hidden` and clipped it by accident; the Today screen scrolls, so it
+          surfaced there immediately. */}
+      <div className="sr-only">
+      <table>
         <caption>Memory density by day</caption>
         <thead>
           <tr>
@@ -399,6 +409,7 @@ export const Timeline = memo(function Timeline({ onScrub }: TimelineProps) {
             ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 });

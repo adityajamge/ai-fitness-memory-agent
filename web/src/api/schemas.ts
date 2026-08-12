@@ -208,6 +208,76 @@ export const DayMemoriesResponse = z.object({
   memories: z.array(MemoryRow),
 });
 
+/* ── today (GET /api/today) ──────────────────────────────────────────────────────────────── */
+
+/**
+ * One metric's total for one local day.
+ *
+ * **`value` is nullable and that is the whole contract.** `null` means nothing was logged;
+ * `0` means a logged zero. `has_data` carries the distinction explicitly so no component has to
+ * infer it from a falsy check — `value === 0` and `value === null` are both falsy in JS, which
+ * is exactly how a fabricated zero would get onto the most-seen screen in the product.
+ */
+export const TodayMetric = z.object({
+  metric: z.string(),
+  day: z.string(),
+  value: z.number().nullable(),
+  n: z.number(),
+  /** How many contributing rows carried a model-estimated value — the basis for "approximately". */
+  n_estimated: z.number(),
+  has_data: z.boolean(),
+  evidence_ids: z.array(Uuid),
+});
+
+/** The newest active insight. Every field is the engine's stored payload, served as written —
+ * `hypothesis` was composed when the claim was derived, never re-narrated on read. */
+export const TodayInsight = z.object({
+  id: Uuid,
+  hypothesis: z.string().nullable(),
+  series_metric: z.string().nullable(),
+  series_kind: z.string().nullable(),
+  kind: z.string().nullable(),
+  pattern_strength: z.number().nullable(),
+  pre_value: z.number().nullable(),
+  post_value: z.number().nullable(),
+  window_start: IsoDateTime.nullable(),
+  window_end: IsoDateTime.nullable(),
+  evidence_ids: z.array(Uuid),
+  evidence_count: z.number().nullable(),
+  /** When the engine *derived* the claim, as distinct from the window it is about (ADR-13.10). */
+  created_at: IsoDateTime,
+});
+
+export const TodayResponse = z.object({
+  day: z.string(),
+  tz: z.string(),
+  generated_at: IsoDateTime,
+  stats: z.object({
+    memories: z.number(),
+    days: z.number(),
+    insights: z.number(),
+    first_event: IsoDateTime.nullable(),
+  }),
+  targets: z.object({
+    protein_g: z.number().nullable(),
+    calorie_kcal: z.number().nullable(),
+    are_custom: z.boolean(),
+    /** `compute_targets`' own basis string, or null when the user set the targets by hand. */
+    basis: z.string().nullable(),
+  }),
+  today: z.object({ protein_g: TodayMetric, kcal: TodayMetric }),
+  yesterday: z.object({ protein_g: TodayMetric, kcal: TodayMetric }),
+  /** Distinct days with logged meals in the trailing 7 — coverage, not a streak. */
+  days_logged_last_7: z.number(),
+  latest_weight: z
+    .object({ id: Uuid, weight_kg: z.number(), event_time: IsoDateTime })
+    .nullable(),
+  insight: TodayInsight.nullable(),
+  recent: z.array(MemoryRow),
+  /** The statements that produced every figure above — rendered by `RetrievalQueries`. */
+  steps: z.array(RetrievalStep),
+});
+
 /* ── auth (POST /api/auth/{signup,login,logout}) ─────────────────────────────────────────── */
 
 export const AuthResponse = z.object({
@@ -324,5 +394,8 @@ export type StatsResponse = z.infer<typeof StatsResponse>;
 export type TimelineDay = z.infer<typeof TimelineDay>;
 export type TimelineResponse = z.infer<typeof TimelineResponse>;
 export type DayMemoriesResponse = z.infer<typeof DayMemoriesResponse>;
+export type TodayMetric = z.infer<typeof TodayMetric>;
+export type TodayInsight = z.infer<typeof TodayInsight>;
+export type TodayResponse = z.infer<typeof TodayResponse>;
 export type TargetSuggestion = z.infer<typeof TargetSuggestion>;
 export type ProfileResponse = z.infer<typeof ProfileResponse>;

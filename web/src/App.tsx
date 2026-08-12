@@ -1,5 +1,10 @@
 /**
- * Routes — DESIGN.md §6.13. Four, and that is the whole product.
+ * Routes — DESIGN.md §6.13. Deliberately few, and that is the whole product.
+ *
+ * `/app/today` is the home briefing and `/app` is the conversation. The split is not arbitrary:
+ * a brand-new account still lands in `/app` after onboarding, because Today has nothing to brief
+ * on an empty history and the guided first turn is the live product experience (§9.1). A
+ * returning sign-in goes to `/app/today`, which is where a user with memory should start.
  *
  * **Every route is lazy.** The landing page is the first paint a judge sees, and eagerly bundling
  * the app shell would make a marketing visitor download the glass box, the dialog primitives, and
@@ -18,6 +23,7 @@ const Landing = lazy(() => import("./routes/Landing").then((m) => ({ default: m.
 const AppScreen = lazy(() =>
   import("./routes/AppScreen").then((m) => ({ default: m.AppScreen })),
 );
+const Today = lazy(() => import("./routes/Today").then((m) => ({ default: m.Today })));
 const AuthScreen = lazy(() =>
   import("./routes/AuthScreen").then((m) => ({ default: m.AuthScreen })),
 );
@@ -39,6 +45,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/app" element={<AppScreen />} />
+        <Route path="/app/today" element={<Today />} />
         <Route path="/app/profile" element={<ProfileSettings />} />
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/login" element={<AuthScreen mode="login" />} />
