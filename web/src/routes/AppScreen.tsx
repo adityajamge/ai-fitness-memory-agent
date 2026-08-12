@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router";
-import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import { ApiError } from "@/api/client";
 import { StreamUnavailableError, streamChat } from "@/api/chatStream";
@@ -21,7 +21,6 @@ import {
   useMemoriesByDay,
   useSendMessage,
   useStats,
-  useThreads,
   useTurns,
 } from "@/api/queries";
 import type { ChatResponse } from "@/api/schemas";
@@ -32,8 +31,7 @@ import { useSelectedTrace } from "@/components/glassbox/useSelectedTrace";
 import { useTurnEvidence } from "@/components/glassbox/useTurnEvidence";
 import { Composer } from "@/components/layout/Composer";
 import { Conversation } from "@/components/layout/Conversation";
-import { Sidebar } from "@/components/layout/Sidebar";
-import { SidebarDrawer } from "@/components/layout/SidebarDrawer";
+import { ThreadSidebarRail } from "@/components/layout/ThreadSidebarRail";
 import { TopBar } from "@/components/layout/TopBar";
 import { ErrorState } from "@/components/state/ErrorState";
 import { Timeline } from "@/components/timeline/Timeline";
@@ -90,12 +88,6 @@ export function AppScreen() {
   // deliberate escape hatch, not a contradiction: nothing stretches to fill the reclaimed space
   // automatically, the conversation column just gets more margin either side of its own cap.
   const [isPaneCollapsed, setPaneCollapsed] = useState(false);
-  // The thread sidebar (§13, added 2026-08-09) — same collapsible-column-on-desktop,
-  // drawer-below-`lg` split as the evidence pane, mirrored on the opposite edge. Defaults open:
-  // a collapsed-by-default sidebar would make the whole feature invisible on first load.
-  const [isSidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [isSidebarDrawerOpen, setSidebarDrawerOpen] = useState(false);
-  const threads = useThreads();
   const timelineRef = useRef<HTMLDivElement>(null);
   const seeded = useRef(false);
 
@@ -429,20 +421,16 @@ export function AppScreen() {
     setDayView(null);
     setShowAskHint(false);
     setDrawerOpen(false);
-    setSidebarDrawerOpen(false);
   }
 
   function handleNewChat() {
     switchToThread(startNewThread());
   }
 
-  /** A no-op re-click (the already-open thread) still closes the mobile drawer rather than
-   * tearing down and re-seeding a conversation that is already exactly right. */
+  /** `ThreadSidebarRail` already no-ops a re-click on the already-active thread (and still
+   * closes its own mobile drawer when it happens) — this is only ever called with a genuinely
+   * different id. */
   function handleSelectThread(id: string) {
-    if (id === threadId) {
-      setSidebarDrawerOpen(false);
-      return;
-    }
     switchToThread(id);
   }
 
@@ -457,65 +445,16 @@ export function AppScreen() {
       </div>
 
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
-        {/* Sidebar column — sits below the header/timeline, in the same row as the conversation
-            and the evidence pane, mirroring that pane's split rather than spanning the full app
-            height above it (§16 Decisions Log). Same collapsible-fixed-width treatment as the
-            evidence pane (§5.7): `w-sidebar` or `w-0`, `overflow-hidden` clipping the transition. */}
-        <div
-          className={cn(
-            "hidden shrink-0 overflow-hidden border-r border-border transition-[width] duration-medium ease-move lg:block",
-            isSidebarCollapsed ? "w-0" : "w-sidebar",
-          )}
-        >
-          <div className="h-full w-sidebar">
-            <Sidebar
-              threads={threads.data?.threads ?? []}
-              isPending={threads.isPending}
-              isError={threads.isError}
-              activeThreadId={threadId}
-              onSelect={handleSelectThread}
-              onNewChat={handleNewChat}
-              onRetry={() => void threads.refetch()}
-            />
-          </div>
-        </div>
-
-        {/* The handle sits ON the sidebar/content border — the same `calc()`-positioned wrapper-div
-            pattern the evidence pane's toggle uses, mirrored onto the left edge, for the same two
-            reasons recorded there (§16 Decisions Log): a transform-based `-translate-x-1/2`
-            measurably failed to hit-test correctly live, and `hidden`/`lg:block` has to live on a
-            wrapper, never directly on `Button` — its base classes always force
-            `display: inline-flex`, which silently wins over a consumer's own `display` override. */}
-        <div
-          className={cn(
-            "absolute top-[calc(50%-16px)] z-10",
-            "transition-[left] duration-medium ease-move",
-            isDesktop && !isSidebarCollapsed
-              ? "left-[calc(var(--container-sidebar)-16px)]"
-              : "-left-4",
-          )}
-        >
-          <Button
-            type="button"
-            variant="secondary"
-            size="icon"
-            onClick={() =>
-              isDesktop ? setSidebarCollapsed((v) => !v) : setSidebarDrawerOpen((v) => !v)
-            }
-            aria-label={
-              (isDesktop ? isSidebarCollapsed : !isSidebarDrawerOpen)
-                ? "Show conversations"
-                : "Hide conversations"
-            }
-            aria-expanded={isDesktop ? !isSidebarCollapsed : isSidebarDrawerOpen}
-          >
-            {(isDesktop ? isSidebarCollapsed : !isSidebarDrawerOpen) ? (
-              <PanelLeftOpen className="size-4" strokeWidth={1.5} aria-hidden="true" />
-            ) : (
-              <PanelLeftClose className="size-4" strokeWidth={1.5} aria-hidden="true" />
-            )}
-          </Button>
-        </div>
+        {/* Sidebar rail — extracted to `ThreadSidebarRail` (§16 Decisions Log, amended
+            2026-08-12) so `Today` can carry the exact same sidebar + account row, ChatGPT's own
+            layout. Sits below the header/timeline, in the same row as the conversation and the
+            evidence pane, mirroring that pane's split rather than spanning the full app height
+            above it. */}
+        <ThreadSidebarRail
+          activeThreadId={threadId}
+          onSelectThread={handleSelectThread}
+          onNewChat={handleNewChat}
+        />
 
         <main className="flex min-w-0 flex-1 flex-col">
           {stats.isPending ? (
@@ -636,25 +575,12 @@ export function AppScreen() {
         </div>
       </div>
 
-      {/* Below lg the same pane is a drawer, opened by the citation gesture itself (§5.8), and
-          the sidebar is a drawer too, opened by its own handle (there is no equivalent gesture
-          to couple it to — "New chat" and the thread list are entry points, not a claim → proof
-          link). Two independent drawers, one per edge, sharing nothing but the breakpoint. */}
+      {/* Below lg the evidence pane is a drawer, opened by the citation gesture itself (§5.8) —
+          the sidebar's own mobile drawer lives inside `ThreadSidebarRail` now, opened by its own
+          handle (there is no equivalent gesture to couple it to — "New chat" and the thread list
+          are entry points, not a claim → proof link). */}
       {!isDesktop && (
-        <>
-          <EvidenceDrawer isOpen={isDrawerOpen} onOpenChange={setDrawerOpen} {...paneProps} />
-          <SidebarDrawer
-            isOpen={isSidebarDrawerOpen}
-            onOpenChange={setSidebarDrawerOpen}
-            threads={threads.data?.threads ?? []}
-            isPending={threads.isPending}
-            isError={threads.isError}
-            activeThreadId={threadId}
-            onSelect={handleSelectThread}
-            onNewChat={handleNewChat}
-            onRetry={() => void threads.refetch()}
-          />
-        </>
+        <EvidenceDrawer isOpen={isDrawerOpen} onOpenChange={setDrawerOpen} {...paneProps} />
       )}
     </div>
   );

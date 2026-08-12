@@ -14,10 +14,19 @@
  * The landing page stays inside this SPA rather than becoming a separate static page: a separate
  * page would paint faster still, but it would fork the design system into two places that drift,
  * and drift is what DESIGN.md exists to prevent.
+ *
+ * **`/app/profile` is two things, chosen by how you arrive** (§6.19/§16 Decisions Log,
+ * 2026-08-12). It is always a real route — direct link, refresh, and mobile all render
+ * `ProfileSettings` as a full page. But the top bar's account icon, on desktop, navigates there
+ * carrying `state.backgroundLocation` (the screen you were already on); when that state is
+ * present, `Routes` below renders the *background* location (chat/Today stays mounted,
+ * untouched) and a second `Routes` renders `/app/profile` as `ProfileSettingsDialog` on top of
+ * it — the standard React Router "modal route" recipe. Closing the dialog is `navigate(-1)`,
+ * which pops back to that same background location rather than a fresh navigation to `/app`.
  */
 
 import { Suspense, lazy } from "react";
-import { Route, Routes } from "react-router";
+import { Route, Routes, useLocation, type Location } from "react-router";
 
 const Landing = lazy(() => import("./routes/Landing").then((m) => ({ default: m.Landing })));
 const AppScreen = lazy(() =>
@@ -33,6 +42,9 @@ const Onboarding = lazy(() =>
 const ProfileSettings = lazy(() =>
   import("./routes/ProfileSettings").then((m) => ({ default: m.ProfileSettings })),
 );
+const ProfileSettingsDialog = lazy(() =>
+  import("./routes/ProfileSettingsDialog").then((m) => ({ default: m.ProfileSettingsDialog })),
+);
 const NotFound = lazy(() => import("./routes/NotFound").then((m) => ({ default: m.NotFound })));
 
 /** Deliberately blank, not a spinner. These chunks resolve in tens of milliseconds on a warm
@@ -40,9 +52,13 @@ const NotFound = lazy(() => import("./routes/NotFound").then((m) => ({ default: 
 const RouteFallback = () => <div className="min-h-dvh bg-background" />;
 
 export default function App() {
+  const location = useLocation();
+  const backgroundLocation = (location.state as { backgroundLocation?: Location } | null)
+    ?.backgroundLocation;
+
   return (
     <Suspense fallback={<RouteFallback />}>
-      <Routes>
+      <Routes location={backgroundLocation ?? location}>
         <Route path="/" element={<Landing />} />
         <Route path="/app" element={<AppScreen />} />
         <Route path="/app/today" element={<Today />} />
@@ -52,6 +68,11 @@ export default function App() {
         <Route path="/signup" element={<AuthScreen mode="signup" />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
+      {backgroundLocation && (
+        <Routes>
+          <Route path="/app/profile" element={<ProfileSettingsDialog />} />
+        </Routes>
+      )}
     </Suspense>
   );
 }

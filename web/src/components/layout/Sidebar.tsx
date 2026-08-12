@@ -2,11 +2,12 @@
  * The thread sidebar — DESIGN.md §13 (added 2026-08-09, un-deferring "multi-thread conversation
  * UI" — see §16 Decisions Log), explicit instruction.
  *
- * `ThreadList` is the shared body — the actual list of conversations plus "New chat" — used by
- * both the desktop column (`Sidebar`, below) and the mobile/tablet drawer (`SidebarDrawer`), the
- * same split `EvidencePane`/`EvidenceDrawer` already establish for the engine pane. Fixed width,
- * never flexes (`--container-sidebar`), for the same reason the engine pane doesn't: a list of
- * short labels has no use for extra width on a wide monitor.
+ * `ThreadList` is the shared body — "New chat", the actual list of conversations, and the
+ * account row at the bottom (§6.21, amended 2026-08-12) — used by both the desktop column
+ * (`Sidebar`, below) and the mobile/tablet drawer (`SidebarDrawer`), the same split
+ * `EvidencePane`/`EvidenceDrawer` already establish for the engine pane. Fixed width, never
+ * flexes (`--container-sidebar`), for the same reason the engine pane doesn't: a list of short
+ * labels has no use for extra width on a wide monitor.
  */
 
 import { MessageSquarePlus } from "lucide-react";
@@ -14,6 +15,7 @@ import type { ThreadSummary } from "@/api/schemas";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
+import { AccountMenu } from "./AccountMenu";
 
 function formatThreadDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -95,6 +97,8 @@ export function ThreadList({
           </ul>
         )}
       </nav>
+
+      <AccountMenu />
     </div>
   );
 }

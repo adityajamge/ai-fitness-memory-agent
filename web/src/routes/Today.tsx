@@ -32,6 +32,7 @@ import { m, useReducedMotion } from "motion/react";
 import { isUnauthorized, useToday } from "@/api/queries";
 import { RetrievalQueries } from "@/components/glassbox/RetrievalQueries";
 import { Composer } from "@/components/layout/Composer";
+import { ThreadSidebarRail } from "@/components/layout/ThreadSidebarRail";
 import { TopBar } from "@/components/layout/TopBar";
 import { EmptyState } from "@/components/state/EmptyState";
 import { ErrorState } from "@/components/state/ErrorState";
@@ -40,6 +41,7 @@ import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { SessionNotice } from "@/session/SessionNotice";
 import { useSessionExpired } from "@/session/sessionStore";
+import { getActiveThreadId, setActiveThread, startNewThread } from "@/session/threadStore";
 import { RecentMemories } from "./today/RecentMemories";
 import { StateLine } from "./today/StateLine";
 import { TargetBar } from "./today/TargetBar";
@@ -61,6 +63,9 @@ export function Today() {
   const sessionExpired = useSessionExpired();
   const reduce = useReducedMotion();
   const [draft, setDraft] = useState("");
+  // The sidebar highlights whichever thread Chat would resume — Today has no conversation
+  // state of its own to read this from, so it's the same localStorage-backed id AppScreen uses.
+  const [activeThreadId] = useState(() => getActiveThreadId());
 
   /** Hand the message to the conversation. Today deliberately has no send path of its own:
    * one turn pipeline, one place receipts and traces are produced. */
@@ -75,6 +80,19 @@ export function Today() {
    * the day view the timeline strip already owns, never a second diary surface. */
   function openDay(day: string) {
     void navigate("/app", { state: { day } });
+  }
+
+  /** The sidebar's "New chat"/thread-select, same hand-off pattern as the composer and day-view
+   * clicks above: Today has no thread machinery of its own, so this only ever points the active
+   * thread and lets `/app` do the actual work. */
+  function handleNewChat() {
+    startNewThread();
+    void navigate("/app");
+  }
+
+  function handleSelectThread(id: string) {
+    setActiveThread(id);
+    void navigate("/app");
   }
 
   // 401 before any request has ever succeeded means "not signed in", not "expired".
@@ -94,122 +112,133 @@ export function Today() {
       <TopBar />
       <Timeline />
 
-      <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-conversation flex-col gap-8 px-4 py-6 md:px-8 md:py-10">
-          {today.isPending ? (
-            <TodaySkeleton />
-          ) : today.isError && !sessionExpired ? (
-            <ErrorState
-              size="page"
-              title="Couldn't reach your memory"
-              detail="The database is unreachable right now."
-              preserved="Nothing you logged has been lost."
-              onRetry={() => void today.refetch()}
-            />
-          ) : data ? (
-            <m.div
-              initial={reduce ? false : { opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: reduce ? 0 : 0.32, ease: [0.2, 0, 0, 1] }}
-              className="flex flex-col gap-8"
-            >
-              {isEmptyAccount ? (
-                <EmptyState
-                  title="Your memory starts here."
-                  body="Tell me what you ate, how you trained, how you slept. I'll structure it, remember it, and show you where you stand."
-                >
-                  <div className="flex flex-col items-start gap-2 sm:flex-row sm:flex-wrap">
-                    {EXAMPLES.map((example) => (
-                      <Button
-                        key={example}
-                        variant="secondary"
-                        size="md"
-                        onClick={() => setDraft(example)}
-                        className="max-w-full justify-start overflow-hidden text-ellipsis"
-                      >
-                        {example}
-                      </Button>
-                    ))}
-                  </div>
-                </EmptyState>
-              ) : (
-                <>
-                  <StateLine today={data} />
+      {/* Row, matching AppScreen's shape (§16 Decisions Log, amended 2026-08-12) — the same
+          sidebar rail lives here so account controls and conversation history are consistent
+          across both surfaces, not a Chat-only fixture. */}
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        <ThreadSidebarRail
+          activeThreadId={activeThreadId}
+          onSelectThread={handleSelectThread}
+          onNewChat={handleNewChat}
+        />
 
-                  {/* Two targets. Stacked below `sm` so the numbers never compress; side by
-                      side above it, where 860px of column comfortably carries both. */}
-                  <section className="flex flex-col gap-5 sm:flex-row sm:gap-10" aria-label="Today's targets">
-                    <div className="flex-1">
-                      <TargetBar
-                        label="Protein"
-                        unit="g"
-                        metric={data.today.protein_g}
-                        target={data.targets.protein_g}
-                        basis={data.targets.basis}
-                        isCustom={data.targets.are_custom}
-                      />
+        <main className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto flex w-full max-w-conversation flex-col gap-8 px-4 py-6 md:px-8 md:py-10">
+            {today.isPending ? (
+              <TodaySkeleton />
+            ) : today.isError && !sessionExpired ? (
+              <ErrorState
+                size="page"
+                title="Couldn't reach your memory"
+                detail="The database is unreachable right now."
+                preserved="Nothing you logged has been lost."
+                onRetry={() => void today.refetch()}
+              />
+            ) : data ? (
+              <m.div
+                initial={reduce ? false : { opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: reduce ? 0 : 0.32, ease: [0.2, 0, 0, 1] }}
+                className="flex flex-col gap-8"
+              >
+                {isEmptyAccount ? (
+                  <EmptyState
+                    title="Your memory starts here."
+                    body="Tell me what you ate, how you trained, how you slept. I'll structure it, remember it, and show you where you stand."
+                  >
+                    <div className="flex flex-col items-start gap-2 sm:flex-row sm:flex-wrap">
+                      {EXAMPLES.map((example) => (
+                        <Button
+                          key={example}
+                          variant="secondary"
+                          size="md"
+                          onClick={() => setDraft(example)}
+                          className="max-w-full justify-start overflow-hidden text-ellipsis"
+                        >
+                          {example}
+                        </Button>
+                      ))}
                     </div>
-                    <div className="flex-1">
-                      <TargetBar
-                        label="Energy"
-                        unit="kcal"
-                        metric={data.today.kcal}
-                        target={data.targets.calorie_kcal}
-                        basis={data.targets.basis}
-                        isCustom={data.targets.are_custom}
-                      />
-                    </div>
-                  </section>
-                </>
-              )}
+                  </EmptyState>
+                ) : (
+                  <>
+                    <StateLine today={data} />
 
-              {/* The primary action, in flow rather than pinned: at 390x844 everything above it
-                  measures ~450px, so it is above the fold without a sticky bar covering the
-                  content the user came to read. */}
-              <div className="flex flex-col gap-2">
-                {sessionExpired && <SessionNotice />}
-                <Composer
-                  value={draft}
-                  onChange={setDraft}
-                  onSubmit={handleSubmit}
-                  isLocked={sessionExpired}
-                />
-                <p className="text-meta text-faint">
-                  Sends to your conversation, where the engine shows its work.
-                </p>
-              </div>
+                    {/* Two targets. Stacked below `sm` so the numbers never compress; side by
+                        side above it, where 860px of column comfortably carries both. */}
+                    <section className="flex flex-col gap-5 sm:flex-row sm:gap-10" aria-label="Today's targets">
+                      <div className="flex-1">
+                        <TargetBar
+                          label="Protein"
+                          unit="g"
+                          metric={data.today.protein_g}
+                          target={data.targets.protein_g}
+                          basis={data.targets.basis}
+                          isCustom={data.targets.are_custom}
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <TargetBar
+                          label="Energy"
+                          unit="kcal"
+                          metric={data.today.kcal}
+                          target={data.targets.calorie_kcal}
+                          basis={data.targets.basis}
+                          isCustom={data.targets.are_custom}
+                        />
+                      </div>
+                    </section>
+                  </>
+                )}
 
-              {!isEmptyAccount && (
-                <>
-                  <WhatChanged insight={data.insight} onOpenDay={openDay} />
-                  <RecentMemories memories={data.recent} onOpenDay={openDay} />
+                {/* The primary action, in flow rather than pinned: at 390x844 everything above it
+                    measures ~450px, so it is above the fold without a sticky bar covering the
+                    content the user came to read. */}
+                <div className="flex flex-col gap-2">
+                  {sessionExpired && <SessionNotice />}
+                  <Composer
+                    value={draft}
+                    onChange={setDraft}
+                    onSubmit={handleSubmit}
+                    isLocked={sessionExpired}
+                  />
+                  <p className="text-meta text-faint">
+                    Sends to your conversation, where the engine shows its work.
+                  </p>
+                </div>
 
-                  {/* Weight is a line, not a card (research §06): one number and when it was
-                      measured is the whole useful content, and a card would imply a surface
-                      that does not exist yet. */}
-                  {data.latest_weight && (
-                    <p className="text-meta text-faint">
-                      Last weight{" "}
-                      <span className="font-mono tabular-nums text-muted-foreground">
-                        {data.latest_weight.weight_kg} kg
-                      </span>{" "}
-                      on{" "}
-                      <span className="font-mono tabular-nums text-muted-foreground">
-                        {new Date(data.latest_weight.event_time).toLocaleDateString(
-                          undefined,
-                          DAY_YEAR,
-                        )}
-                      </span>
-                    </p>
-                  )}
+                {!isEmptyAccount && (
+                  <>
+                    <WhatChanged insight={data.insight} onOpenDay={openDay} />
+                    <RecentMemories memories={data.recent} onOpenDay={openDay} />
 
-                  <RetrievalQueries steps={data.steps} />
-                </>
-              )}
-            </m.div>
-          ) : null}
-        </div>
-      </main>
+                    {/* Weight is a line, not a card (research §06): one number and when it was
+                        measured is the whole useful content, and a card would imply a surface
+                        that does not exist yet. */}
+                    {data.latest_weight && (
+                      <p className="text-meta text-faint">
+                        Last weight{" "}
+                        <span className="font-mono tabular-nums text-muted-foreground">
+                          {data.latest_weight.weight_kg} kg
+                        </span>{" "}
+                        on{" "}
+                        <span className="font-mono tabular-nums text-muted-foreground">
+                          {new Date(data.latest_weight.event_time).toLocaleDateString(
+                            undefined,
+                            DAY_YEAR,
+                          )}
+                        </span>
+                      </p>
+                    )}
+
+                    <RetrievalQueries steps={data.steps} />
+                  </>
+                )}
+              </m.div>
+            ) : null}
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

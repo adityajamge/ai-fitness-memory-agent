@@ -2,20 +2,21 @@
  * Top bar — DESIGN.md §6.13. 56px, and the product's entire navigation.
  *
  * Deliberately navigation-light. It carries **two** product surfaces — Today and Chat — and
- * nothing else; Profile stays a text button on the right, where MyFitnessPal's 2026 redesign
- * also moved its overflow menu. Inventing a tab bar beyond that would be the "dashboard"
- * mistake wireframe v2 was rejected for, in better manners.
+ * nothing else. **No account controls live here anymore** (amended 2026-08-12, §16 Decisions
+ * Log, twice in one day): a circular profile icon briefly replaced the old `Profile`/`Sign out`
+ * text buttons, then moved again — explicit instruction, a screenshot of ChatGPT's own sidebar
+ * footer as the reference — to the account row at the bottom of the left sidebar
+ * (`AccountMenu.tsx`, §6.21). This bar is stats and navigation only now.
  *
  * The stats are mono because they came out of CockroachDB (§4.1). "4,182 memories · 312 days ·
  * 23 insights" says *memory system* before a word of the conversation is read, which is the
  * bar's real job.
  */
 
-import { Link, useLocation, useNavigate } from "react-router";
-import { logout } from "@/api/client";
+import { useLocation } from "react-router";
+import { Link } from "react-router";
 import { useStats } from "@/api/queries";
 import { Logo } from "@/components/Logo";
-import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ThemeToggle } from "./ThemeToggle";
 import { cn } from "@/lib/utils";
@@ -49,14 +50,8 @@ export interface TopBarProps {
 }
 
 export function TopBar({ isBusy = false }: TopBarProps) {
-  const navigate = useNavigate();
   const { pathname } = useLocation();
   const { data, isPending, isError } = useStats();
-
-  async function handleSignOut() {
-    await logout();
-    navigate("/login", { replace: true });
-  }
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border px-4 md:px-6">
@@ -141,13 +136,6 @@ export function TopBar({ isBusy = false }: TopBarProps) {
         </span>
 
         <ThemeToggle />
-
-        <Button variant="ghost" size="sm" onClick={() => navigate("/app/profile")}>
-          Profile
-        </Button>
-        <Button variant="ghost" size="sm" onClick={handleSignOut}>
-          Sign out
-        </Button>
       </div>
     </header>
   );

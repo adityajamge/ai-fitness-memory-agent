@@ -443,7 +443,7 @@ radius-xs    2px   badges, chips, provenance tags
 radius-sm    4px   buttons, inputs, selects
 radius-md    6px   cards, evidence rows
 radius-lg    8px   panes, dialogs, drawers
-radius-full  9999  avatar ONLY
+radius-full  9999  avatar, account row's identity glyph ONLY (amended 2026-08-12, §16)
 ```
 
 Nothing else is ever a pill. A pill-shaped button is a bug.
@@ -659,7 +659,9 @@ definition list; it never scrolls horizontally inside the page.
 ### 6.5 Dialogs
 
 Base UI `Dialog`. `--surface-3` background, `radius-lg`, `--shadow-overlay`, max-width 480px
-(560px for confirmations with detail). Backdrop: `oklch(0 0 0 / 0.6)` with a 2px backdrop blur.
+(560px for confirmations with detail, or a form with several sections — Profile & goals, §6.19,
+is the one instance so far; its body scrolls independently so the title bar and close control
+stay put). Backdrop: `oklch(0 0 0 / 0.6)` with a 2px backdrop blur.
 Enter: opacity 0→1 and `translateY(4px)→0` over `duration-enter` with `--ease-out`. Exit: reverse
 over `duration-medium`.
 
@@ -845,16 +847,18 @@ five primary items and Oura shipped a redesign *removing* two. Two is where this
 until a surface earns a third.
 
 **Top bar (56px):** mark + wordmark (left) · **primary nav** (Today · Chat) · stats in mono
-(center-right) · connection indicator · account menu (right). The nav renders as a 1px bottom
-border on the active item — never a filled pill or a chip row, which at 56px reads as chrome
-competing with the stats beside it. The connection indicator is three 4px dots showing
-CockroachDB health: `--faint` idle, `--signal` on active query, `--invalid` on error. It is the
-top bar's one piece of ornament and it is functional. Two `ghost`/`sm` controls sit at the far
-right: `Profile` (→ `/app/profile`, §6.19) beside `Sign out` — two adjacent actions, not a
-dropdown menu (no third item has ever needed one).
+(center-right) · connection indicator (right). The nav renders as a 1px bottom border on the
+active item — never a filled pill or a chip row, which at 56px reads as chrome competing with
+the stats beside it. The connection indicator is three 4px dots showing CockroachDB health:
+`--faint` idle, `--signal` on active query, `--invalid` on error. It is the top bar's one piece
+of ornament and it is functional. **No account controls live here** (amended 2026-08-12, §16
+Decisions Log, twice the same day): a `Profile` text button, then a circular account icon,
+briefly stood in for them; both are gone now, moved to the account row at the bottom of the left
+sidebar (§6.21) — explicit instruction, ChatGPT's own sidebar footer as the reference.
 
 Routes: `/` (landing), `/app/today` (§6.20), `/app` (the conversation), `/app/profile` (§6.19),
-`/onboarding` (§6.19), `/login`, `/signup`. That is all.
+`/onboarding` (§6.19), `/login`, `/signup`. That is all — `/app/profile` is still exactly one
+route; §6.19 covers how it renders differently by device and entry point.
 
 **Where each entry point lands, and why they differ.** Login → `/app/today`: a returning account
 has memory, and the briefing is what someone opening the app wants before they have a question.
@@ -1014,12 +1018,12 @@ sets `onboarded_at`. No field blocks it, and skipping never revisits the user wi
 account behaves exactly as an unskipped one with fewer inputs, same as every other honest-empty
 state in this product (§6.9).
 
-**`/app/profile` — Profile & goals.** Reached from the account menu (§6.13's top-bar right side,
-where the menu already lives). Same page shell as `/onboarding` reused for editing rather than a
-distinct settings-screen design — sections: Identity, Goals, Nutrition targets, Dietary
-preferences & allergies, Injuries/notes, and a closing explainer line: *"Your protein target uses
-your weight, activity level, and goal. Changing it here only affects targets going forward — past
-days are judged against the target that was active then."* That sentence is not decoration; it is
+**`/app/profile` — Profile & goals.** Reached from the account row at the bottom of the left
+sidebar (§6.21) — "Settings" in that row's menu. The content — sections Identity, Goals, Nutrition targets, Dietary preferences & allergies,
+Injuries/notes, and a closing explainer line: *"Your protein target uses your weight, activity
+level, and goal. Changing it here only affects targets going forward — past days are judged
+against the target that was active then."* — is identical whichever surface renders it
+(`ProfileSettingsContent`, shared by both below), because that sentence is not decoration; it is
 the user-facing statement of the historical-integrity rule ADR-17 enforces structurally
 (`profile_change` history).
 
@@ -1027,6 +1031,25 @@ Editing **current weight** here submits through the same path as logging it in c
 `weight` memory, not a mutated field — so the input control is intentionally styled like a
 compact log entry ("log a new weight"), not a settings field, to avoid implying it overwrites
 something.
+
+**Two renderings of the one route, chosen by device (amended 2026-08-12, §16 Decisions Log).**
+`/app/profile` is a real route either way — direct link, refresh, and a page that renders full
+regardless of history — but *how you arrive* changes what you see:
+
+- **Desktop (≥1024px).** Clicking "Settings" navigates carrying `state.backgroundLocation` (the
+  screen you were already on). `App.tsx` reads that and renders Profile as a **dialog** over the
+  unchanged background — chat or Today stays mounted, scroll position and any in-flight state
+  intact — mirroring how ChatGPT and Claude open settings on web. `Esc`, the backdrop, or the `×`
+  all close it back to that exact background, never a fresh navigation to `/app`. Base UI
+  `Dialog`, `--surface-3`, `radius-lg`, `--shadow-overlay` (§6.5) — but **560px wide, not 480**:
+  §6.5's cap was sized for confirmations, and a five-section settings form at 480px would force
+  wrapping on every row this screen's two-column fields use. The body scrolls independently
+  (`max-h-85vh`) so the fixed title bar and its close control never leave the viewport on a short
+  laptop screen.
+- **Mobile/tablet (<1024px).** There is no honest way to float a modal over a phone-width
+  screen — it would just be the screen again, badly — so "Settings" navigates plainly and
+  `ProfileSettings` renders as its own full page, exactly the layout described above, with the
+  same `Logo` + `Back` header `/onboarding` uses.
 
 **Rules.** Every required field carries a visible label (§6.17's placeholder-as-label ban
 applies here too). The suggested-target line always reflects the *current* form state, live,
@@ -1092,6 +1115,42 @@ Weight is a line with a date, not a card.
 `analytics.pattern_strength`, stated as what it is: how much the numbers above rest on. Three of
 five competitors ship streaks and it plainly works for them; it cannot work here, because §1
 defines this product *against* rings and green checkmarks. Same user need, opposite framing.
+
+### 6.21 Account menu *(added 2026-08-12, §16 Decisions Log — supersedes the same-day top-bar icon)*
+
+The account entry point, and the whole of "settings" this product has. Bottom of the left
+sidebar — `AccountMenu.tsx` — explicit instruction, a screenshot of ChatGPT's own sidebar
+footer as the reference. No account controls remain in the top bar (§6.13).
+
+**Anatomy.** One row, `border-t` against the thread list above it: a 28px circular identity
+glyph (`radius-full`, rule 10's second sanctioned exception — there is no photo-avatar feature,
+so this stands in for one) plus the account's display name, or the plain word "Account" before
+onboarding sets one. Clicking it opens a Base UI `Menu` **above** the row — it sits at the
+bottom of its container, so up is the only place a menu can open — with exactly two items:
+
+```
+[○] Aditya                                row, --surface hover
+  ┌──────────────────┐
+  │ ⚙ Settings         │  →  Profile & goals (§6.19)
+  │ ⏻ Sign out          │
+  └──────────────────┘
+```
+
+`--surface-3`, `radius-md`, `--shadow-popover` (not `--shadow-overlay` — that token is for
+dialogs/drawers, §6.5; a menu this small does not carry that much weight). Items are `text-dense`
+with a 16px leading icon, `data-highlighted:bg-surface-2` on keyboard/pointer focus — no color
+change, matching every other hover treatment in this product.
+
+**The sidebar is now a fixture of the whole product, not one screen of it.** `ThreadSidebarRail`
+(extracted from `AppScreen` the same day) renders identically on `/app` and `/app/today` —
+ChatGPT's own layout, where the conversation rail persists everywhere rather than existing only
+inside the chat view. `Today` has no conversation state of its own (§6.20's "no machinery"
+rule), so its sidebar's "New chat" and thread clicks do exactly what its composer and day-view
+clicks already do: point `session/threadStore.ts` at the right thread and hand off to `/app`.
+
+**Sign out has no other home.** It was a top-bar `ghost`/`sm` button; that button is gone. This
+menu is the only place it exists now, on both surfaces, on every breakpoint (mobile gets the
+same row inside the sidebar drawer, §5.8's split).
 
 ---
 
@@ -1507,7 +1566,10 @@ Every component must satisfy all twenty. A review that finds a violation blocks 
 
 **Form**
 
-10. Radii come from the five-step scale. `radius-full` is for the avatar and nothing else.
+10. Radii come from the five-step scale. `radius-full` is for the avatar and nothing else — the
+    sidebar's account row (§6.21, amended 2026-08-12) is the one other exception, standing in
+    for a photo avatar this product does not have; it is the account's identity control, not a
+    decorative icon-in-a-circle.
 11. No shadows except `--shadow-overlay` and `--shadow-popover`, and only at depth 3. Cards do not
     lift; they change surface.
 12. No gradients. Anywhere. On anything.
@@ -1652,3 +1714,5 @@ Numbered `F-T*` to stay clear of the T1–T18 backlog in
 | 2026-08-12 | **`value: null`, never `0`, for a metric with no logged rows — carried by an explicit `has_data` flag** | The screen's central honesty problem, and the reason the endpoint's shape is what it is. "You have logged nothing today" and "you ate 0 g of protein today" are different claims, and at 8 AM only the first is true. A JSON `0` makes them indistinguishable, and in the client `value === 0` and `value === null` are *both* falsy — so a plain truthiness check is exactly how a fabricated zero reaches the most-seen screen in the product. `has_data` exists so no component ever has to infer the difference. Pinned in both directions by `engine/tests/test_today.py`, including the case a naive fix would break: a meal that genuinely carried 0 g must still read as data. |
 | 2026-08-12 | **Coverage shipped as a stated number; streaks rejected** | Three of five competitors ship streaks (MyFitnessPal's Streaks view, WHOOP's Streak, Google Health's badges) and it demonstrably works for them, so this was evaluated rather than assumed. It cannot work here: §1 defines this product *against* "rings, streaks and green checkmarks" and §3's anti-patterns ban green success checkmarks outright, so a streak flame would be the single most on-the-nose violation of the locked contract. But the need underneath one is real — *am I logging consistently enough for these averages to mean anything?* — and the engine already computes the honest answer as `coverage`, an input to `analytics.pattern_strength`. So it ships as a data-quality disclosure ("5 of the last 7 days logged"), not a reward. Same information, opposite framing, and the framing no competitor can copy without conceding their own reports don't disclose it. |
 | 2026-08-12 | **`profile_change` excluded from Today's "Recently logged", alongside `insight`** | Found in the browser, not in review: `apply_profile_update` writes one memory per changed field, so a single onboarding submission filled four of the strip's eight rows with "activity level set to moderate" and buried a week of meals. `insight` was already excluded on the principle `Receipt` establishes — the user reported a meal, an insight is a claim the *engine* made — and a settings edit fails the same test from the other direction: it is a real memory and belongs in the profile history (ADR-17.1), but it is not a health event and it is not a useful way into a day of health data. The strip's job is receipts plus a browse affordance; both exclusions serve it. |
+| 2026-08-12 | **Profile & goals opens as a dialog on desktop, a full page on mobile — the top-bar control becomes a circular account icon** (§6.13, §6.19) | Explicit user instruction, referencing how ChatGPT/Claude web open settings. `/app/profile` stays one real route (direct link and refresh always render `ProfileSettings`, the full page), but the top bar's new account icon navigates carrying React Router's standard "modal route" state (`state.backgroundLocation`) on desktop only — `App.tsx` renders that background location's own route in one `<Routes>` and, when the state is present, `/app/profile` as `ProfileSettingsDialog` in a second `<Routes>` layered on top, so chat/Today stays mounted underneath rather than unmounting for the navigation. Closing is `navigate(-1)`, back to that exact background. Below `lg` the icon navigates plainly — there is no honest way to float a dialog over a phone-width screen, so mobile gets the same full page `/onboarding` already uses. Both surfaces render one shared `ProfileSettingsContent` (extracted from the former single-purpose `ProfileSettings.tsx`), so the form and its save logic cannot drift between them. The dialog widens §6.5's cap to 560px (not the 480px default) since this is a five-section form, not a confirmation, with an independently scrolling body so the title bar and close control never leave the viewport. The icon itself is the second sanctioned use of `radius-full` (rule 10, previously "avatar ONLY") — built as a plain `<button>` rather than through `Button`, because `Button`'s base classes always include `rounded-sm` and a `className` override cannot reliably win a same-property Tailwind collision (the exact footgun `Button.tsx`'s own `size="icon"` comment and the 2026-08-09 collapse-toggle entry above both already warn about). |
+| 2026-08-12 | **Account controls moved a second time the same day — top-bar icon → account row at the bottom of the sidebar** (§6.13, §6.21, supersedes the entry immediately above) | Explicit user instruction, a screenshot of ChatGPT's own sidebar footer as the reference: "the profile on ChatGPT is at bottom left, in left side bar... sign out should not be in header... click on profile name, it should expand to settings and signout." `AccountMenu.tsx` (Base UI `Menu`, `--shadow-popover` not `--shadow-overlay` — §6.21) sits at the bottom of the thread sidebar's `ThreadList`, so both the desktop column and the mobile drawer (`SidebarDrawer`) get it from one place. Its trigger opens "Settings" (routes through the exact §6.19 dialog/full-page split, unchanged) and "Sign out" (previously a top-bar `ghost` button, now with no other home). Top bar is stats/nav only again. **This required the thread sidebar to stop being Chat-only**: `ThreadSidebarRail` is `AppScreen`'s former inline sidebar-column-plus-toggle-handle JSX, extracted so `Today` (§6.20) can mount the identical rail — ChatGPT's own layout, one persistent rail across the whole product rather than a per-screen fixture. Today's "no machinery of its own" rule (§6.20) is not bent by this: its rail's "New chat"/thread-select handlers do exactly what its composer and day-view clicks already do — point `session/threadStore.ts` and hand off to `/app` — never touching a turn or a receipt themselves. Verified live against the real dev stack: TopBar carries neither control on either breakpoint, the sidebar's account row expands upward (correct, since it sits at the bottom of its container) to Settings/Sign out on both `/app` and `/app/today`, Settings still opens the dialog with chat/Today mounted underneath, and Sign out actually ends the session — 5/5 targeted Playwright checks plus a full re-run of both Definition-of-Done specs (15/15) after the `AppScreen`/`Today` restructure. |
