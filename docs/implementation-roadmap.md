@@ -325,6 +325,41 @@
 
 ## Phase 6 — Evidence Traces & Glass-Box UI *(~5–7 days)* — **ACTIVE**
 
+> **Status 2026-08-12: Today shipped (`8aed61a`) — the first surface added after 07's build
+> order.** Not part of the original plan: it comes from the competitive research approved
+> 2026-08-12 (P0 #1), which found that all five products studied — MyFitnessPal, Google Health
+> (the renamed Fitbit app, since 2026-05-19), WHOOP, Oura and Apple Health — open to a
+> Today-style home, while AyuMind opened to a composer. The consequence was concrete rather than
+> aesthetic: there was no way to learn where you stood without composing a question, and a judge
+> working through a submission in ninety seconds may never compose one.
+>
+> One new endpoint, `GET /api/today` (`engine/today.py` + `api/routers/today.py`):
+> **deterministic and model-free**, composing `fetch_stats`, `get_profile` + `compute_targets`,
+> `aggregate_memories` over `protein_g`/`kcal` for today and yesterday, `latest_weight` and
+> day-grouped coverage into **one** round trip — six would be the N+1 mistake at page level over
+> the `us-east-1` → `ap-south-1` hop this system actually runs on. It returns the
+> `RetrievalStep`s it executed, so the screen carries the same "how this was retrieved"
+> disclosure a conversational turn does (ADR-12). Spec: [DESIGN.md §6.20](../DESIGN.md); the four
+> design decisions, including the rejected streak, are in §16's Decisions Log.
+>
+> The load-bearing contract is `value: null`, never `0`, for a metric with no logged rows, with an
+> explicit `has_data` flag beside it — "you logged nothing" and "you ate 0 g" are different claims
+> and only the first is true at 8 AM, and in JS both values are falsy, which is exactly how a
+> fabricated zero would reach the most-seen screen in the product.
+>
+> Two pre-existing defects fixed in the same commit. The larger: `Timeline.tsx` put `sr-only` on
+> the `<table>` itself, which cannot shrink a table (tables size to content), so a 114-day account
+> carried a clipped 2,784px box that pushed `document.scrollHeight` to three screens of empty
+> scroll — invisible while `AppScreen`'s `overflow-hidden` shell was its only consumer, immediate
+> on a screen that scrolls. Also three E501s left in `api/routers/profile.py` by the ADR-17 commit.
+>
+> Verified: 6 new engine tests green against real CockroachDB · 762 Python tests passed · ruff and
+> `tsc` clean · **15/15 Playwright green** including both axe assertions (which also closes the
+> outstanding full-suite re-run owed since 2026-08-09, see [TODOS.md](../TODOS.md)) · initial
+> bundle unchanged at 108.06 KB gzip, Today being 3.65 KB lazy · smoke-tested at 1440×900 and
+> 390×844, light and dark, against both the real replayed history and a seeded account. **Next per
+> the research: the Review surface (P0 #2) — not started, awaiting approval.**
+>
 > **Status 2026-08-08: M7 + M8 complete — the 07 build order is fully shipped.** The timeline
 > strip renders memory density with changepoint markers, buckets by week and scrolls below 768px
 > (a previously-open F-T7 gap, now closed and verified at a 390×844 viewport), and click-to-scrub

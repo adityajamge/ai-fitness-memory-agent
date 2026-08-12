@@ -28,6 +28,41 @@ per §13). Remaining work is hardening, not new UI surface — see the end of th
 | **M6** | Live engine pane: SSE stage narration with an automatic plain-transport fallback |
 | **M7** | Timeline strip: density bars, changepoint caps, mobile weekly bucketing, click-to-scrub |
 | **M8** | Insight lineage: the text list (§13's designated shipped form; the graph stays cut) |
+| **Today** | `/app/today` (§6.20) — the home briefing. First surface added *after* the M4–M8 build order, from the 2026-08-12 competitive research (P0 #1) |
+
+**Today shipped 2026-08-12** (commit `8aed61a`), the first new product surface since M8 and the
+first driven by competitive research rather than the original build order. It answers "how am I
+doing?" without requiring a question first — the gap the research named as AyuMind's largest, on
+the grounds that all five products studied open to a Today-style home while AyuMind opened to a
+composer.
+
+Backed by one new endpoint, `GET /api/today` (`engine/today.py` + `api/routers/today.py`):
+**deterministic, no model call**, composing capabilities that already existed — `fetch_stats`,
+`get_profile` + `compute_targets`, `aggregate_memories` over `protein_g`/`kcal` for today and
+yesterday, `latest_weight`, and day-grouped coverage — in **one** round trip, because six over the
+`us-east-1` → `ap-south-1` hop is the N+1 mistake at page level. It returns the `RetrievalStep`s
+it ran, which is what lets the screen carry the same glass box a conversational turn does.
+
+The frontend reuses `Composer`, `Timeline`, `TopBar`, `EmptyState`, `ErrorState`, `Skeleton`,
+`ConfidenceMeter` and `RetrievalQueries` unmodified; the only new components are the four in
+`web/src/routes/today/`. Today has **no send path and no day view of its own** (§6.20).
+
+Two pre-existing defects surfaced and were fixed in the same commit. The larger one:
+`Timeline.tsx`'s accessible data table carried `sr-only` on the `<table>` itself, and that utility
+cannot shrink a table (tables size to content regardless of a 1×1 rule). A 114-day account
+produced a clipped, absolutely-positioned **2,784px** box that pushed `document.scrollHeight` to
+nearly three screens of empty scroll. It had been invisible for as long as `AppScreen` — whose
+shell is `h-dvh overflow-hidden` — was the only consumer, and appeared the moment a scrolling
+screen rendered the same component. Now on a wrapper `div`. The smaller one: three E501s in
+`api/routers/profile.py` left by the ADR-17 commit.
+
+Verified: 6 new engine tests green against real CockroachDB (they pin the null-vs-zero contract in
+both directions, the local-midnight day split, coverage semantics, and the recent-strip
+exclusions) · 762 Python tests passed · ruff and `tsc` clean · **15/15 Playwright green**,
+including both axe assertions and the mobile-timeline test that covers the `sr-only` change ·
+initial bundle **unchanged at 108.06 KB gzip** (Today is 3.65 KB, lazy) · smoke-tested at 1440×900
+and 390×844, light and dark, against both the real replayed history and a seeded account: no
+console errors, no horizontal overflow, composer above the fold at 390px.
 
 **Foundation commit: `fa2dcd5`** — `feat(web): frontend foundation — design system, scaffold, and serving`.
 Verified at that commit: 766 Python tests passed · ruff clean · `tsc -b` clean · production build
@@ -798,18 +833,33 @@ use a toast for a validation error.
 
 ### 6.13 Navigation
 
-This product is deliberately **navigation-light**: it is one screen plus marketing and auth. There
-is no sidebar, no tab bar, no nested routing.
+This product is deliberately **navigation-light**. It carries **two** product surfaces and no
+more: `Today` (the briefing, §6.20) and `Chat` (the conversation, §9). No sidebar of sections, no
+nested routing beyond those two, and nothing that reads as a dashboard tab bar.
 
-**Top bar (56px):** mark + wordmark (left) · stats in mono (center-right) · connection indicator ·
-account menu (right). The connection indicator is three 4px dots showing CockroachDB health:
-`--faint` idle, `--signal` on active query, `--invalid` on error. It is the top bar's one
-piece of ornament and it is functional. Two `ghost`/`sm` controls sit at the far right: `Profile`
-(→ `/app/profile`, §6.19) beside the existing `Sign out` — still not a nav bar, two adjacent
-actions, not a dropdown menu (no third item has ever needed one).
+**Amended 2026-08-12** (§16 Decisions Log) — this section previously read "one screen plus
+marketing and auth… no tab bar". Today made that false, and the count is now a stated ceiling
+rather than an accident: the competitive read (§16) found the median mature product runs three to
+five primary items and Oura shipped a redesign *removing* two. Two is where this product stops
+until a surface earns a third.
 
-Routes: `/` (landing), `/app` (the product), `/app/profile` (§6.19), `/onboarding` (§6.19),
-`/login`, `/signup`. That is all.
+**Top bar (56px):** mark + wordmark (left) · **primary nav** (Today · Chat) · stats in mono
+(center-right) · connection indicator · account menu (right). The nav renders as a 1px bottom
+border on the active item — never a filled pill or a chip row, which at 56px reads as chrome
+competing with the stats beside it. The connection indicator is three 4px dots showing
+CockroachDB health: `--faint` idle, `--signal` on active query, `--invalid` on error. It is the
+top bar's one piece of ornament and it is functional. Two `ghost`/`sm` controls sit at the far
+right: `Profile` (→ `/app/profile`, §6.19) beside `Sign out` — two adjacent actions, not a
+dropdown menu (no third item has ever needed one).
+
+Routes: `/` (landing), `/app/today` (§6.20), `/app` (the conversation), `/app/profile` (§6.19),
+`/onboarding` (§6.19), `/login`, `/signup`. That is all.
+
+**Where each entry point lands, and why they differ.** Login → `/app/today`: a returning account
+has memory, and the briefing is what someone opening the app wants before they have a question.
+Signup → `/onboarding` → `/app`: a brand-new account has nothing to brief, and the guided first
+turn (§9.1) *is* the live product experience under ADR-13.4. The asymmetry is the product
+behaving correctly, not an inconsistency to tidy up.
 
 ### 6.14 Icons
 
@@ -982,6 +1032,65 @@ applies here too). The suggested-target line always reflects the *current* form 
 without a submit round-trip — it is pure client-side arithmetic mirroring `engine/profile.py`'s
 formula, confirmed by the server response after submit. No field on either screen collects
 anything from §13's medical-history/phone/address/wearable-credentials "should not collect" list.
+
+### 6.20 Today *(added 2026-08-12, research P0 #1)*
+
+`/app/today`. The home screen, and **a briefing, not a dashboard** — the banned word (§16) applies
+here with more force than anywhere else, because this is the surface that most invites the
+category default.
+
+**Why the category's hierarchy is unavailable to us.** Every product studied (MyFitnessPal,
+Google Health, WHOOP, Oura, Apple Health) fills 8 AM with *data collected while the user slept* —
+a sleep score, a recovery number, a readiness dial. AyuMind has no overnight sensor, so copying
+that opening would mean inventing the numbers. Today leads with **continuity** instead, which is
+the one thing a memory product has and a sensor product does not: how much memory exists, where
+you stood when we last measured, and one way to change it.
+
+**Order, and nothing may invert it:**
+
+| # | Zone | Job |
+|---|---|---|
+| 1 | **State line** | The thesis in one sentence. Days of memory · memory count · yesterday's protein against target · coverage. Every figure from `GET /api/today`. |
+| 2 | **Targets** | Two — protein and energy. Never four. |
+| 3 | **Composer** | The primary action. Above the fold at 390×844 (measured: ~450px above it). |
+| 4 | **What changed** | The newest active insight, or *absent entirely*. |
+| 5 | **Recently logged** | Receipts, and the way into the day view. |
+
+**The four-state target rule.** A `TargetBar` has four states, and collapsing any pair is the bug
+the component exists to prevent: *nothing logged* renders `— / 150 g` with an empty rail and the
+words "nothing logged yet"; *a real logged zero* renders `0 / 150 g`; *a value with no target*
+renders the number alone; *neither* points at Profile. At 8 AM the first row is the normal case,
+which is exactly why it must not look like failure. A red ring at zero is the reflex this refuses.
+Backed by contract: `GET /api/today` sends `value: null`, never `0`, and carries `has_data`
+explicitly — `value === 0` and `value === null` are both falsy in JS, and that is precisely how a
+fabricated zero reaches the most-seen screen in the product.
+
+**No color encodes progress.** Bar fill is `--muted-foreground` on a `--surface-3` rail — the same
+meaning-free neutral `ConfidenceMeter` uses, legible in grayscale. Rule 4 stands: `--signal` means
+*evidence you can open*, and a progress bar is not evidence.
+
+**Insight strength reuses `ConfidenceMeter`**, never a percentage (ADR-13.12) — one 0–1 visual
+language, not two. The card shows `flagged` (the insight's `created_at`) *separately* from the
+window the claim is about: the bi-temporal argument is invisible unless both clocks are on screen.
+
+**It owns no machinery of its own.** The composer hands its message to `/app` via `location.state`
+and `AppScreen` sends it through the same graph every turn uses; clicking a memory or an insight
+opens the day view the timeline strip already owns (§9). One turn pipeline, one day-view renderer.
+A second diary here would fork the definition of "a day" between two screens.
+
+**It shows its work.** Today asserts figures nobody asked for, so it carries the same
+`RetrievalQueries` disclosure a turn does — the five statements that produced every number
+(ADR-12). This is the reason the endpoint returns its `RetrievalStep`s at all.
+
+**Explicitly not on this screen:** sleep, recovery, readiness, stress, HRV, steps, water (no
+sensor — each would be fabrication); habit grids, streak flames, badges, celebrations,
+motivational copy, any greeting with an exclamation mark (§2's voice table rejects these by name).
+Weight is a line with a date, not a card.
+
+**Coverage, not a streak.** "5 of the last 7 days logged" is the same quantity that gates
+`analytics.pattern_strength`, stated as what it is: how much the numbers above rest on. Three of
+five competitors ship streaks and it plainly works for them; it cannot work here, because §1
+defines this product *against* rings and green checkmarks. Same user need, opposite framing.
 
 ---
 
@@ -1538,3 +1647,7 @@ Numbered `F-T*` to stay clear of the T1–T18 backlog in
 | 2026-08-10 | **Custom scrollbar, token-driven, replacing default browser chrome everywhere** | Explicit user instruction ("three scrollbars... traditional browser scrollbar... improve the design, for both white and black theme"), covering the thread sidebar, the conversation column, and the engine pane at once rather than three one-off fixes. Added globally in `theme.css`'s `@layer base` — a universal `*` rule (`scrollbar-width: thin`, `scrollbar-color: var(--color-border-strong) transparent` for Firefox) plus `::-webkit-scrollbar*` pseudo-elements for Chromium/Safari (10px track, `--color-border-strong` thumb on a transparent track, `padding-box`-clipped 2px inset border so the thumb reads as inset rather than edge-to-edge, `--color-faint` on hover). No new tokens (rule 6 intact): both colors already existed for borders/muted text and simply carry over per-theme automatically, same as every other token consumer. `.scrollbar-none` (the timeline rail's fully-hidden scrollbar, unlayered) still wins over this by cascade-layer ordering, unchanged. |
 | 2026-08-10 | **Staged progress (§6.10) simplified from a connected-dot trail to a single swapping line** | Explicit user instruction ("I dont want this connected dots vertically, simply in one line... remove that connected dots design"), reversing the 2026-08-09 decision on its own terms once seen running — that version's stacked `<ol>` of dimmed dots read as more machinery than the moment needed. `PendingTurn` (`Conversation.tsx`) now tracks only the latest stage (`stages[stages.length - 1]`) and swaps it via `AnimatePresence mode="wait"` (fade + 4px vertical slide, `exit` values collapsed to a no-op under reduced motion rather than passed as `undefined`, since `exactOptionalPropertyTypes` rejects an explicit `undefined` on a required prop) instead of appending to a growing list. The `--border`-connector and per-stage dimmed dots are gone; the single pulsing `--signal` dot now means "still working" rather than marking one specific stage. Landed together with two related, same-session changes to the same component: the pending-state `Logo` grew from 28px to 36px (reported live as "looking so small"), and the completed-turn `Logo` was removed outright — replaced by a 36px spacer `<div>` so the answer column doesn't reflow sideways when a turn settles from pending to complete — since a heartbeat/spin mark next to a *finished* answer was reading as decoration rather than "generating," the opposite of what the mark is for. |
 | 2026-08-11 | **Profile/onboarding foundation approved, superseding §13's "onboarding tour" and "settings/profile screen" rejections** | Explicit user instruction, following an audit of the identity/account system (email+password only, no health profile) and the unused `user_profile` schema stub. §6.19 is the new component spec; ADR-17 ([09-decisions.md](docs/office-hours/09-decisions.md#adr-17)) is the backing architecture decision. Account creation itself is unchanged (email+password, no new required field) — the addition is a one-screen intake **after** signup and a small profile settings surface, both scoped to fields that feed a computed nutrition target or the agent's context, never a general settings page. Current weight remains a `weight` memory, never a mutable profile column (principle carried from the audit: one fact, one source of truth). Goal/target/preference changes write a `profile_change` memory alongside the `user_profile` row update, in the same transaction — the mechanism that keeps "you hit your target" honest against the target that was active on that historical day, not today's. |
+| 2026-08-12 | **Today added as a second product surface (§6.20), amending §6.13's "no tab bar"** | Competitive research approved 2026-08-12, P0 #1. All five products studied (MyFitnessPal, Google Health, WHOOP, Oura, Apple Health) open to a Today-style home; AyuMind opened to a composer, so there was no way to answer "how am I doing?" without typing — and a judge with ninety seconds may never type. The nav count is now a stated ceiling of **two** rather than an accident of having only one screen: the same research found the median mature product runs three to five primary items and that Oura shipped a redesign *removing* two, so restraint here is the category's own lesson, not our limitation. Today deliberately keeps no machinery of its own — its composer hands off to `/app`'s existing turn pipeline and its rows open the timeline's existing day view — because a second send path or a second diary would fork the definitions of "a turn" and "a day" across two screens. |
+| 2026-08-12 | **`value: null`, never `0`, for a metric with no logged rows — carried by an explicit `has_data` flag** | The screen's central honesty problem, and the reason the endpoint's shape is what it is. "You have logged nothing today" and "you ate 0 g of protein today" are different claims, and at 8 AM only the first is true. A JSON `0` makes them indistinguishable, and in the client `value === 0` and `value === null` are *both* falsy — so a plain truthiness check is exactly how a fabricated zero reaches the most-seen screen in the product. `has_data` exists so no component ever has to infer the difference. Pinned in both directions by `engine/tests/test_today.py`, including the case a naive fix would break: a meal that genuinely carried 0 g must still read as data. |
+| 2026-08-12 | **Coverage shipped as a stated number; streaks rejected** | Three of five competitors ship streaks (MyFitnessPal's Streaks view, WHOOP's Streak, Google Health's badges) and it demonstrably works for them, so this was evaluated rather than assumed. It cannot work here: §1 defines this product *against* "rings, streaks and green checkmarks" and §3's anti-patterns ban green success checkmarks outright, so a streak flame would be the single most on-the-nose violation of the locked contract. But the need underneath one is real — *am I logging consistently enough for these averages to mean anything?* — and the engine already computes the honest answer as `coverage`, an input to `analytics.pattern_strength`. So it ships as a data-quality disclosure ("5 of the last 7 days logged"), not a reward. Same information, opposite framing, and the framing no competitor can copy without conceding their own reports don't disclose it. |
+| 2026-08-12 | **`profile_change` excluded from Today's "Recently logged", alongside `insight`** | Found in the browser, not in review: `apply_profile_update` writes one memory per changed field, so a single onboarding submission filled four of the strip's eight rows with "activity level set to moderate" and buried a week of meals. `insight` was already excluded on the principle `Receipt` establishes — the user reported a meal, an insight is a claim the *engine* made — and a settings edit fails the same test from the other direction: it is a real memory and belongs in the profile history (ADR-17.1), but it is not a health event and it is not a useful way into a day of health data. The strip's job is receipts plus a browse affordance; both exclusions serve it. |

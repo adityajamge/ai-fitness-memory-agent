@@ -34,7 +34,9 @@ web/
       glassbox/     evidence chips, evidence rows, trace panel, receipts
       chart/        hand-rolled SVG: density bars, series line
       layout/       top bar, panes, drawer, composer shell
-    routes/         one file per route: landing, app, login, signup
+    routes/         one file per route: landing, today, app, profile, login, signup
+      today/        Today's own components — single-use, so they live beside the route
+                    (see the promote-on-second-use rule below), not in components/
     hooks/          shared behavior (useReducedMotion wrappers, media queries)
     lib/            pure helpers, no React
     styles/

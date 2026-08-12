@@ -30,6 +30,19 @@
 > follow-up (2 of the 4 required Playwright E2E paths, both live-model eval lanes, the Phase 5
 > latency profile and photo ingestion) is Phase 7 scope; detail in
 > [12-test-plan.md](12-test-plan.md) and [TODOS.md](../../TODOS.md).
+>
+> **Product surfaces added after this design, 2026-08-12:** these documents describe the
+> conversation-first product as designed on 2026-07-10, and **07's philosophy is unchanged** —
+> chat is still the primary interface and every interaction still becomes memory. What changed is
+> that the product grew a *second* surface beside it. A competitive study of MyFitnessPal, Google
+> Health (the renamed Fitbit app), WHOOP, Oura and Apple Health found all five open to a
+> Today-style home, and that an AI coach grounded in the user's own data is now **table stakes**
+> rather than a differentiator — four of the five shipped one between 2023 and May 2026. What none
+> of them can do is resolve a claim to the rows that produced it, which is what 01's thesis and
+> ADR-12 already buy. **Today** (the home briefing) shipped 2026-08-12; **Review** (the generated
+> weekly review) is next and not yet started. Spec for both lives in
+> [DESIGN.md §6.20](../../DESIGN.md) and §16's Decisions Log, not here — 07 remains the visual
+> grammar for the conversation surface it was written about.
 
 ## The project in three sentences
 

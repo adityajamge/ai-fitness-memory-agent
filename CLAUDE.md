@@ -26,6 +26,15 @@ Frontend status, the foundation commit, and what to build first are in
 **[DESIGN.md §0](DESIGN.md#0-frontend-foundation-status)** and
 **[§15 M4 build order](DESIGN.md#15-m4-build-order)**.
 
+**Product surfaces (as of 2026-08-12):** two, and two is a stated ceiling —
+**Today** (`/app/today`, the home briefing, [DESIGN.md §6.20](DESIGN.md)) and
+**Chat** (`/app`, the conversation, [§9](DESIGN.md)). A third needs a Decisions Log
+entry. Both come out of the competitive research approved 2026-08-12, whose finding
+was that an AI coach grounded in your own data is now **table stakes** — four of the
+five products studied shipped one — while resolving a claim to the rows that produced
+it is what nobody else does. **Review** (the generated weekly review) is the next
+planned surface and is not started.
+
 ## Skill routing
 
 When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.

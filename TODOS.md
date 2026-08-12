@@ -1,16 +1,45 @@
 # TODOS
 
-## Full Playwright suite pending re-run — Timeline month-tick removal (2026-08-09)
+## ~~Full Playwright suite pending re-run — Timeline month-tick removal (2026-08-09)~~ CLOSED 2026-08-12
 
-- **What:** `web/src/components/timeline/Timeline.tsx` had its always-visible month-tick labels
-  removed (they overlapped into unreadable text on an account with a wide date range; the
-  per-day hover tooltip already shows the date on demand). `web/e2e/first-run.spec.ts`'s two
-  timeline-touching tests were run in isolation post-fix and passed 9/9 clean against a fresh
-  backend connection; the full suite (`glass-box.spec.ts` included) was not re-run afterward —
-  skipped deliberately to save time under competition deadline pressure, not because of a known
-  failure.
-- **Action:** run `npx playwright test` (full suite, `web/`) once time allows, before treating
-  this change as fully verified.
+- **Resolved.** The full suite was re-run during the Today milestone (`8aed61a`), which touched
+  `Timeline.tsx` again and so needed the same coverage: **15/15 green** — `first-run.spec.ts` 9/9
+  and `glass-box.spec.ts` 6/6, including both axe assertions and the 390×844 mobile-timeline test.
+  Run against a local `uvicorn` on the test cluster via `E2E_BASE_URL`. The month-tick removal and
+  the `sr-only` table fix are both covered by that run.
+
+## Narration arithmetic is unchecked (2026-08-12) — the glass box's weakest seam
+
+- **What:** asked "how much protein did I average this week?" on a seeded account, the model
+  answered **"You averaged approximately 5.7g of protein this week"** while correctly citing eight
+  days of 28–62 g in the same sentence. Every chip resolved, the evidence pane was right, the
+  citation report passed. The *prose* was wrong by an order of magnitude.
+- **Why it matters more than a missing feature:** this is the one failure mode that damages the
+  product's actual thesis. A stateless chatbot being wrong is expected; a system that renders the
+  rows *and* a contradictory number teaches the reader not to trust the rows either. It is also
+  exactly the discrepancy Oura's own help page concedes about Advisor ("discrepancies may appear
+  between the data in Oura Advisor and what's displayed in other sections") — the thing AyuMind's
+  citation validator was built to make impossible, and does not yet cover.
+- **Root cause:** `engine/citations.py` validates that every marker *resolves to a citable ID*
+  (ADR-13.13's honestly-scoped `valid`). It does not, and by design cannot, check that a number in
+  the prose matches the aggregate the engine computed. `AggregateResult` already holds the true
+  value; nothing compares the two.
+- **Smallest honest fix:** the aggregate's own value is deterministic and already in the trace, so
+  the narrator does not need to compute it — pass it in the assembled context as a pre-formatted
+  figure and instruct narration to quote rather than derive. A validator that regex-scans for
+  numbers and diffs them against `AggregateResult` is the heavier alternative and probably the
+  wrong shape (it would flag legitimate rounding and prose like "about half").
+- **Not in scope for Today.** Filed from the Today smoke test; belongs to the agent/narration lane.
+
+## Today: two deliberate deferrals (2026-08-12)
+
+- **No trend chart yet.** `§6.15`'s series line still does not exist, so Today shows values without
+  a curve. Research P1; the Review surface is where it earns its place, and building it for Today
+  alone would be a component with one caller.
+- **`GET /api/today` has no API-level test.** The engine composer has six
+  (`engine/tests/test_today.py`); the router itself is transport-only and untested, unlike its
+  siblings in `api/tests/test_glassbox.py`. Worth ~20 lines when the deploy work quiets down —
+  specifically an I-28 scoping assertion, since every other read route has one by policy.
 
 ## M6 — Latency profile (T12): POSTPONED 2026-08-06, not skipped
 
