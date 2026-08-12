@@ -41,6 +41,19 @@
   siblings in `api/tests/test_glassbox.py`. Worth ~20 lines when the deploy work quiets down —
   specifically an I-28 scoping assertion, since every other read route has one by policy.
 
+## Target-adherence insights (deferred by ADR-17, 2026-08-11) — not built
+
+- **What's deferred:** a derived insight kind for "you hit your protein target N% of days since
+  the target changed" — a claim with pattern strength and evidence, the same tier as
+  `level_shift`/`intervention_outcome`, not just today's raw numbers next to a target.
+- **What already exists to build it on:** `profile_change` gives the target's active-on-date
+  history to join against, so a detector can compare each day's logged total to the target that
+  was actually in force that day rather than today's. Today (`/app/today`) reads the *current*
+  target only — it is composition, not a new detector, and does not touch this.
+- **Where it belongs:** Nutrition/Insights product-surface work, per ADR-17's own "Open" section
+  — deliberately left for the research pass that follows the profile/onboarding + Today
+  foundation, not this milestone.
+
 ## M6 — Latency profile (T12): POSTPONED 2026-08-06, not skipped
 
 - **Status:** intentionally deferred, still **owed**. Phase 5 is not complete without it, and

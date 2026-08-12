@@ -28,6 +28,7 @@ per §13). Remaining work is hardening, not new UI surface — see the end of th
 | **M6** | Live engine pane: SSE stage narration with an automatic plain-transport fallback |
 | **M7** | Timeline strip: density bars, changepoint caps, mobile weekly bucketing, click-to-scrub |
 | **M8** | Insight lineage: the text list (§13's designated shipped form; the graph stays cut) |
+| **Profile** | `/onboarding` + `/app/profile` (§6.19, [ADR-17](docs/office-hours/09-decisions.md#adr-17)) — one-screen intake after signup and a Profile & goals settings screen; activates `user_profile` as a current-state cache with `profile_change` history, and adds `compute_targets` — the engine-computed nutrition targets Today (below) now also reads |
 | **Today** | `/app/today` (§6.20) — the home briefing. First surface added *after* the M4–M8 build order, from the 2026-08-12 competitive research (P0 #1) |
 
 **Today shipped 2026-08-12** (commit `8aed61a`), the first new product surface since M8 and the

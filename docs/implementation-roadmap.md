@@ -360,6 +360,37 @@
 > 390×844, light and dark, against both the real replayed history and a seeded account. **Next per
 > the research: the Review surface (P0 #2) — not started, awaiting approval.**
 >
+> **Status 2026-08-11: Profile & onboarding foundation shipped (`d2df0eb`,
+> [ADR-17](office-hours/09-decisions.md#adr-17)), ahead of and consumed by Today above.** Signup
+> stayed email+password only; a one-screen intake at `/onboarding` follows it (real "Skip for
+> now", no wizard chrome) and a Profile & goals screen lives at `/app/profile` — both superseding
+> the two DESIGN.md §13 rows that rejected them before personalization was a requirement. The
+> previously-unused
+> `user_profile` table (Phase 2 stub, zero readers or writers) is activated as a current-state
+> cache; every edit to a history-worthy field (goal, activity level, targets, diet, allergies)
+> writes a `profile_change` memory in the same transaction, so a claim about "was the target hit"
+> can be judged against the target active *on that date* — current weight stays a first-class
+> `weight` memory rather than a cached column, for the same one-fact-one-source reason. New pure
+> function `engine.profile.compute_targets` (Mifflin-St Jeor BMR × activity × goal) is what Today
+> now reads via `get_profile` + `compute_targets`, and what `engine/ingestion.py` folds into
+> nutrition-estimation context (dietary preference/allergies) and `agent/graph.py` folds into
+> narration context (`ContextBlock.profile_note`) — both additive seams, zero `ModelProvider`
+> protocol change. Also added `ENGINE_ONLY_TYPES` (`engine/types.py`): `profile_change` is
+> registered for read paths but withheld from the extraction tool schema, since unlike `insight`
+> its payload has no coherence check and would validate trivially if a stray extraction proposed
+> one.
+>
+> Verified: 18 new engine tests + 12 new API tests (target-calculator edge cases, history-vs-no-op
+> writes, cross-user isolation, onboarding-writes-a-real-weight-memory) · full-suite regression at
+> 799 passed, 56 skipped, 1 failed — the skips and the one failure both trace to CockroachDB
+> Cloud connectivity degrading over an unusually long 82-minute run; the failing test
+> (`test_batch_never_returns_another_users_memory`) passed clean on an isolated re-run with a
+> fresh connection, confirming a transient blip rather than a code defect · `tsc` and production
+> build clean · both Definition-of-Done Playwright specs updated for the new
+> signup → `/onboarding` → `/app` hop and re-verified live (zero axe violations) · a live
+> onboarding-submit-and-settings-edit smoke pass against the real dev stack, which is what caught
+> the three E501s in `api/routers/profile.py` fixed in the Today commit above.
+>
 > **Status 2026-08-08: M7 + M8 complete — the 07 build order is fully shipped.** The timeline
 > strip renders memory density with changepoint markers, buckets by week and scrolls below 768px
 > (a previously-open F-T7 gap, now closed and verified at a 390×844 viewport), and click-to-scrub

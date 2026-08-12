@@ -31,6 +31,15 @@
 > latency profile and photo ingestion) is Phase 7 scope; detail in
 > [12-test-plan.md](12-test-plan.md) and [TODOS.md](../../TODOS.md).
 >
+> **Documentation audit 2026-08-11 (profile/onboarding foundation):** account creation was
+> email+password only, with no health profile — [ADR-17](09-decisions.md#adr-17) is the fix.
+> `user_profile` (defined since Phase 2, never read or written) is activated as a current-state
+> cache with `profile_change` history for goal/target/preference edits; a one-screen intake at
+> `/onboarding` and a Profile & goals screen at `/app/profile` supersede the two DESIGN.md §13
+> rows that had rejected an onboarding screen and a settings screen, now that profile data feeds
+> computed nutrition targets. This is infrastructure, not a third product surface — see the entry
+> below — but it is what Today's targets and personalized context are read from.
+>
 > **Product surfaces added after this design, 2026-08-12:** these documents describe the
 > conversation-first product as designed on 2026-07-10, and **07's philosophy is unchanged** —
 > chat is still the primary interface and every interaction still becomes memory. What changed is
