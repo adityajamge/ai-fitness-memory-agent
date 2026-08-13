@@ -29,6 +29,47 @@ export const PRIMARY_GOALS: readonly PrimaryGoal[] = [
   "general_health",
 ];
 
+// Shared by Onboarding and ProfileSettings — hoisted here, not declared inline at either call
+// site (fixed 2026-08-13). `ToggleGroup` is `React.memo`'d, and memoization only pays off when
+// its props are referentially stable: an inline `options={["male", "female"]}` array literal or
+// an inline `labelOf={(v) => ...}` arrow function is a *new* value on every render, which
+// re-renders the group (and its up-to-five `Button` children) on every keystroke in the form
+// regardless of the memo — a large form with several groups made typing visibly heavy.
+export const SEX_OPTIONS: readonly Sex[] = ["male", "female"];
+export const UNITS_OPTIONS: readonly ("metric" | "imperial")[] = ["metric", "imperial"];
+
+export function sexLabel(v: Sex): string {
+  return v === "male" ? "Male" : "Female";
+}
+
+export function unitsLabel(v: "metric" | "imperial"): string {
+  return v === "metric" ? "kg / cm" : "lb / in";
+}
+
+export const GOAL_LABEL: Record<PrimaryGoal, string> = {
+  lose_fat: "Lose fat",
+  build_muscle: "Build muscle",
+  recomp: "Recomp",
+  maintain: "Maintain",
+  general_health: "General health",
+};
+
+export function goalLabel(v: PrimaryGoal): string {
+  return GOAL_LABEL[v];
+}
+
+export const ACTIVITY_LABEL: Record<ActivityLevel, string> = {
+  sedentary: "Sedentary",
+  light: "Lightly active",
+  moderate: "Moderately active",
+  very_active: "Very active",
+  athlete: "Athlete",
+};
+
+export function activityLabel(v: ActivityLevel): string {
+  return ACTIVITY_LABEL[v];
+}
+
 const ACTIVITY_MULTIPLIER: Record<ActivityLevel, number> = {
   sedentary: 1.2,
   light: 1.375,

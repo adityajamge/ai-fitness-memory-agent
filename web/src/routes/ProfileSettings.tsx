@@ -3,23 +3,31 @@
  * reaches this over the app as a dialog (`ProfileSettingsDialog`), mobile as this full page —
  * `ProfileSettingsContent` below is the shared body both render, so the two surfaces cannot drift.
  *
- * Sections: Identity, Goals, Nutrition targets, Dietary preferences & allergies, Injuries/notes,
- * and a closing explainer — the user-facing statement of the historical-integrity rule ADR-17
- * enforces structurally (`profile_change` history: changing a target here only affects targets
- * going forward).
+ * **Composed of memoized sections** (fixed 2026-08-13, `routes/profile/*Section.tsx`): this
+ * component owns every field's state — it has to, `preview` and `handleSave` both need values
+ * that span sections — but that means *something* has to stop a keystroke in Identity from
+ * re-rendering Goals, Dietary preferences, and Injuries too. `Conversation`/`EvidencePane`
+ * already solve the identical problem for `AppScreen` (turn history and the evidence trace sit
+ * right next to the composer's `draft` state and don't re-render on a keystroke because neither
+ * one's props depend on it); the sections here are that same split. Every callback handed to a
+ * memoized section is either a bare `useState` setter (already stable) or explicitly
+ * `useCallback`'d against only the state it actually reads — `addAllergy`/`removeAllergy`
+ * (Dietary) and `handleLogWeight` (Current weight) — so an unrelated keystroke leaves their
+ * identity, and therefore that section's props, untouched.
+ *
+ * Sections: Identity, Current weight, Goals, Nutrition targets, Dietary preferences &
+ * allergies, Injuries/notes, and a closing explainer — the user-facing statement of the
+ * historical-integrity rule ADR-17 enforces structurally (`profile_change` history: changing a
+ * target here only affects targets going forward).
  */
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useProfile, useUpdateProfile } from "@/api/queries";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/Button";
-import { Field } from "@/components/ui/Field";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { ToggleGroup } from "@/components/ui/ToggleGroup";
 import {
-  ACTIVITY_LEVELS,
-  PRIMARY_GOALS,
   cmToIn,
   inToCm,
   kgToLb,
@@ -29,30 +37,12 @@ import {
   type PrimaryGoal,
   type Sex,
 } from "@/lib/targets";
-
-const GOAL_LABEL: Record<PrimaryGoal, string> = {
-  lose_fat: "Lose fat",
-  build_muscle: "Build muscle",
-  recomp: "Recomp",
-  maintain: "Maintain",
-  general_health: "General health",
-};
-
-const ACTIVITY_LABEL: Record<ActivityLevel, string> = {
-  sedentary: "Sedentary",
-  light: "Lightly active",
-  moderate: "Moderately active",
-  very_active: "Very active",
-  athlete: "Athlete",
-};
-
-function SectionLabel({ children }: { children: ReactNode }) {
-  return (
-    <span className="font-mono text-micro uppercase tracking-[0.08em] text-faint">
-      {children}
-    </span>
-  );
-}
+import { CurrentWeightSection } from "./profile/CurrentWeightSection";
+import { DietarySection } from "./profile/DietarySection";
+import { GoalsSection } from "./profile/GoalsSection";
+import { IdentitySection } from "./profile/IdentitySection";
+import { InjuriesSection } from "./profile/InjuriesSection";
+import { NutritionTargetsSection } from "./profile/NutritionTargetsSection";
 
 /**
  * The form itself — no page chrome, so it can sit inside either a full page (`ProfileSettings`,
@@ -60,7 +50,11 @@ function SectionLabel({ children }: { children: ReactNode }) {
  */
 export function ProfileSettingsContent() {
   const profile = useProfile();
-  const update = useUpdateProfile();
+  // Destructured rather than kept as one `update` object: `mutateAsync` is TanStack Query's
+  // stable function reference (unlike the mutation object itself, which gets a new reference on
+  // most renders), and that stability is what lets `handleLogWeight` below be `useCallback`'d
+  // against only the state it actually needs.
+  const { mutateAsync: saveProfile, isPending: isSaving } = useUpdateProfile();
 
   const [displayName, setDisplayName] = useState("");
   const [dateOfBirth, setDateOfBirth] = useState("");
@@ -79,12 +73,24 @@ export function ProfileSettingsContent() {
   const [newWeightInput, setNewWeightInput] = useState("");
   const [saveError, setSaveError] = useState<string>();
   const [saved, setSaved] = useState(false);
+  // Guards the seed effect below so it runs exactly once, ever — see that effect's comment for
+  // why a plain `[profile.data]` dependency array is not enough (fixed 2026-08-13).
+  const seeded = useRef(false);
 
-  // Seed local state from the loaded profile exactly once — after that the form is the
-  // source of truth for what the user is editing, the same "seed once, then local wins"
-  // pattern AppScreen uses for conversation history.
+  // Seed local state from the loaded profile exactly once — after that the form is the source
+  // of truth for what the user is editing, the same "seed once, then local wins" pattern
+  // AppScreen uses for conversation history (`seeded.current`, not just a dependency array).
+  //
+  // **That guard is load-bearing, not decorative.** `profile.data` gets a *new object
+  // reference* on every successful mutation this screen makes, including a partial one:
+  // `handleLogWeight` only changes `weight_kg`, but its response still replaces the whole
+  // cached profile object. Without `seeded.current`, this effect would re-fire on that response
+  // and overwrite every *other* field back to its last-saved server value — silently discarding
+  // whatever the user had typed into Name, Height, Goals, etc. but not yet saved. Caught by a
+  // smoke test that logged a weight partway through filling the rest of the form.
   useEffect(() => {
-    if (!profile.data) return;
+    if (seeded.current || !profile.data) return;
+    seeded.current = true;
     setDisplayName(profile.data.display_name ?? "");
     setDateOfBirth(profile.data.date_of_birth ?? "");
     setSex(profile.data.sex);
@@ -142,7 +148,11 @@ export function ProfileSettingsContent() {
     [currentWeightKg, heightCm, dateOfBirth, sex, activityLevel, primaryGoal],
   );
 
-  function addAllergy() {
+  // `useCallback`, not a plain function: this is `DietarySection`'s prop, and a fresh reference
+  // on every render (any keystroke, anywhere in the form) would defeat that section's memo. Its
+  // identity legitimately changes when `allergyDraft`/`allergies` change — which is exactly when
+  // Dietary is already re-rendering for its own reasons, so that's free.
+  const addAllergy = useCallback(() => {
     const value = allergyDraft.trim();
     if (!value || allergies.includes(value)) {
       setAllergyDraft("");
@@ -150,7 +160,12 @@ export function ProfileSettingsContent() {
     }
     setAllergies((prev) => [...prev, value]);
     setAllergyDraft("");
-  }
+  }, [allergyDraft, allergies]);
+
+  // Fully stable (functional update, no closed-over state) — never forces Dietary to re-render.
+  const removeAllergy = useCallback((item: string) => {
+    setAllergies((prev) => prev.filter((a) => a !== item));
+  }, []);
 
   async function handleSave() {
     setSaveError(undefined);
@@ -160,7 +175,7 @@ export function ProfileSettingsContent() {
     // (client.ts's `request` helper carries the same note), and `ProfileEditInput`'s partial-
     // update semantics depend on only-the-fields-you-mean-to-change being present at all.
     try {
-      await update.mutateAsync({
+      await saveProfile({
         ...(displayName ? { display_name: displayName } : {}),
         ...(dateOfBirth ? { date_of_birth: dateOfBirth } : {}),
         ...(sex ? { sex } : {}),
@@ -188,18 +203,21 @@ export function ProfileSettingsContent() {
     }
   }
 
-  async function handleLogWeight() {
+  // `useCallback`, not a plain function: `CurrentWeightSection`'s prop — see `addAllergy` above
+  // for why. Depends only on `newWeightInput`/`units` (both that section's own props already)
+  // and `saveProfile` (TanStack Query's stable `mutateAsync`), never on unrelated form state.
+  const handleLogWeight = useCallback(async () => {
     if (!newWeightInput) return;
     setSaveError(undefined);
     const kg = units === "imperial" ? lbToKg(Number(newWeightInput)) : Number(newWeightInput);
     try {
-      await update.mutateAsync({ weight_kg: Math.round(kg * 10) / 10 });
+      await saveProfile({ weight_kg: Math.round(kg * 10) / 10 });
       setNewWeightInput("");
       setSaved(true);
     } catch {
       setSaveError("couldn't reach the server");
     }
-  }
+  }, [newWeightInput, units, saveProfile]);
 
   if (profile.isPending) {
     return (
@@ -213,206 +231,58 @@ export function ProfileSettingsContent() {
 
   return (
     <div className="flex flex-col gap-8">
-      {/* Identity */}
-      <section className="flex flex-col gap-4">
-        <h2 className="text-dense font-medium text-foreground">Identity</h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
-          <Field
-            label="Date of birth"
-            type="date"
-            value={dateOfBirth}
-            onChange={(e) => setDateOfBirth(e.target.value)}
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <SectionLabel>Sex</SectionLabel>
-          <ToggleGroup<Sex>
-            options={["male", "female"]}
-            value={sex}
-            onChange={setSex}
-            labelOf={(v) => (v === "male" ? "Male" : "Female")}
-          />
-        </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div className="flex flex-col gap-1.5">
-            <SectionLabel>Units</SectionLabel>
-            <ToggleGroup<"metric" | "imperial">
-              options={["metric", "imperial"]}
-              value={units}
-              onChange={setUnits}
-              labelOf={(v) => (v === "metric" ? "kg / cm" : "lb / in")}
-            />
-          </div>
-          <Field
-            label={`Height (${units === "metric" ? "cm" : "in"})`}
-            type="number"
-            inputMode="decimal"
-            value={heightInput}
-            onChange={(e) => setHeightInput(e.target.value)}
-          />
-        </div>
-      </section>
+      <IdentitySection
+        displayName={displayName}
+        onDisplayNameChange={setDisplayName}
+        dateOfBirth={dateOfBirth}
+        onDateOfBirthChange={setDateOfBirth}
+        sex={sex}
+        onSexChange={setSex}
+        units={units}
+        onUnitsChange={setUnits}
+        heightInput={heightInput}
+        onHeightInputChange={setHeightInput}
+      />
 
-      {/* Current weight — deliberately styled like logging a value, not editing a
-          settings field: it writes a new `weight` memory, never a profile column
-          (ADR-17.2). */}
-      <section className="flex flex-col gap-2 border-t border-border pt-6">
-        <h2 className="text-dense font-medium text-foreground">Current weight</h2>
-        <p className="text-meta text-faint">
-          {currentWeightKg != null
-            ? `Last logged: ${
-                units === "imperial"
-                  ? `${Math.round(kgToLb(currentWeightKg) * 10) / 10} lb`
-                  : `${currentWeightKg} kg`
-              }`
-            : "Nothing logged yet"}
-        </p>
-        <div className="flex gap-2">
-          <input
-            type="number"
-            inputMode="decimal"
-            value={newWeightInput}
-            onChange={(e) => setNewWeightInput(e.target.value)}
-            placeholder={`log a new weight (${units === "metric" ? "kg" : "lb"})`}
-            className="h-10 w-full rounded-sm border border-border bg-surface px-3 text-body text-foreground placeholder:text-faint focus:border-border-strong focus:outline-none"
-          />
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={handleLogWeight}
-            isLoading={update.isPending}
-          >
-            Log
-          </Button>
-        </div>
-      </section>
+      <CurrentWeightSection
+        currentWeightKg={currentWeightKg}
+        units={units}
+        newWeightInput={newWeightInput}
+        onNewWeightInputChange={setNewWeightInput}
+        onLogWeight={handleLogWeight}
+        isLogging={isSaving}
+      />
 
-      {/* Goals */}
-      <section className="flex flex-col gap-4 border-t border-border pt-6">
-        <h2 className="text-dense font-medium text-foreground">Goals</h2>
-        <div className="flex flex-col gap-1.5">
-          <SectionLabel>Primary goal</SectionLabel>
-          <ToggleGroup<PrimaryGoal>
-            options={PRIMARY_GOALS}
-            value={primaryGoal}
-            onChange={setPrimaryGoal}
-            labelOf={(v) => GOAL_LABEL[v]}
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <SectionLabel>Activity level</SectionLabel>
-          <ToggleGroup<ActivityLevel>
-            options={ACTIVITY_LEVELS}
-            value={activityLevel}
-            onChange={setActivityLevel}
-            labelOf={(v) => ACTIVITY_LABEL[v]}
-          />
-        </div>
-        <Field
-          label={`Target weight (${units === "metric" ? "kg" : "lb"})`}
-          type="number"
-          inputMode="decimal"
-          value={targetWeightInput}
-          onChange={(e) => setTargetWeightInput(e.target.value)}
-        />
-      </section>
+      <GoalsSection
+        primaryGoal={primaryGoal}
+        onPrimaryGoalChange={setPrimaryGoal}
+        activityLevel={activityLevel}
+        onActivityLevelChange={setActivityLevel}
+        units={units}
+        targetWeightInput={targetWeightInput}
+        onTargetWeightInputChange={setTargetWeightInput}
+      />
 
-      {/* Nutrition targets */}
-      <section className="flex flex-col gap-4 border-t border-border pt-6">
-        <h2 className="text-dense font-medium text-foreground">Nutrition targets</h2>
-        {preview && (
-          <div className="rounded-sm border border-border bg-surface px-4 py-3">
-            <p className="font-mono text-body text-signal">
-              ~{preview.proteinG}g protein · ~{preview.calorieKcal} kcal
-            </p>
-            <details className="mt-1">
-              <summary className="cursor-pointer text-meta text-muted-foreground">
-                how this is calculated
-              </summary>
-              <p className="mt-1 text-meta text-faint">{preview.basis}</p>
-            </details>
-          </div>
-        )}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field
-            label="Protein target (g/day)"
-            type="number"
-            inputMode="decimal"
-            hint={
-              profile.data?.targets_are_custom
-                ? "custom — no longer auto-updated"
-                : "auto-computed from your profile"
-            }
-            value={proteinTargetInput}
-            onChange={(e) => setProteinTargetInput(e.target.value)}
-          />
-          <Field
-            label="Calorie target (kcal/day)"
-            type="number"
-            inputMode="decimal"
-            value={calorieTargetInput}
-            onChange={(e) => setCalorieTargetInput(e.target.value)}
-          />
-        </div>
-      </section>
+      <NutritionTargetsSection
+        preview={preview}
+        proteinTargetInput={proteinTargetInput}
+        onProteinTargetInputChange={setProteinTargetInput}
+        calorieTargetInput={calorieTargetInput}
+        onCalorieTargetInputChange={setCalorieTargetInput}
+        targetsAreCustom={Boolean(profile.data?.targets_are_custom)}
+      />
 
-      {/* Dietary preferences & allergies */}
-      <section className="flex flex-col gap-4 border-t border-border pt-6">
-        <h2 className="text-dense font-medium text-foreground">Dietary preferences & allergies</h2>
-        <Field
-          label="Dietary preference"
-          placeholder="vegetarian, vegan, omnivore…"
-          value={dietaryPreference}
-          onChange={(e) => setDietaryPreference(e.target.value)}
-        />
-        <div className="flex flex-col gap-1.5">
-          <SectionLabel>Allergies / restrictions</SectionLabel>
-          <div className="flex gap-2">
-            <input
-              value={allergyDraft}
-              onChange={(e) => setAllergyDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addAllergy();
-                }
-              }}
-              placeholder="peanuts, shellfish…"
-              className="h-10 w-full rounded-sm border border-border bg-surface px-3 text-body text-foreground placeholder:text-faint focus:border-border-strong focus:outline-none"
-            />
-            <Button type="button" variant="secondary" onClick={addAllergy}>
-              Add
-            </Button>
-          </div>
-          {allergies.length > 0 && (
-            <div className="mt-1 flex flex-wrap gap-2">
-              {allergies.map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => setAllergies((prev) => prev.filter((a) => a !== item))}
-                  className="rounded-sm border border-border bg-surface-2 px-2 py-1 text-meta text-foreground transition-colors duration-120 hover:border-invalid hover:text-invalid"
-                >
-                  {item} ×
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
+      <DietarySection
+        dietaryPreference={dietaryPreference}
+        onDietaryPreferenceChange={setDietaryPreference}
+        allergyDraft={allergyDraft}
+        onAllergyDraftChange={setAllergyDraft}
+        allergies={allergies}
+        onAddAllergy={addAllergy}
+        onRemoveAllergy={removeAllergy}
+      />
 
-      {/* Injuries / notes */}
-      <section className="flex flex-col gap-2 border-t border-border pt-6">
-        <h2 className="text-dense font-medium text-foreground">Injuries / notes</h2>
-        <textarea
-          value={injuries}
-          onChange={(e) => setInjuries(e.target.value)}
-          rows={3}
-          placeholder="anything AyuMind should know when talking about training or recovery"
-          className="w-full rounded-sm border border-border bg-surface px-3 py-2 text-body text-foreground placeholder:text-faint focus:border-border-strong focus:outline-none"
-        />
-      </section>
+      <InjuriesSection injuries={injuries} onInjuriesChange={setInjuries} />
 
       <p className="border-t border-border pt-6 text-meta text-faint">
         Your protein target uses your weight, activity level, and goal. Changing it here only
@@ -432,13 +302,7 @@ export function ProfileSettingsContent() {
       )}
 
       <div>
-        <Button
-          type="button"
-          variant="primary"
-          size="lg"
-          isLoading={update.isPending}
-          onClick={handleSave}
-        >
+        <Button type="button" variant="primary" size="lg" isLoading={isSaving} onClick={handleSave}>
           Save changes
         </Button>
       </div>

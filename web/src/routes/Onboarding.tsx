@@ -7,7 +7,7 @@
  * grammar as `AuthScreen` (§6.17): left-weighted, no card, no border, no shadow.
  */
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useCallback, useMemo, useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router";
 import { useProfile, useSubmitOnboarding } from "@/api/queries";
 import { Logo } from "@/components/Logo";
@@ -18,32 +18,22 @@ import { ToggleGroup } from "@/components/ui/ToggleGroup";
 import {
   ACTIVITY_LEVELS,
   PRIMARY_GOALS,
+  SEX_OPTIONS,
+  UNITS_OPTIONS,
+  activityLabel,
   cmToIn,
+  goalLabel,
   inToCm,
   kgToLb,
   lbToKg,
   previewTargets,
+  sexLabel,
+  unitsLabel,
   type ActivityLevel,
   type PrimaryGoal,
   type Sex,
 } from "@/lib/targets";
 import { cn } from "@/lib/utils";
-
-const GOAL_LABEL: Record<PrimaryGoal, string> = {
-  lose_fat: "Lose fat",
-  build_muscle: "Build muscle",
-  recomp: "Recomp",
-  maintain: "Maintain",
-  general_health: "General health",
-};
-
-const ACTIVITY_LABEL: Record<ActivityLevel, string> = {
-  sedentary: "Sedentary",
-  light: "Lightly active",
-  moderate: "Moderately active",
-  very_active: "Very active",
-  athlete: "Athlete",
-};
 
 export function Onboarding() {
   const navigate = useNavigate();
@@ -54,6 +44,13 @@ export function Onboarding() {
   const [dateOfBirth, setDateOfBirth] = useState("");
   const [sex, setSex] = useState<Sex | null>(null);
   const [sexSkipped, setSexSkipped] = useState(false);
+  // Stable identity for ToggleGroup's memoization to actually take effect (an inline arrow
+  // function here would be a new prop value on every render, same reason as SEX_OPTIONS/
+  // sexLabel being hoisted to lib/targets.ts).
+  const chooseSex = useCallback((v: Sex) => {
+    setSex(v);
+    setSexSkipped(false);
+  }, []);
   const [units, setUnits] = useState<"metric" | "imperial">("metric");
   const [heightInput, setHeightInput] = useState("");
   const [weightInput, setWeightInput] = useState("");
@@ -70,20 +67,25 @@ export function Onboarding() {
   // DESIGN.md §6.19, rather than showing the form again.
   const shouldRedirect = profile.data?.has_onboarded === true;
 
-  function toggleUnits(next: "metric" | "imperial") {
-    if (next === units) return;
-    setHeightInput((v) => {
-      const n = Number(v);
-      if (!v || Number.isNaN(n)) return v;
-      return String(Math.round((next === "imperial" ? cmToIn(n) : inToCm(n)) * 10) / 10);
-    });
-    setWeightInput((v) => {
-      const n = Number(v);
-      if (!v || Number.isNaN(n)) return v;
-      return String(Math.round((next === "imperial" ? kgToLb(n) : lbToKg(n)) * 10) / 10);
-    });
-    setUnits(next);
-  }
+  // `useCallback`, not a plain function: it's ToggleGroup's `onChange`, and a fresh reference
+  // on every render (any keystroke, anywhere in the form) would defeat that component's memo.
+  const toggleUnits = useCallback(
+    (next: "metric" | "imperial") => {
+      if (next === units) return;
+      setHeightInput((v) => {
+        const n = Number(v);
+        if (!v || Number.isNaN(n)) return v;
+        return String(Math.round((next === "imperial" ? cmToIn(n) : inToCm(n)) * 10) / 10);
+      });
+      setWeightInput((v) => {
+        const n = Number(v);
+        if (!v || Number.isNaN(n)) return v;
+        return String(Math.round((next === "imperial" ? kgToLb(n) : lbToKg(n)) * 10) / 10);
+      });
+      setUnits(next);
+    },
+    [units],
+  );
 
   const heightCm = useMemo(() => {
     const n = Number(heightInput);
@@ -211,13 +213,10 @@ export function Onboarding() {
                 </span>
                 <div className="flex flex-wrap items-center gap-2">
                   <ToggleGroup<Sex>
-                    options={["male", "female"]}
+                    options={SEX_OPTIONS}
                     value={sexSkipped ? null : sex}
-                    onChange={(v) => {
-                      setSex(v);
-                      setSexSkipped(false);
-                    }}
-                    labelOf={(v) => (v === "male" ? "Male" : "Female")}
+                    onChange={chooseSex}
+                    labelOf={sexLabel}
                   />
                   <Button
                     type="button"
@@ -263,7 +262,7 @@ export function Onboarding() {
                   options={PRIMARY_GOALS}
                   value={primaryGoal}
                   onChange={setPrimaryGoal}
-                  labelOf={(v) => GOAL_LABEL[v]}
+                  labelOf={goalLabel}
                 />
               </div>
 
@@ -275,7 +274,7 @@ export function Onboarding() {
                   options={ACTIVITY_LEVELS}
                   value={activityLevel}
                   onChange={setActivityLevel}
-                  labelOf={(v) => ACTIVITY_LABEL[v]}
+                  labelOf={activityLabel}
                 />
               </div>
 
@@ -324,10 +323,10 @@ export function Onboarding() {
                         Units
                       </span>
                       <ToggleGroup<"metric" | "imperial">
-                        options={["metric", "imperial"]}
+                        options={UNITS_OPTIONS}
                         value={units}
                         onChange={toggleUnits}
-                        labelOf={(v) => (v === "metric" ? "kg / cm" : "lb / in")}
+                        labelOf={unitsLabel}
                       />
                     </div>
 
