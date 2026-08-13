@@ -3,8 +3,7 @@
  *
  * Query keys follow `[resource, ...identifiers]` (frontend-guidelines §5). Consistency here is
  * what makes SSE invalidation a one-liner in M6: one `invalidateQueries({ queryKey: ["stats"] })`
- * updates the top bar, the timeline, and the insight count without any of them knowing about
- * each other.
+ * updates Review's state line and timeline without either knowing about the other.
  */
 
 import { useCallback } from "react";
@@ -31,7 +30,11 @@ import { markAuthenticated } from "@/session/sessionStore";
 export const queryKeys = {
   stats: ["stats"] as const,
   timeline: ["timeline"] as const,
-  today: ["today"] as const,
+  // The cache key is still literally "today" — it mirrors `GET /api/today`, the backend endpoint
+  // this revision deliberately left unrenamed (frontend-only IA change, DESIGN.md §16
+  // 2026-08-13). Only the exported name (`review`, matching the page) and the hook
+  // (`useReview`, below) changed.
+  review: ["today"] as const,
   // Keyed by thread so "New chat" (a new thread id) never reads the previous thread's cached
   // history — each thread gets its own cache entry under the shared "turns" prefix, which is
   // also what lets invalidateTurnDerivedQueries below invalidate all of them with one call.
@@ -49,7 +52,10 @@ export const isUnauthorized = (error: unknown): boolean =>
   error instanceof ApiError && error.status === 401;
 
 /**
- * Top-bar stats, and the app's session probe (see `client.getStats`).
+ * The app's session probe and connection-status source (see `client.getStats`). The top bar
+ * reads only this query's `isError` for its connection dots since the 2026-08-13 IA revision —
+ * the visible counts it used to feed moved into Review's state line. `AppScreen` still reads the
+ * data itself, for the empty-account check.
  *
  * `retry: false` matters here beyond performance: this query's 401 *is* the signal that the
  * session ended, and retrying would delay the notice by seconds while the user types into a
@@ -74,16 +80,17 @@ export function useTimeline() {
 }
 
 /**
- * The home screen's single read.
+ * Review's single read (renamed from `useToday`, 2026-08-13 IA revision — the underlying
+ * endpoint is still `GET /api/today`, deliberately left unrenamed; see `queryKeys.review`).
  *
  * `staleTime: 0` overrides the app-wide 60s default, and the reason is specific to this query:
  * every other cached thing here is immutable once written (a trace never changes, a memory row
- * only changes when superseded), whereas Today is a *view of now* — it rolls over at local
+ * only changes when superseded), whereas this is a *view of now* — it rolls over at local
  * midnight and moves every time a meal is logged. A minute of staleness on a trace is free; a
- * minute of staleness on "today's protein" is a wrong number on the most-seen screen.
+ * minute of staleness on "today's protein" is a wrong number on Review's most load-bearing line.
  */
-export function useToday() {
-  return useQuery({ queryKey: queryKeys.today, queryFn: getToday, staleTime: 0 });
+export function useReview() {
+  return useQuery({ queryKey: queryKeys.review, queryFn: getToday, staleTime: 0 });
 }
 
 /** Conversation history for one thread — the active thread, per `session/threadStore.ts`. Only
@@ -131,7 +138,7 @@ export function useMemoriesByDay(day: string | null) {
  * Every derived surface, invalidated together, because one message can change all of them at
  * once: an ingest turn creates memories (stats, timeline), records turns (history), and may
  * trigger consolidation that writes an insight (stats again). Invalidating individually would
- * let the top bar and the timeline disagree for a frame.
+ * let Review's state line and its timeline disagree for a frame.
  *
  * Shared between `useSendMessage` (the plain transport) and the SSE transport
  * (`AppScreen`'s `useInvalidateAfterTurn`) — the two must leave the cache in the same state, or
@@ -140,10 +147,10 @@ export function useMemoriesByDay(day: string | null) {
 function invalidateTurnDerivedQueries(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: queryKeys.stats });
   void queryClient.invalidateQueries({ queryKey: queryKeys.timeline });
-  // Today reads targets, both day totals, coverage, the newest insight and the recent strip —
+  // Review reads targets, both day totals, coverage, the newest insight and the recent strip —
   // an ingest turn can move every one of them at once, so it invalidates with the rest rather
   // than waiting for a remount.
-  void queryClient.invalidateQueries({ queryKey: queryKeys.today });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.review });
   // Prefix match across every cached day, the same reason the "turns" invalidation below is a
   // bare prefix: a new memory can land on a day whose list is already cached from an earlier
   // timeline click.
@@ -204,9 +211,9 @@ export function useUpdateProfile() {
     onSuccess: (profile) => {
       queryClient.setQueryData(queryKeys.profile, profile);
       // A profile edit can move a target (directly, or by recomputation after a weight change)
-      // and `weight_kg` writes a real memory — so Today's targets, weight and stats are all
+      // and `weight_kg` writes a real memory — so Review's targets, weight and stats are all
       // stale. Invalidated rather than patched: the server owns those numbers.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.today });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.review });
       void queryClient.invalidateQueries({ queryKey: queryKeys.stats });
     },
   });

@@ -1,38 +1,36 @@
 /**
  * Routes — DESIGN.md §6.13. Deliberately few, and that is the whole product.
  *
- * `/app/today` is the home briefing and `/app` is the conversation. The split is not arbitrary:
- * a brand-new account still lands in `/app` after onboarding, because Today has nothing to brief
- * on an empty history and the guided first turn is the live product experience (§9.1). A
- * returning sign-in goes to `/app/today`, which is where a user with memory should start.
+ * **Three destinations** (2026-08-13 IA revision, §16 Decisions Log): `/app` (Chat, and the
+ * default landing page for every account — "talk to your health memory" is the core promise),
+ * `/app/review` (the memory briefing), `/app/profile` (identity/goals/account). A brand-new
+ * account lands in `/app` after onboarding too, because the guided first turn is the live
+ * product experience (§9.1) — both entry points land on the same surface now.
  *
  * **Every route is lazy.** The landing page is the first paint a judge sees, and eagerly bundling
- * the app shell would make a marketing visitor download the glass box, the dialog primitives, and
- * the query layer before reading a headline. Splitting here is what keeps the initial chunk near
- * the §10 budget instead of over it — measured, not assumed.
+ * the app shell would make a marketing visitor download the glass box and the query layer before
+ * reading a headline. Splitting here is what keeps the initial chunk near the §10 budget instead
+ * of over it — measured, not assumed.
  *
  * The landing page stays inside this SPA rather than becoming a separate static page: a separate
  * page would paint faster still, but it would fork the design system into two places that drift,
  * and drift is what DESIGN.md exists to prevent.
  *
- * **`/app/profile` is two things, chosen by how you arrive** (§6.19/§16 Decisions Log,
- * 2026-08-12). It is always a real route — direct link, refresh, and mobile all render
- * `ProfileSettings` as a full page. But the top bar's account icon, on desktop, navigates there
- * carrying `state.backgroundLocation` (the screen you were already on); when that state is
- * present, `Routes` below renders the *background* location (chat/Today stays mounted,
- * untouched) and a second `Routes` renders `/app/profile` as `ProfileSettingsDialog` on top of
- * it — the standard React Router "modal route" recipe. Closing the dialog is `navigate(-1)`,
- * which pops back to that same background location rather than a fresh navigation to `/app`.
+ * **`/app/profile` is a plain route, on every breakpoint.** Through 2026-08-12 the top bar's
+ * account icon opened it as a dialog over the current screen on desktop (`state.backgroundLocation`
+ * plus a second layered `Routes`, the React Router "modal route" recipe). That is retired: Profile
+ * is now a primary nav destination reached from the top bar like Chat or Review (§6.19/§6.13), and
+ * a primary destination is navigated to, not popped open over another screen.
  */
 
 import { Suspense, lazy } from "react";
-import { Route, Routes, useLocation, type Location } from "react-router";
+import { Route, Routes } from "react-router";
 
 const Landing = lazy(() => import("./routes/Landing").then((m) => ({ default: m.Landing })));
 const AppScreen = lazy(() =>
   import("./routes/AppScreen").then((m) => ({ default: m.AppScreen })),
 );
-const Today = lazy(() => import("./routes/Today").then((m) => ({ default: m.Today })));
+const Review = lazy(() => import("./routes/Review").then((m) => ({ default: m.Review })));
 const AuthScreen = lazy(() =>
   import("./routes/AuthScreen").then((m) => ({ default: m.AuthScreen })),
 );
@@ -42,9 +40,6 @@ const Onboarding = lazy(() =>
 const ProfileSettings = lazy(() =>
   import("./routes/ProfileSettings").then((m) => ({ default: m.ProfileSettings })),
 );
-const ProfileSettingsDialog = lazy(() =>
-  import("./routes/ProfileSettingsDialog").then((m) => ({ default: m.ProfileSettingsDialog })),
-);
 const NotFound = lazy(() => import("./routes/NotFound").then((m) => ({ default: m.NotFound })));
 
 /** Deliberately blank, not a spinner. These chunks resolve in tens of milliseconds on a warm
@@ -52,27 +47,18 @@ const NotFound = lazy(() => import("./routes/NotFound").then((m) => ({ default: 
 const RouteFallback = () => <div className="min-h-dvh bg-background" />;
 
 export default function App() {
-  const location = useLocation();
-  const backgroundLocation = (location.state as { backgroundLocation?: Location } | null)
-    ?.backgroundLocation;
-
   return (
     <Suspense fallback={<RouteFallback />}>
-      <Routes location={backgroundLocation ?? location}>
+      <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/app" element={<AppScreen />} />
-        <Route path="/app/today" element={<Today />} />
+        <Route path="/app/review" element={<Review />} />
         <Route path="/app/profile" element={<ProfileSettings />} />
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/login" element={<AuthScreen mode="login" />} />
         <Route path="/signup" element={<AuthScreen mode="signup" />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
-      {backgroundLocation && (
-        <Routes>
-          <Route path="/app/profile" element={<ProfileSettingsDialog />} />
-        </Routes>
-      )}
     </Suspense>
   );
 }

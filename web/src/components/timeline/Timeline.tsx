@@ -2,10 +2,11 @@
  * The timeline strip — DESIGN.md §6.8, §6.15 ("density bars", one of the two hand-rolled chart
  * types this product has).
  *
- * Permanent, full width, sits directly under the top bar. Rule 7 confines `--signal` to a fixed
- * list that includes "insight caps in the timeline" — nothing else here may use it, which is why
- * a day's bar is `--faint`/`--muted-foreground` and only the 2px insight cap and the `now` marker
- * are signal-colored.
+ * **Scoped to Review only** since the 2026-08-13 IA revision (§6.20, §16 Decisions Log) — it no
+ * longer renders globally above every screen; `routes/Review.tsx` is its one mount now. Rule 7
+ * confines `--signal` to a fixed list that includes "insight caps in the timeline" — nothing
+ * else here may use it, which is why a day's bar is `--faint`/`--muted-foreground` and only the
+ * 2px insight cap and the `now` marker are signal-colored.
  *
  * Hand-rolled SVG per §12 rule 12 ("no chart library"): a generic chart library fights exact
  * token control, and this needs it for the graph-rule background and the signal cap alone.

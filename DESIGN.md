@@ -28,8 +28,18 @@ per §13). Remaining work is hardening, not new UI surface — see the end of th
 | **M6** | Live engine pane: SSE stage narration with an automatic plain-transport fallback |
 | **M7** | Timeline strip: density bars, changepoint caps, mobile weekly bucketing, click-to-scrub |
 | **M8** | Insight lineage: the text list (§13's designated shipped form; the graph stays cut) |
-| **Profile** | `/onboarding` + `/app/profile` (§6.19, [ADR-17](docs/office-hours/09-decisions.md#adr-17)) — one-screen intake after signup and a Profile & goals settings screen; activates `user_profile` as a current-state cache with `profile_change` history, and adds `compute_targets` — the engine-computed nutrition targets Today (below) now also reads |
-| **Today** | `/app/today` (§6.20) — the home briefing. First surface added *after* the M4–M8 build order, from the 2026-08-12 competitive research (P0 #1) |
+| **Profile** | `/onboarding` + `/app/profile` (§6.19, [ADR-17](docs/office-hours/09-decisions.md#adr-17)) — one-screen intake after signup and a Profile & goals settings screen; activates `user_profile` as a current-state cache with `profile_change` history, and adds `compute_targets` — the engine-computed nutrition targets Review (below) now also reads. **As of the 2026-08-13 IA revision, `/app/profile` is a primary nav destination and a plain full page on every breakpoint** — the dialog-over-background variant described further down this table's history is retired; spec is current in §6.19, implementation pending. |
+| **Review** | `/app/review` (§6.20) — the memory briefing, renamed and rebuilt from Today by the 2026-08-13 IA revision (below). Spec is current in §6.20; implementation pending. |
+
+**IA revision approved 2026-08-13, implementation not yet started.** Today, its shared global
+sidebar/account-menu, and the global timeline strip are superseded by the three-destination IA in
+§6.13/§6.19/§6.20/§6.21: Chat is now home, Review replaces Today at `/app/review` and drops its
+composer, Profile becomes a primary nav destination and a plain full page, and the timeline and
+chat-history sidebar are scoped to the surfaces that actually need them instead of rendering
+globally. The build itself — new route, component moves, the `AppScreen`/`Today` restructure —
+has not happened yet; everything below this note describes the shipped code as of 2026-08-12,
+which the revision above will change. Rationale for the whole revision is recorded in §16's
+2026-08-13 entries.
 
 **Today shipped 2026-08-12** (commit `8aed61a`), the first new product surface since M8 and the
 first driven by competitive research rather than the original build order. It answers "how am I
@@ -443,7 +453,7 @@ radius-xs    2px   badges, chips, provenance tags
 radius-sm    4px   buttons, inputs, selects
 radius-md    6px   cards, evidence rows
 radius-lg    8px   panes, dialogs, drawers
-radius-full  9999  avatar, account row's identity glyph ONLY (amended 2026-08-12, §16)
+radius-full  9999  avatar ONLY (the account row's glyph exception, §16 2026-08-12, is retired 2026-08-13)
 ```
 
 Nothing else is ever a pill. A pill-shaped button is a bug.
@@ -499,14 +509,13 @@ moves.
 
 ### 5.7 Grid and layout
 
-**App (wireframe v5 — thread sidebar moved under the header/timeline 2026-08-09, §16), desktop
-≥1280px:**
+**App (wireframe v6 — timeline moved into Review, sidebar scoped to Chat only, 2026-08-13 IA
+revision, §16), desktop ≥1280px. This is Chat's layout; Review and Profile are the single-column
+layout described in §6.20/§6.19, with nothing to either side:**
 
 ```
 ┌───────────────────────────────────────────────────────────┐
-│ top bar                          56px   mark · stats · acct│
-├───────────────────────────────────────────────────────────┤
-│ timeline strip                   72px   full width          │
+│ top bar                    56px   mark · Chat Review Profile│
 ├────────────┬────────────────────────────────┬──────────────┤
 │  sidebar   │ conversation                   │ memory engine│
 │  272px     │ minmax(560px, 1fr)             │ 420px fixed  │
@@ -516,8 +525,12 @@ moves.
 └────────────┴────────────────────────────────┴──────────────┘
 ```
 
-The sidebar is a **peer of the conversation and the engine pane, below the top bar and timeline**
-— not the ChatGPT-style full-viewport-height column wireframe v4 specified. It is fixed at
+There is no timeline row above this layout anymore — it rendered globally through 2026-08-13 and
+is now scoped to Review only (§6.20), where memory density has context (targets, insights,
+coverage) instead of sitting above every screen regardless of relevance.
+
+The sidebar is a **peer of the conversation and the engine pane, below the top bar**, holding
+**Chat history only** — it does not render on Review or Profile at all (§6.13). It is fixed at
 **272px** and collapsible (a handle on its own border, same mechanism as the pane's), never a
 drawer on desktop.
 
@@ -545,11 +558,16 @@ section may break the grid to full-bleed; nothing else may.
 
 Tailwind defaults are kept as tokens, but only three transitions are *designed*:
 
+**Everything below is Chat's layout** (sidebar + conversation + engine pane). Review and Profile
+are single-column and full-width at every breakpoint — there is no drawer, collapse, or column
+behavior to specify for them; the responsive concern for both is simply "the column reflows,"
+which needs no table.
+
 | Range | Name | Layout |
 |---|---|---|
-| < 768px | **mobile** | Single column. Conversation full-width. Engine pane becomes a **right-side drawer** (amended 2026-08-09 from an original bottom sheet — §16) opened by tapping a citation chip or the pane handle; the thread sidebar (added 2026-08-09, §16) becomes a **left-side drawer** the same way, opened by its own handle. Timeline collapses to a horizontally scrollable rail. Top-bar stats collapse to a single count with a tap-to-expand sheet. |
-| 768–1279px | **tablet** | Two columns. Conversation + engine pane, but the pane is **collapsible** and defaults closed in portrait, open in landscape. The sidebar is a drawer at this width too, same as mobile — three simultaneous fixed-width columns (272 + conversation + 420) is a desktop-only claim. Timeline full width, reduced to 48px. |
-| ≥ 1280px | **desktop** | Full four-region layout above (sidebar, top bar/timeline/conversation, engine pane). |
+| < 768px | **mobile** | Single column. Conversation full-width. Engine pane becomes a **right-side drawer** (amended 2026-08-09 from an original bottom sheet — §16) opened by tapping a citation chip or the pane handle; the thread sidebar (added 2026-08-09, §16) becomes a **left-side drawer** the same way, opened by its own handle. |
+| 768–1279px | **tablet** | Two columns. Conversation + engine pane, but the pane is **collapsible** and defaults closed in portrait, open in landscape. The sidebar is a drawer at this width too, same as mobile — three simultaneous fixed-width columns (272 + conversation + 420) is a desktop-only claim. |
+| ≥ 1280px | **desktop** | Full three-region layout above (sidebar, conversation, engine pane), below the top bar. |
 
 **The mobile decision is load-bearing and was made now, not later.** There is no honest way to show
 three panes on a 390px screen. Retrofitting this at M7 would mean rewriting every component; it is
@@ -575,9 +593,10 @@ chat UI breaks, so it is specified:
   2026-08-09], but dismissing the keyboard on open is still correct: it's still an overlay
   competing for the same viewport.)
 
-**The timeline rail at 390px** covers a full history in ~340px of scrollable width, so a
-300-day account cannot render one bar per day (≈1px each, unreadable and untappable). Below
-768px the rail **buckets by week**, keeps changepoint markers at full size as the primary
+**The timeline rail at 390px** (now inside Review, §6.20 — it no longer renders on Chat) covers a
+full history in ~340px of scrollable width, so a 300-day account cannot render one bar per day
+(≈1px each, unreadable and untappable). Below 768px the rail **buckets by week**, keeps
+changepoint markers at full size as the primary
 affordance, and remains horizontally scrollable with the `now` marker pinned right. Density is
 still legible; the resolution is honestly lower.
 
@@ -836,35 +855,45 @@ use a toast for a validation error.
 
 ### 6.13 Navigation
 
-This product is deliberately **navigation-light**. It carries **two** product surfaces and no
-more: `Today` (the briefing, §6.20) and `Chat` (the conversation, §9). No sidebar of sections, no
-nested routing beyond those two, and nothing that reads as a dashboard tab bar.
+**Revised 2026-08-13** (§16 Decisions Log) — this section previously carried two surfaces (Today,
+Chat) with Today as the post-login landing page and a global sidebar/timeline shared by both. A
+usability pass found that arrangement reading as a conventional fitness dashboard rather than an
+evidence-first memory product: a permanent global timeline, a conversation-history sidebar bleeding
+into non-chat screens, and stacked competing sections. The IA below replaces it. It is still
+**navigation-light** — three destinations, a stated ceiling per the same 2026-08-12 competitive
+read (median mature product runs three to five; Oura shipped a redesign *removing* two) — but each
+surface now owns only what it needs, instead of every surface carrying the same global chrome.
 
-**Amended 2026-08-12** (§16 Decisions Log) — this section previously read "one screen plus
-marketing and auth… no tab bar". Today made that false, and the count is now a stated ceiling
-rather than an accident: the competitive read (§16) found the median mature product runs three to
-five primary items and Oura shipped a redesign *removing* two. Two is where this product stops
-until a surface earns a third.
+**Three product surfaces, and no more:** `Chat` (the conversation, §9 — the default/home
+experience), `Review` (the memory briefing, §6.20), `Profile` (§6.19). No sidebar of sections, no
+nested routing beyond those three, nothing that reads as a dashboard tab bar.
 
-**Top bar (56px):** mark + wordmark (left) · **primary nav** (Today · Chat) · stats in mono
-(center-right) · connection indicator (right). The nav renders as a 1px bottom border on the
-active item — never a filled pill or a chip row, which at 56px reads as chrome competing with
-the stats beside it. The connection indicator is three 4px dots showing CockroachDB health:
-`--faint` idle, `--signal` on active query, `--invalid` on error. It is the top bar's one piece
-of ornament and it is functional. **No account controls live here** (amended 2026-08-12, §16
-Decisions Log, twice the same day): a `Profile` text button, then a circular account icon,
-briefly stood in for them; both are gone now, moved to the account row at the bottom of the left
-sidebar (§6.21) — explicit instruction, ChatGPT's own sidebar footer as the reference.
+**Top bar (56px):** mark + wordmark, linked to Chat (left) · **primary nav** (Chat · Review ·
+Profile) · connection indicator (right). The nav renders as a 1px bottom border on the active
+item — never a filled pill or a chip row, which at 56px reads as chrome competing with the stats
+beside it. The connection indicator is three 4px dots showing CockroachDB health: `--faint` idle,
+`--signal` on active query, `--invalid` on error. It is the top bar's one piece of ornament and it
+is functional. **The mono stats readout (`memories · days · insights`) no longer lives here** —
+moved to Review's state line (§6.20): ambient database counts on every screen, including Chat, is
+exactly the kind of always-on dashboard furniture this revision removes. **No account controls
+live here either** — Sign out now lives inside Profile's Account section (§6.19), since Profile is
+a primary destination rather than something reached through a popover.
 
-Routes: `/` (landing), `/app/today` (§6.20), `/app` (the conversation), `/app/profile` (§6.19),
-`/onboarding` (§6.19), `/login`, `/signup`. That is all — `/app/profile` is still exactly one
-route; §6.19 covers how it renders differently by device and entry point.
+The top bar itself is identical on all three surfaces and at every breakpoint — one nav idiom,
+never a bottom tab bar — but **what renders below it is not**: Chat alone gets the conversation-
+history sidebar (§9); Review and Profile are single-column, full-width, with nothing to their
+left or right.
 
-**Where each entry point lands, and why they differ.** Login → `/app/today`: a returning account
-has memory, and the briefing is what someone opening the app wants before they have a question.
-Signup → `/onboarding` → `/app`: a brand-new account has nothing to brief, and the guided first
-turn (§9.1) *is* the live product experience under ADR-13.4. The asymmetry is the product
-behaving correctly, not an inconsistency to tidy up.
+Routes: `/` (landing), `/app` (the conversation, now the default landing page), `/app/review`
+(§6.20, renamed from `/app/today`), `/app/profile` (§6.19, now a plain full-page route on every
+breakpoint), `/onboarding` (§6.19), `/login`, `/signup`.
+
+**Where each entry point lands.** Login → `/app`: **"talk to your health memory" is the core
+promise, so Chat is home for every returning account, not a briefing.** Signup → `/onboarding` →
+`/app`: unchanged — a brand-new account has nothing to brief either way, and the guided first turn
+(§9.1) *is* the live product experience under ADR-13.4. Both paths now land on the same surface;
+the asymmetry that used to exist between them is gone, because Review is no longer the thing either
+path lands on.
 
 ### 6.14 Icons
 
@@ -1018,76 +1047,78 @@ sets `onboarded_at`. No field blocks it, and skipping never revisits the user wi
 account behaves exactly as an unskipped one with fewer inputs, same as every other honest-empty
 state in this product (§6.9).
 
-**`/app/profile` — Profile & goals.** Reached from the account row at the bottom of the left
-sidebar (§6.21) — "Settings" in that row's menu. The content — sections Identity, Goals, Nutrition targets, Dietary preferences & allergies,
+**`/app/profile` — Profile & goals.** **Revised 2026-08-13** (§16 Decisions Log): Profile is now
+one of the product's three primary nav destinations (§6.13), reached by clicking "Profile" in the
+top bar like Chat or Review — not through an account-menu popover. It is a **plain full-page
+route on every breakpoint**, full-width, no sidebar — the desktop dialog-over-background variant
+(`ProfileSettingsDialog`, 2026-08-12) is retired along with the `state.backgroundLocation`
+mechanism that produced it, since a primary destination is something you navigate to, not
+something you pop open over another screen. Direct link, refresh, and top-nav click all render
+the same page.
+
+The content — sections Identity, Goals, Nutrition targets, Dietary preferences & allergies,
 Injuries/notes, and a closing explainer line: *"Your protein target uses your weight, activity
 level, and goal. Changing it here only affects targets going forward — past days are judged
-against the target that was active then."* — is identical whichever surface renders it
-(`ProfileSettingsContent`, shared by both below), because that sentence is not decoration; it is
-the user-facing statement of the historical-integrity rule ADR-17 enforces structurally
-(`profile_change` history).
+against the target that was active then."* — is unchanged (`ProfileSettingsContent`), because
+that sentence is not decoration; it is the user-facing statement of the historical-integrity rule
+ADR-17 enforces structurally (`profile_change` history).
+
+**A sixth section, Account, is new.** Bottom of the page, below Injuries/notes: the signed-in
+email and a `secondary` "Sign out" button — the only place Sign out exists now that the global
+sidebar (and its account-menu popover, formerly §6.21) is scoped to Chat and no longer renders on
+every screen. No confirmation dialog; signing out is reversible (sign back in) and low-cost to get
+wrong, unlike the destructive confirmations §6.5 reserves a dialog for.
 
 Editing **current weight** here submits through the same path as logging it in chat — a new
 `weight` memory, not a mutated field — so the input control is intentionally styled like a
 compact log entry ("log a new weight"), not a settings field, to avoid implying it overwrites
 something.
 
-**Two renderings of the one route, chosen by device (amended 2026-08-12, §16 Decisions Log).**
-`/app/profile` is a real route either way — direct link, refresh, and a page that renders full
-regardless of history — but *how you arrive* changes what you see:
-
-- **Desktop (≥1024px).** Clicking "Settings" navigates carrying `state.backgroundLocation` (the
-  screen you were already on). `App.tsx` reads that and renders Profile as a **dialog** over the
-  unchanged background — chat or Today stays mounted, scroll position and any in-flight state
-  intact — mirroring how ChatGPT and Claude open settings on web. `Esc`, the backdrop, or the `×`
-  all close it back to that exact background, never a fresh navigation to `/app`. Base UI
-  `Dialog`, `--surface-3`, `radius-lg`, `--shadow-overlay` (§6.5) — but **560px wide, not 480**:
-  §6.5's cap was sized for confirmations, and a five-section settings form at 480px would force
-  wrapping on every row this screen's two-column fields use. The body scrolls independently
-  (`max-h-85vh`) so the fixed title bar and its close control never leave the viewport on a short
-  laptop screen.
-- **Mobile/tablet (<1024px).** There is no honest way to float a modal over a phone-width
-  screen — it would just be the screen again, badly — so "Settings" navigates plainly and
-  `ProfileSettings` renders as its own full page, exactly the layout described above, with the
-  same `Logo` + `Back` header `/onboarding` uses.
-
 **Rules.** Every required field carries a visible label (§6.17's placeholder-as-label ban
 applies here too). The suggested-target line always reflects the *current* form state, live,
 without a submit round-trip — it is pure client-side arithmetic mirroring `engine/profile.py`'s
-formula, confirmed by the server response after submit. No field on either screen collects
-anything from §13's medical-history/phone/address/wearable-credentials "should not collect" list.
+formula, confirmed by the server response after submit. No field collects anything from §13's
+medical-history/phone/address/wearable-credentials "should not collect" list.
 
-### 6.20 Today *(added 2026-08-12, research P0 #1)*
+### 6.20 Review *(renamed and rebuilt from Today, 2026-08-13 IA revision, §16)*
 
-`/app/today`. The home screen, and **a briefing, not a dashboard** — the banned word (§16) applies
-here with more force than anywhere else, because this is the surface that most invites the
-category default.
+`/app/review`. **Not a dashboard, and not a briefing either now** — Today's job ("how am I doing
+right now") belonged to a screen that was also the product's landing page. Review answers a
+different question, because it no longer has to double as home: **"What is happening in my health
+memory, and what has changed?"** Chat is home (§6.13); Review is where you go to see the memory
+system itself, on your own schedule, not on every login.
 
-**Why the category's hierarchy is unavailable to us.** Every product studied (MyFitnessPal,
-Google Health, WHOOP, Oura, Apple Health) fills 8 AM with *data collected while the user slept* —
-a sleep score, a recovery number, a readiness dial. AyuMind has no overnight sensor, so copying
-that opening would mean inventing the numbers. Today leads with **continuity** instead, which is
-the one thing a memory product has and a sensor product does not: how much memory exists, where
-you stood when we last measured, and one way to change it.
+**Why the category's hierarchy is still unavailable to us.** Every product studied (MyFitnessPal,
+Google Health, WHOOP, Oura, Apple Health) opens with *data collected while the user slept* — a
+sleep score, a recovery number, a readiness dial. AyuMind has no overnight sensor, so copying that
+opening would mean inventing the numbers. Review leads with **continuity** instead, which is the
+one thing a memory product has and a sensor product does not: how much memory exists, what changed
+since you last looked, and the receipts behind both.
 
 **Order, and nothing may invert it:**
 
 | # | Zone | Job |
 |---|---|---|
-| 1 | **State line** | The thesis in one sentence. Days of memory · memory count · yesterday's protein against target · coverage. Every figure from `GET /api/today`. |
-| 2 | **Targets** | Two — protein and energy. Never four. |
-| 3 | **Composer** | The primary action. Above the fold at 390×844 (measured: ~450px above it). |
-| 4 | **What changed** | The newest active insight, or *absent entirely*. |
+| 1 | **State line** | The thesis in one sentence, plus the memory-system counts formerly in the top bar: memory count · days · insight count · coverage. Every figure from the engine. |
+| 2 | **Memory-density timeline** | The strip formerly global to the whole app (§5.7/§5.8), now scoped here, where density has context instead of sitting above every screen. Click-to-scrub still opens Chat's day view (§9), via the same `location.state` hand-off Today used. |
+| 3 | **Since your last review** | Active insights flagged since the stored `lastReviewedAt` marker (client-side, `localStorage` — no new backend field for this revision; see the note below). Reuses the insight lineage cards from §9's glass-box interactions, not a new component. |
+| 4 | **Targets** | Two — protein and energy, current values against target. Never four. |
 | 5 | **Recently logged** | Receipts, and the way into the day view. |
 
-**The four-state target rule.** A `TargetBar` has four states, and collapsing any pair is the bug
-the component exists to prevent: *nothing logged* renders `— / 150 g` with an empty rail and the
-words "nothing logged yet"; *a real logged zero* renders `0 / 150 g`; *a value with no target*
-renders the number alone; *neither* points at Profile. At 8 AM the first row is the normal case,
-which is exactly why it must not look like failure. A red ring at zero is the reflex this refuses.
-Backed by contract: `GET /api/today` sends `value: null`, never `0`, and carries `has_data`
-explicitly — `value === 0` and `value === null` are both falsy in JS, and that is precisely how a
-fabricated zero reaches the most-seen screen in the product.
+**Review has no composer and no send path.** Today's composer existed because Today was the
+landing page and needed a fast way to send a message without navigating away. Chat is the landing
+page now, so that shortcut is gone along with the `state.draft` hand-off that supported it — one
+fewer entry point into the turn pipeline to keep synchronized. The day-view hand-off (`state.day`)
+stays: clicking a timeline day, an insight, or a memory row still opens that day in Chat's evidence
+pane, exactly as before.
+
+**The four-state target rule** (unchanged from Today). A `TargetBar` has four states, and
+collapsing any pair is the bug the component exists to prevent: *nothing logged* renders
+`— / 150 g` with an empty rail and the words "nothing logged yet"; *a real logged zero* renders
+`0 / 150 g`; *a value with no target* renders the number alone; *neither* points at Profile.
+Backed by contract: the endpoint sends `value: null`, never `0`, and carries `has_data` explicitly
+— `value === 0` and `value === null` are both falsy in JS, and that is precisely how a fabricated
+zero would reach the screen.
 
 **No color encodes progress.** Bar fill is `--muted-foreground` on a `--surface-3` rail — the same
 meaning-free neutral `ConfidenceMeter` uses, legible in grayscale. Rule 4 stands: `--signal` means
@@ -1097,14 +1128,19 @@ meaning-free neutral `ConfidenceMeter` uses, legible in grayscale. Rule 4 stands
 language, not two. The card shows `flagged` (the insight's `created_at`) *separately* from the
 window the claim is about: the bi-temporal argument is invisible unless both clocks are on screen.
 
-**It owns no machinery of its own.** The composer hands its message to `/app` via `location.state`
-and `AppScreen` sends it through the same graph every turn uses; clicking a memory or an insight
-opens the day view the timeline strip already owns (§9). One turn pipeline, one day-view renderer.
-A second diary here would fork the definition of "a day" between two screens.
+**"Since your last review" is a client-side marker, not a new backend field.** `lastReviewedAt` is
+written to `localStorage` on visiting `/app/review` and read on the next visit to filter which
+insights count as "since." This is a deliberate, stated trade for this revision: it doesn't sync
+across devices and resets if storage is cleared, which is acceptable for a hackathon single-session
+demo and revisitable later (a real `last_reviewed_at` column) if that gap becomes a concrete
+problem — not before.
 
-**It shows its work.** Today asserts figures nobody asked for, so it carries the same
-`RetrievalQueries` disclosure a turn does — the five statements that produced every number
-(ADR-12). This is the reason the endpoint returns its `RetrievalStep`s at all.
+**It owns no machinery of its own**, same principle as Today: it renders what the engine returns
+and hands off navigation (day view) to Chat rather than growing a second day-view renderer. A
+second diary here would fork the definition of "a day" between two screens.
+
+**It shows its work.** Review asserts figures nobody asked for, so it carries the same
+`RetrievalQueries` disclosure a turn does — the statements that produced every number (ADR-12).
 
 **Explicitly not on this screen:** sleep, recovery, readiness, stress, HRV, steps, water (no
 sensor — each would be fabrication); habit grids, streak flames, badges, celebrations,
@@ -1116,41 +1152,25 @@ Weight is a line with a date, not a card.
 five competitors ship streaks and it plainly works for them; it cannot work here, because §1
 defines this product *against* rings and green checkmarks. Same user need, opposite framing.
 
-### 6.21 Account menu *(added 2026-08-12, §16 Decisions Log — supersedes the same-day top-bar icon)*
+### 6.21 Chat history sidebar *(retitled 2026-08-13, §16 — supersedes "Account menu")*
 
-The account entry point, and the whole of "settings" this product has. Bottom of the left
-sidebar — `AccountMenu.tsx` — explicit instruction, a screenshot of ChatGPT's own sidebar
-footer as the reference. No account controls remain in the top bar (§6.13).
+**The account menu described here through 2026-08-12 is retired.** Its two items split: "Settings"
+was already just a navigation to Profile, which is now reached directly from the top nav (§6.13);
+"Sign out" moved into Profile's new Account section (§6.19). Neither needs a popover anymore, and
+the sidebar itself is no longer the right place to anchor account controls, because the sidebar is
+no longer global.
 
-**Anatomy.** One row, `border-t` against the thread list above it: a 28px circular identity
-glyph (`radius-full`, rule 10's second sanctioned exception — there is no photo-avatar feature,
-so this stands in for one) plus the account's display name, or the plain word "Account" before
-onboarding sets one. Clicking it opens a Base UI `Menu` **above** the row — it sits at the
-bottom of its container, so up is the only place a menu can open — with exactly two items:
+**The sidebar is scoped to Chat only, reversing the 2026-08-12 "fixture of the whole product"
+decision.** `ThreadSidebarRail` rendered identically on `/app` and `/app/today` under that
+decision, mirroring a ChatGPT-style persistent rail; the 2026-08-13 usability pass found that
+exact persistence read as clutter on Review and Profile, where conversation history is not
+relevant. It now mounts only inside `AppScreen` (`/app`). Review and Profile render full-width,
+with no sidebar column and no collapse handle to account for in their layouts.
 
-```
-[○] Aditya                                row, --surface hover
-  ┌──────────────────┐
-  │ ⚙ Settings         │  →  Profile & goals (§6.19)
-  │ ⏻ Sign out          │
-  └──────────────────┘
-```
-
-`--surface-3`, `radius-md`, `--shadow-popover` (not `--shadow-overlay` — that token is for
-dialogs/drawers, §6.5; a menu this small does not carry that much weight). Items are `text-dense`
-with a 16px leading icon, `data-highlighted:bg-surface-2` on keyboard/pointer focus — no color
-change, matching every other hover treatment in this product.
-
-**The sidebar is now a fixture of the whole product, not one screen of it.** `ThreadSidebarRail`
-(extracted from `AppScreen` the same day) renders identically on `/app` and `/app/today` —
-ChatGPT's own layout, where the conversation rail persists everywhere rather than existing only
-inside the chat view. `Today` has no conversation state of its own (§6.20's "no machinery"
-rule), so its sidebar's "New chat" and thread clicks do exactly what its composer and day-view
-clicks already do: point `session/threadStore.ts` at the right thread and hand off to `/app`.
-
-**Sign out has no other home.** It was a top-bar `ghost`/`sm` button; that button is gone. This
-menu is the only place it exists now, on both surfaces, on every breakpoint (mobile gets the
-same row inside the sidebar drawer, §5.8's split).
+**Anatomy is otherwise unchanged**: "New chat" at the top, the thread list below, a collapse
+handle on desktop (≥1024px, `w-sidebar` ↔ `w-0`, same mechanism as the evidence pane's), a
+left-side drawer below that breakpoint. `Sidebar.tsx` / `SidebarDrawer.tsx` no longer render an
+account row at the bottom — the sidebar's only job now is conversation history.
 
 ---
 
@@ -1392,7 +1412,7 @@ never silently, and never mixed with trace rows in the same view.
 | Click an evidence row | Expands to full payload JSON in mono, with `radius-md` and a copy button |
 | Click `how this was retrieved` | Expands the executed SQL and vector queries in `<pre><code>`, with the parameter values shown |
 | Click an insight | Shows lineage: the hypothesis, its supporting memory IDs, its confidence, and its retraction condition. Lineage is **rendered, never cited** (Q1, resolved narrow) |
-| Click a timeline day | Scrubs the conversation to that date AND puts the engine pane into **day view**: every memory logged that day (a raw listing, not a retrieval trace — a bar has no query behind it), with a count and a "back to conversation" exit. Day view persists until a new turn is sent, a citation chip is clicked, or the exit is used |
+| Click a timeline day (in Review, §6.20 — the timeline no longer renders inside Chat) | Navigates to `/app` carrying `state.day`, which scrubs the conversation to that date AND puts the engine pane into **day view**: every memory logged that day (a raw listing, not a retrieval trace — a bar has no query behind it), with a count and a "back to conversation" exit. Day view persists until a new turn is sent, a citation chip is clicked, or the exit is used |
 | Hover a provenance tag | Tooltip: `live` = captured as it happened; `reconstructed` = rebuilt from records, with an estimated timestamp |
 
 ### Transitions
@@ -1410,7 +1430,6 @@ choreographed motion is the citation link. New evidence rows arriving via SSE fa
 | `Esc` | Close overlay / blur composer |
 | `⌘Enter` | Send (when the composer is multi-line) |
 | `E` | Toggle engine pane (tablet) / open drawer (mobile) |
-| `T` | Focus timeline |
 | `?` | Shortcut reference |
 | `↑` in empty composer | Edit last message |
 
@@ -1566,10 +1585,10 @@ Every component must satisfy all twenty. A review that finds a violation blocks 
 
 **Form**
 
-10. Radii come from the five-step scale. `radius-full` is for the avatar and nothing else — the
-    sidebar's account row (§6.21, amended 2026-08-12) is the one other exception, standing in
-    for a photo avatar this product does not have; it is the account's identity control, not a
-    decorative icon-in-a-circle.
+10. Radii come from the five-step scale. `radius-full` is for the avatar and nothing else. The
+    sidebar account row's identity glyph (§6.21, 2026-08-12) was a second sanctioned exception;
+    it is retired along with the account row itself in the 2026-08-13 IA revision — Profile's new
+    Account section (§6.19) is plain text and a button, no circular glyph.
 11. No shadows except `--shadow-overlay` and `--shadow-popover`, and only at depth 3. Cards do not
     lift; they change surface.
 12. No gradients. Anywhere. On anything.
@@ -1716,3 +1735,7 @@ Numbered `F-T*` to stay clear of the T1–T18 backlog in
 | 2026-08-12 | **`profile_change` excluded from Today's "Recently logged", alongside `insight`** | Found in the browser, not in review: `apply_profile_update` writes one memory per changed field, so a single onboarding submission filled four of the strip's eight rows with "activity level set to moderate" and buried a week of meals. `insight` was already excluded on the principle `Receipt` establishes — the user reported a meal, an insight is a claim the *engine* made — and a settings edit fails the same test from the other direction: it is a real memory and belongs in the profile history (ADR-17.1), but it is not a health event and it is not a useful way into a day of health data. The strip's job is receipts plus a browse affordance; both exclusions serve it. |
 | 2026-08-12 | **Profile & goals opens as a dialog on desktop, a full page on mobile — the top-bar control becomes a circular account icon** (§6.13, §6.19) | Explicit user instruction, referencing how ChatGPT/Claude web open settings. `/app/profile` stays one real route (direct link and refresh always render `ProfileSettings`, the full page), but the top bar's new account icon navigates carrying React Router's standard "modal route" state (`state.backgroundLocation`) on desktop only — `App.tsx` renders that background location's own route in one `<Routes>` and, when the state is present, `/app/profile` as `ProfileSettingsDialog` in a second `<Routes>` layered on top, so chat/Today stays mounted underneath rather than unmounting for the navigation. Closing is `navigate(-1)`, back to that exact background. Below `lg` the icon navigates plainly — there is no honest way to float a dialog over a phone-width screen, so mobile gets the same full page `/onboarding` already uses. Both surfaces render one shared `ProfileSettingsContent` (extracted from the former single-purpose `ProfileSettings.tsx`), so the form and its save logic cannot drift between them. The dialog widens §6.5's cap to 560px (not the 480px default) since this is a five-section form, not a confirmation, with an independently scrolling body so the title bar and close control never leave the viewport. The icon itself is the second sanctioned use of `radius-full` (rule 10, previously "avatar ONLY") — built as a plain `<button>` rather than through `Button`, because `Button`'s base classes always include `rounded-sm` and a `className` override cannot reliably win a same-property Tailwind collision (the exact footgun `Button.tsx`'s own `size="icon"` comment and the 2026-08-09 collapse-toggle entry above both already warn about). |
 | 2026-08-12 | **Account controls moved a second time the same day — top-bar icon → account row at the bottom of the sidebar** (§6.13, §6.21, supersedes the entry immediately above) | Explicit user instruction, a screenshot of ChatGPT's own sidebar footer as the reference: "the profile on ChatGPT is at bottom left, in left side bar... sign out should not be in header... click on profile name, it should expand to settings and signout." `AccountMenu.tsx` (Base UI `Menu`, `--shadow-popover` not `--shadow-overlay` — §6.21) sits at the bottom of the thread sidebar's `ThreadList`, so both the desktop column and the mobile drawer (`SidebarDrawer`) get it from one place. Its trigger opens "Settings" (routes through the exact §6.19 dialog/full-page split, unchanged) and "Sign out" (previously a top-bar `ghost` button, now with no other home). Top bar is stats/nav only again. **This required the thread sidebar to stop being Chat-only**: `ThreadSidebarRail` is `AppScreen`'s former inline sidebar-column-plus-toggle-handle JSX, extracted so `Today` (§6.20) can mount the identical rail — ChatGPT's own layout, one persistent rail across the whole product rather than a per-screen fixture. Today's "no machinery of its own" rule (§6.20) is not bent by this: its rail's "New chat"/thread-select handlers do exactly what its composer and day-view clicks already do — point `session/threadStore.ts` and hand off to `/app` — never touching a turn or a receipt themselves. Verified live against the real dev stack: TopBar carries neither control on either breakpoint, the sidebar's account row expands upward (correct, since it sits at the bottom of its container) to Settings/Sign out on both `/app` and `/app/today`, Settings still opens the dialog with chat/Today mounted underneath, and Sign out actually ends the session — 5/5 targeted Playwright checks plus a full re-run of both Definition-of-Done specs (15/15) after the `AppScreen`/`Today` restructure. |
+| 2026-08-13 | **IA revised to three destinations — Chat, Review, Profile — with the global sidebar and timeline scoped down, superseding the 2026-08-12 "fixture of the whole product" direction** | Explicit user instruction, following a usability read of the shipped product: a permanent global timeline above every screen, a conversation-history sidebar bleeding into non-chat surfaces, and stacked competing sections read as a conventional fitness dashboard, the opposite of the evidence-first identity §1–§3 define. Chat becomes home (`/app`, login lands here instead of `/app/today`) because "talk to your health memory" is the stated core promise, not a briefing. Today is renamed and rebuilt as Review (`/app/review`, §6.20): same engine data, but the composer and its `state.draft` hand-off are dropped (redundant once Chat is home), and it gains the relocated timeline and top-bar stats plus a "since your last review" framing over the insight list. Profile (§6.19) becomes a primary nav destination and a plain full page on every breakpoint, retiring the desktop dialog-over-background variant from two of 2026-08-12's four entries — a primary destination is navigated to, not popped open over another screen. The sidebar (§6.21, retitled from "Account menu") reverses to Chat-only. Net effect on the backend: none — every field this revision touches (`GET /api/today`'s shape, `GET /api/stats`, ADR-17's profile data model) is reused as-is; this is a frontend routing/composition change, matching the explicit instruction to preserve existing backend architecture absent a concrete problem with it. |
+| 2026-08-13 | **Sign out moves from the (now Chat-only) sidebar's account menu into a new Account section at the bottom of Profile** | Once Profile is a primary destination reached from the top nav rather than a popover, and the sidebar no longer renders on every screen, the account menu had nowhere non-arbitrary left to live. Profile's own content list already includes "account/settings," so Sign out becomes Profile's sixth section rather than a new persistent UI element — no confirmation dialog, since signing out is reversible and low-cost to get wrong, unlike the destructive confirmations §6.5 reserves a dialog for. |
+| 2026-08-13 | **Mobile keeps the top bar as its nav mechanism; no bottom tab bar** | Considered and rejected in favor of consistency: a bottom tab bar is the convention all five competitor apps studied use, but it would be a second nav idiom alongside the top bar every other screen (auth, landing, 404) already uses, and a new component this revision does not otherwise need. One idiom across every breakpoint was chosen over matching the category default. |
+| 2026-08-13 | **"Since your last review" is tracked client-side (`localStorage`), not a new backend field** | A `last_reviewed_at` column would be more correct across devices but is new engine work, and the brief's own instruction is to preserve the existing backend absent a concrete problem. `localStorage` is sufficient for a single-session hackathon demo; revisit with a real column only if cross-device drift becomes an actual reported problem, not preemptively. |

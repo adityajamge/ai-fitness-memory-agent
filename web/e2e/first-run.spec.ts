@@ -37,10 +37,6 @@ test.describe("first run", () => {
     await expect(page.getByRole("heading", { name: "Your memory starts here." })).toBeVisible();
     await expect(page.getByText("0", { exact: true }).first()).toBeVisible();
     await expect(page.getByRole("heading", { name: "Nothing retrieved yet." })).toBeVisible();
-    // The timeline strip (§6.8/M7) is the fourth designed empty state — same "day one" framing.
-    // `exact: true`: a substring match would also hit the conversation's "Your memory starts
-    // here." heading.
-    await expect(page.getByText("your memory starts here", { exact: true })).toBeVisible();
 
     // Example prompts must be real loggable text, not "Try asking about…" placeholders.
     await expect(page.getByRole("button", { name: /250g curd/ })).toBeVisible();
@@ -71,8 +67,12 @@ test.describe("first run", () => {
     // Step 6: the hand-off to asking, shown once.
     await expect(page.getByText(/now ask about it/)).toBeVisible();
 
-    // The timeline (M7) picks up the first bar the same moment stats tick and the pane fills —
-    // three surfaces confirming one action (§9.1 step 5).
+    // The timeline moved to Review in the 2026-08-13 IA revision (DESIGN.md §6.20) — it no
+    // longer renders inside Chat. Confirms both halves of that move: gone from Chat, present on
+    // Review, picking up the same first bar the receipt above just created.
+    await expect(page.getByRole("img", { name: /Memory timeline/ })).toHaveCount(0);
+    await page.getByRole("link", { name: "Review" }).click();
+    await expect(page).toHaveURL(/\/app\/review$/);
     await expect(page.getByRole("img", { name: /Memory timeline: 1 memor/ })).toBeVisible();
   });
 
@@ -81,14 +81,19 @@ test.describe("first run", () => {
   }) => {
     // §5.8: below 768px a months-long rail cannot render one bar per day in ~340px, so it
     // buckets by week and scrolls. This is the only test exercising that code path — everything
-    // else in this suite runs at the default desktop viewport.
+    // else in this suite runs at the default desktop viewport. The timeline lives on Review now
+    // (§6.20), not Chat, so this test logs on Chat and then checks the rail on Review.
     await page.setViewportSize({ width: 390, height: 844 });
     await signUp(page);
     await page.getByRole("button", { name: /250g curd/ }).click();
     await page.getByRole("button", { name: "Send message" }).click();
-    await expect(page.getByRole("img", { name: /Memory timeline: 1 memor/ })).toBeVisible({
+    await expect(page.getByText(/memory created|parsing incomplete/).first()).toBeVisible({
       timeout: 60_000,
     });
+
+    await page.getByRole("link", { name: "Review" }).click();
+    await expect(page).toHaveURL(/\/app\/review$/);
+    await expect(page.getByRole("img", { name: /Memory timeline: 1 memor/ })).toBeVisible();
 
     const results = await new AxeBuilder({ page })
       .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])

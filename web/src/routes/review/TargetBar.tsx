@@ -1,5 +1,5 @@
 /**
- * One target, one bar — the Today screen's most load-bearing honesty test.
+ * One target, one bar — Review's most load-bearing honesty test.
  *
  * There are **four** states here, not two, and collapsing any pair of them is the bug this
  * component exists to prevent:
@@ -11,7 +11,6 @@
  * | number   | `null`  | the number alone, no rail, no percentage.                   |
  * | `null`   | `null`  | the component's own empty state, pointing at Profile.       |
  *
- * At 8 AM the first row is the normal case, which is exactly why it cannot look like failure.
  * A red ring at zero would be the fitness-app reflex; this shows an empty rail and says so in
  * words, because "you have not eaten yet" is information, not a warning.
  *
@@ -111,7 +110,7 @@ export function TargetBar({ label, unit, metric, target, basis, isCustom }: Targ
       </div>
 
       {/* The basis is what stops a target being an unexplained number (§6.19). Rendered as a
-          `title` rather than always-on text: it is a long sentence, and Today is a briefing. */}
+          `title` rather than always-on text: it is a long sentence, and Review is a briefing. */}
       {target !== null && (basis || isCustom) && (
         <span className="text-meta text-faint" title={basis ?? undefined}>
           {isCustom ? "you set this" : "computed from your profile"}

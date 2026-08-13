@@ -1,12 +1,16 @@
 /**
- * The state line — the first thing on Today, and the product's thesis in one sentence.
+ * The state line — the first thing on Review, and the product's thesis in one sentence.
+ *
+ * Also carries the memory-system counts formerly shown in the global top bar (2026-08-13 IA
+ * revision — DESIGN.md §6.13/§6.20): ambient database counts belong on the screen whose job is
+ * "what's in memory," not on every screen including Chat.
  *
  * Two rules shape it:
  *
- * 1. **Every number comes from `GET /api/today`.** Nothing is computed here. The component
- *    chooses a *sentence shape* from which facts exist and drops the engine's figures into it;
- *    it never derives a figure, and there is no arithmetic in this file beyond one subtraction
- *    that the caption below spells out (`target − logged`, both server-supplied).
+ * 1. **Every number comes from the engine.** Nothing is computed here. The component chooses a
+ *    *sentence shape* from which facts exist and drops the engine's figures into it; it never
+ *    derives a figure, and there is no arithmetic in this file beyond one subtraction that the
+ *    caption below spells out (`target − logged`, both server-supplied).
  * 2. **It is not a greeting.** DESIGN.md §2's voice table rejects "Great job crushing your
  *    protein goals!" by name. This reads like a lab report opening: what we have, and where you
  *    stood last time we measured.

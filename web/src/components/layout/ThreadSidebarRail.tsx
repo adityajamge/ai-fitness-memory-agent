@@ -1,15 +1,14 @@
 /**
  * The thread sidebar as a self-contained rail — collapsible column on desktop, drawer below
- * `lg`, account row at the bottom (§6.21). Amended 2026-08-12 (§16 Decisions Log): extracted
- * out of `AppScreen` so `Today` can carry the exact same sidebar — ChatGPT's own layout, where
- * the conversation rail is a fixture of the whole product, not one screen of it. Today has no
- * conversation state of its own, so its `onSelectThread`/`onNewChat` just hand off to `/app`
- * (`session/threadStore.ts` + a navigation) — the same "Today has no machinery of its own"
- * pattern its composer and day-view clicks already use.
+ * `lg`. **Scoped to Chat only** since the 2026-08-13 IA revision (§6.21, supersedes the
+ * 2026-08-12 "fixture of the whole product" direction): `AppScreen` is now this component's only
+ * mount. It previously also rendered on Today (`/app/today`), un-deferred "multi-thread
+ * conversation UI" extracted out of `AppScreen` so the two screens could share one rail,
+ * ChatGPT-style — that direction is reversed now that Review and Profile are full-width with no
+ * sidebar at all (§6.13).
  *
- * Owns its own collapse/drawer/breakpoint state rather than lifting it to a shared store: each
- * mount (Today, Chat) gets independent state, so switching between the two screens does not
- * need to be threaded through anything global for a toggle this peripheral.
+ * Owns its own collapse/drawer/breakpoint state rather than lifting it to a shared store — there
+ * is only ever one mount now, but the pattern was cheap to keep as-is.
  */
 
 import { useEffect, useState } from "react";

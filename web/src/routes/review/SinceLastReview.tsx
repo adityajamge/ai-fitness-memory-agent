@@ -1,11 +1,17 @@
 /**
- * "What changed" — the newest active insight, or nothing at all.
+ * "Since your last review" — the newest active insight, gated to whether it is actually new.
+ *
+ * Renamed from Today's "What changed" in the 2026-08-13 IA revision (DESIGN.md §6.20, §16). The
+ * engine still only ever hands back one active insight, so "since last review" is implemented as
+ * a client-side gate in `Review.tsx`: the insight renders here only when its `created_at` is
+ * newer than the `lastReviewedAt` marker stored in `localStorage` on the previous visit (or
+ * always, on a first-ever visit). This component itself is unaware of that marker — it renders
+ * whatever `insight` it is handed, or nothing.
  *
  * **It renders only when an insight exists.** A heading over an empty box is the fastest way to
  * make a memory product look like it has no memory, so the absent case returns `null` and the
- * section simply is not there. That is deliberate and not an oversight: Today has other things
- * to say, and inventing a placeholder claim to fill a slot is the one thing this product cannot
- * do.
+ * section simply is not there. Review has other things to say, and inventing a placeholder claim
+ * to fill a slot is the one thing this product cannot do.
  *
  * Three properties of the engine's model are load-bearing on screen:
  *
@@ -27,13 +33,13 @@ import { ConfidenceMeter } from "@/components/glassbox/EvidenceRow";
 const DAY = { day: "numeric", month: "short" } as const;
 const DAY_YEAR = { day: "numeric", month: "short", year: "numeric" } as const;
 
-export interface WhatChangedProps {
+export interface SinceLastReviewProps {
   insight: TodayInsight | null;
-  /** Opens the day the claim's window ends on, in the conversation's evidence pane. */
+  /** Opens the day the claim's window ends on, in Chat's evidence pane. */
   onOpenDay: (day: string) => void;
 }
 
-export function WhatChanged({ insight, onOpenDay }: WhatChangedProps) {
+export function SinceLastReview({ insight, onOpenDay }: SinceLastReviewProps) {
   if (!insight || !insight.hypothesis) return null;
 
   const windowEnd = insight.window_end ? new Date(insight.window_end) : null;
@@ -44,12 +50,12 @@ export function WhatChanged({ insight, onOpenDay }: WhatChangedProps) {
   const dayKey = windowEnd ? windowEnd.toISOString().slice(0, 10) : null;
 
   return (
-    <section className="flex flex-col gap-3" aria-labelledby="what-changed">
+    <section className="flex flex-col gap-3" aria-labelledby="since-last-review">
       <h2
-        id="what-changed"
+        id="since-last-review"
         className="font-mono text-micro uppercase tracking-[0.08em] text-faint"
       >
-        What changed
+        Since your last review
       </h2>
 
       <div className="rounded-md border border-border bg-surface p-4">

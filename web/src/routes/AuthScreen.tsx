@@ -74,11 +74,11 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
       // the guided first turn — onboarding is a signup follow-up, not a gate re-enforced on
       // every session, and "Skip for now" means skipping stays skipped.
       //
-      // Login lands on **Today**, not the conversation: a returning account has memory, and the
-      // briefing is what someone opening the app wants to see before they have a question. A
-      // brand-new account goes the other way (via /onboarding → /app) because Today has nothing
-      // to brief on an empty history.
-      navigate(mode === "signup" ? "/onboarding" : "/app/today", { replace: true });
+      // Login lands on **Chat**, same as signup → onboarding does (2026-08-13 IA revision,
+      // §6.13): "talk to your health memory" is the core promise, so Chat is home for every
+      // account, not a briefing. The asymmetry that used to exist here (returning accounts to
+      // Today, new accounts to Chat) is gone — both paths land on the same surface now.
+      navigate(mode === "signup" ? "/onboarding" : "/app", { replace: true });
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 409) {

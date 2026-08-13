@@ -1,7 +1,9 @@
 /**
- * Profile & goals — DESIGN.md §6.19, ADR-17. Amended 2026-08-12 (§16 Decisions Log): desktop
- * reaches this over the app as a dialog (`ProfileSettingsDialog`), mobile as this full page —
- * `ProfileSettingsContent` below is the shared body both render, so the two surfaces cannot drift.
+ * Profile & goals — DESIGN.md §6.19, ADR-17. **Revised 2026-08-13** (§16 Decisions Log): Profile
+ * is now a primary nav destination (§6.13), reached from the top bar like Chat or Review — always
+ * a plain full page, on every breakpoint. The desktop dialog-over-background variant
+ * (`ProfileSettingsDialog`, 2026-08-12) is retired: a primary destination is navigated to, not
+ * popped open over another screen.
  *
  * **Composed of memoized sections** (fixed 2026-08-13, `routes/profile/*Section.tsx`): this
  * component owns every field's state — it has to, `preview` and `handleSave` both need values
@@ -22,9 +24,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
+import { logout } from "@/api/client";
 import { useProfile, useUpdateProfile } from "@/api/queries";
-import { Logo } from "@/components/Logo";
+import { TopBar } from "@/components/layout/TopBar";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import {
@@ -45,8 +48,11 @@ import { InjuriesSection } from "./profile/InjuriesSection";
 import { NutritionTargetsSection } from "./profile/NutritionTargetsSection";
 
 /**
- * The form itself — no page chrome, so it can sit inside either a full page (`ProfileSettings`,
- * mobile) or a dialog popup (`ProfileSettingsDialog`, desktop) with the exact same behavior.
+ * The form itself — no page chrome, kept separate from `ProfileSettings` below so the fields and
+ * their save logic have exactly one implementation. (Through 2026-08-12 this separation also let
+ * a desktop dialog and the mobile full page share it without drift; the dialog is retired now
+ * that Profile is a primary full-page destination on every breakpoint, but the split was cheap
+ * to keep.)
  */
 export function ProfileSettingsContent() {
   const profile = useProfile();
@@ -310,31 +316,62 @@ export function ProfileSettingsContent() {
   );
 }
 
-/** The full-page surface — reached directly (mobile: the icon navigates here plainly; desktop:
- * a direct link or a page refresh while the dialog is open) rather than as an overlay. */
-export function ProfileSettings() {
+/** The account section, at the bottom of the page (§6.19/§16, 2026-08-13) — the only place Sign
+ * out exists now that the sidebar (and its account-menu popover, formerly §6.21) is scoped to
+ * Chat and no longer renders on every screen.
+ *
+ * Shows `display_name` rather than email: the client has no endpoint that returns the signed-in
+ * account's email outside the one-time signup/login response, and adding one would be new backend
+ * surface for a label — this revision is explicitly scoped to reusing what already exists. */
+function AccountSection() {
   const navigate = useNavigate();
+  const profile = useProfile();
+  const [isSigningOut, setSigningOut] = useState(false);
+
+  async function handleSignOut() {
+    setSigningOut(true);
+    await logout();
+    navigate("/login", { replace: true });
+  }
 
   return (
-    <main className="relative min-h-dvh overflow-hidden">
-      <div className="relative flex min-h-dvh justify-center px-6 py-12 md:px-[max(6vw,48px)]">
-        <div className="w-full max-w-[560px]">
-          <div className="flex items-center justify-between">
-            <Link to="/app" aria-label="Back to AyuMind" className="inline-block">
-              <Logo size={20} animated={false} glowStrength={0} />
-            </Link>
-            <Button variant="ghost" size="sm" onClick={() => navigate("/app")}>
-              Back
-            </Button>
-          </div>
+    <section className="flex items-center justify-between gap-4 border-t border-border pt-6">
+      <div>
+        <h2 className="font-mono text-micro uppercase tracking-[0.08em] text-faint">Account</h2>
+        <p className="mt-1 text-dense text-foreground">
+          {profile.data?.display_name || "Signed in"}
+        </p>
+      </div>
+      <Button
+        type="button"
+        variant="secondary"
+        size="md"
+        isLoading={isSigningOut}
+        onClick={() => void handleSignOut()}
+      >
+        Sign out
+      </Button>
+    </section>
+  );
+}
 
-          <h1 className="mt-8 text-h2 text-foreground">Profile & goals</h1>
+/** The full page — reached from the top nav like Chat or Review (§6.13), a primary destination
+ * rather than an overlay. Direct link and refresh render exactly the same thing. */
+export function ProfileSettings() {
+  return (
+    <div className="flex h-dvh flex-col overflow-hidden bg-background">
+      <TopBar />
 
-          <div className="mt-8">
+      <main className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-[560px] px-6 py-12 md:px-8">
+          <h1 className="text-h2 text-foreground">Profile & goals</h1>
+
+          <div className="mt-8 flex flex-col gap-8">
             <ProfileSettingsContent />
+            <AccountSection />
           </div>
         </div>
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }

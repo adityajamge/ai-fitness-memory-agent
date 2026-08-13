@@ -34,7 +34,6 @@ import { Conversation } from "@/components/layout/Conversation";
 import { ThreadSidebarRail } from "@/components/layout/ThreadSidebarRail";
 import { TopBar } from "@/components/layout/TopBar";
 import { ErrorState } from "@/components/state/ErrorState";
-import { Timeline } from "@/components/timeline/Timeline";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { SessionNotice } from "@/session/SessionNotice";
@@ -88,7 +87,6 @@ export function AppScreen() {
   // deliberate escape hatch, not a contradiction: nothing stretches to fill the reclaimed space
   // automatically, the conversation column just gets more margin either side of its own cap.
   const [isPaneCollapsed, setPaneCollapsed] = useState(false);
-  const timelineRef = useRef<HTMLDivElement>(null);
   const seeded = useRef(false);
 
   // The pane follows the selected turn; when nothing is selected it follows the newest answer,
@@ -148,11 +146,12 @@ export function AppScreen() {
   // dark during the SSE path, since that transport never touches the mutation.
   const isSending = turns.some((t) => t.kind === "pending");
 
-  // The keyboard shortcuts §9 lists that are still worth having without the command palette
-  // they were specified alongside (§13: cut-eligible, ranked below everything else in the
-  // Phase-6 priority list). `/` (focus composer) and `⌘Enter` (send) already live in Composer;
-  // this covers the two that are page-level. `Esc` blurring the active element is the browser's
-  // native behavior for most controls, so there is nothing to add for it here.
+  // The keyboard shortcut §9 lists that is still worth having without the command palette it was
+  // specified alongside (§13: cut-eligible, ranked below everything else in the Phase-6 priority
+  // list). `/` (focus composer) and `⌘Enter` (send) already live in Composer; this covers the
+  // one that is page-level. `Esc` blurring the active element is the browser's native behavior
+  // for most controls, so there is nothing to add for it here. `T` (focus timeline) is gone: the
+  // timeline no longer renders inside Chat (2026-08-13 IA revision — it lives in Review, §6.20).
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
@@ -161,14 +160,11 @@ export function AppScreen() {
       if (typing) return;
       if (event.key === "e" || event.key === "E") {
         if (!isDesktop) setDrawerOpen((v) => !v);
-      } else if (event.key === "t" || event.key === "T") {
-        timelineRef.current?.focus();
-        timelineRef.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isDesktop, reduce]);
+  }, [isDesktop]);
 
   /**
    * The signature interaction (§5.6). On mobile the same gesture opens the drawer, so the
@@ -193,11 +189,14 @@ export function AppScreen() {
   // arrow here would recreate `onScrubHandled` (and force a re-render) on every keystroke.
   const clearScrubDay = useCallback(() => setScrubDay(null), []);
 
-  // Clicking a timeline bar: scrolls the conversation to that day (`scrubDay`, handled by
-  // `Conversation`) AND puts the engine pane into day view — every memory logged that day, not
-  // whichever turn's trace happened to be selected before. The two are independent (a day with
-  // no matching turn in the loaded conversation still gets a day view), which is why this sets
-  // both rather than routing one through the other.
+  // Scrolls the conversation to a given day (`scrubDay`, handled by `Conversation`) AND puts the
+  // engine pane into day view — every memory logged that day, not whichever turn's trace
+  // happened to be selected before. The two are independent (a day with no matching turn in the
+  // loaded conversation still gets a day view), which is why this sets both rather than routing
+  // one through the other. Reached two ways: the `location.state.day` hand-off below (Review's
+  // timeline, an insight, or a memory row — §6.20) is the only path since the 2026-08-13 IA
+  // revision moved the timeline itself out of Chat; the name is unchanged from when a timeline
+  // bar inside Chat called this directly.
   const handleScrub = useCallback(
     (day: string) => {
       setScrubDay(day);
@@ -364,29 +363,27 @@ export function AppScreen() {
   }, [threadId, turns.length, send.mutate, invalidateAfterTurn]);
 
   /**
-   * The handoff from Today (`routes/Today.tsx`).
+   * The day-view handoff from Review (`routes/Review.tsx`).
    *
-   * Today has **no send path and no day view of its own** — it navigates here carrying one of
-   * two things in `location.state`, and this effect completes the action. That keeps exactly
-   * one turn pipeline and exactly one day-view renderer in the product, which is the whole
-   * reason Today was allowed to grow a composer at all.
+   * Review has **no day-view renderer of its own** (§6.20's "no machinery" rule) — clicking its
+   * timeline, an insight, or a memory row navigates here carrying `state.day`, and this effect
+   * completes the action. That keeps exactly one day-view renderer in the product.
    *
-   * - `state.draft` — the message typed on Today, sent through the same `sendTurn` every other
-   *   turn uses, so receipts, the trace and citation validation all follow for free.
-   * - `state.day` — a memory or insight clicked on Today, landing in the pane's day view.
+   * **The draft hand-off this effect used to also handle is gone** (2026-08-13 IA revision):
+   * Today used to carry `state.draft` from its own composer, but Review has no composer — Chat
+   * is home now, so the shortcut a landing-page composer existed for is no longer needed.
    *
    * **The state is cleared before acting.** A `replace` navigation strips it, so a browser back
-   * or a refresh cannot resend the message. That clear, not the dependency array, is the guard:
-   * `sendTurn`'s identity changes with `turns.length`, so depending on it would re-fire this on
-   * every reply. Keyed on `location.key` instead — one run per navigation, which is exactly the
-   * event being handled.
+   * or a refresh cannot re-trigger the scrub. That clear, not the dependency array, is the
+   * guard — `handleScrub`'s identity is stable, but clearing prevents a stale `state.day` from
+   * re-firing on an unrelated re-render. Keyed on `location.key` instead — one run per
+   * navigation, which is exactly the event being handled.
    */
   useEffect(() => {
-    const handoff = location.state as { draft?: string; day?: string } | null;
-    if (!handoff?.draft && !handoff?.day) return;
+    const handoff = location.state as { day?: string } | null;
+    if (!handoff?.day) return;
     void navigate(location.pathname, { replace: true, state: null });
-    if (handoff.draft) sendTurn(handoff.draft);
-    if (handoff.day) handleScrub(handoff.day);
+    handleScrub(handoff.day);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.key]);
 
@@ -437,12 +434,6 @@ export function AppScreen() {
   return (
     <div className="relative flex h-dvh flex-col overflow-hidden">
       <TopBar isBusy={isSending} />
-
-      {/* One of the four designed empty states (§6.9) — rendered unconditionally, so a brand-new
-          account shows "your memory starts here" here too rather than nothing. */}
-      <div ref={timelineRef} tabIndex={-1} className="outline-none">
-        <Timeline onScrub={handleScrub} />
-      </div>
 
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {/* Sidebar rail — extracted to `ThreadSidebarRail` (§16 Decisions Log, amended

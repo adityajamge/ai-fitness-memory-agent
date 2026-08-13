@@ -2,11 +2,11 @@
  * The recent-memory strip — proof, and the way into the rest of the history.
  *
  * It is deliberately **not a diary**. The engine caps it at eight rows, and the rows are not
- * editable, groupable, or filterable here: clicking one hands off to the day view the timeline
- * strip already owns (`AppScreen`'s `handleScrub`), so there is exactly one place in the product
- * where "everything logged on a day" is rendered. Building a second would fork the definition of
- * a day between two screens, which is how the timeline's count and a diary's list start
- * disagreeing.
+ * editable, groupable, or filterable here: clicking one hands off to Chat's day view
+ * (`AppScreen`'s `handleScrub`, reached via `navigate("/app", { state: { day } })`), so there is
+ * exactly one place in the product where "everything logged on a day" is rendered. Building a
+ * second would fork the definition of a day between two screens, which is how the timeline's
+ * count and a diary's list start disagreeing.
  *
  * `type <> 'insight'` is enforced server-side (`glassbox.fetch_recent_memories`) and matters
  * here too: these are things the *user* reported. An engine-derived claim in this list would
@@ -26,7 +26,7 @@ const TIME = { hour: "2-digit", minute: "2-digit" } as const;
 
 export interface RecentMemoriesProps {
   memories: MemoryRow[];
-  /** Hands off to the conversation's day view — never opens a second diary surface. */
+  /** Hands off to Chat's day view — never opens a second diary surface. */
   onOpenDay: (day: string) => void;
 }
 
