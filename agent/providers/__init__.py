@@ -55,6 +55,11 @@ class CompositeProvider:
     def extract_events(self, text: str, *, now: datetime, tz: str) -> list[ExtractedEvent]:
         return self._llm.extract_events(text, now=now, tz=tz)
 
+    def extract_from_image(
+        self, image_bytes: bytes, mime_type: str, *, now: datetime, tz: str, caption: str = ""
+    ) -> list[ExtractedEvent]:
+        return self._llm.extract_from_image(image_bytes, mime_type, now=now, tz=tz, caption=caption)
+
     def plan(
         self, question: str, tools: list[ToolSpec], *, now: datetime, tz: str
     ) -> list[ToolCall]:

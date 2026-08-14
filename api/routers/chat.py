@@ -18,19 +18,25 @@ rides inline today (decision D-2) and becomes a ``trace_id`` fetch once T7 persi
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 from uuid import UUID, uuid4
 
 import psycopg
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
+from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, field_validator
 
 from agent.graph import STAGE_LABELS, TurnResult, run_turn, run_turn_stream
 from api.deps import get_current_user
 from api.routers.ingest import receipt_json
+from engine.assembly import assemble
+from engine.db import Database
+from engine.ingestion import IngestionService, Receipt
 from engine.model import NarrationError, PlanningError
+from engine.turns import persist_turn
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +45,12 @@ router = APIRouter(prefix="/api", tags=["chat"])
 # The checkpointer requires thread_id < 255 chars (ADR-13.14 footgun). We prepend a 36-char
 # UUID plus a separator, so the client's half is capped well inside that budget.
 MAX_CLIENT_THREAD_ID = 128
+
+# M7 (photo ingestion, ephemeral-storage variant — TODOS.md). Generous for a phone photo,
+# small enough to keep a vision call's latency reasonable; enforced before the bytes ever
+# reach a model call.
+_PHOTO_MAX_BYTES = 8 * 1024 * 1024
+_PHOTO_CONTENT_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
 
 
 class ChatBody(BaseModel):
@@ -197,3 +209,105 @@ def chat_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+def _validate_photo(content_type: str | None, data: bytes) -> None:
+    """Reject anything that isn't a small, genuinely-decodable image before it reaches a
+    model call. The content-type allowlist matches the providers' own vision allowlists
+    (agent/providers/bedrock.py, claude_api.py) — this is the first line of defense, not the
+    only one. Decoding with Pillow (rather than trusting the declared content-type) is what
+    catches a mislabeled or malformed file; ``verify()`` also means the bytes are never
+    written anywhere, satisfying M7's no-persistence tradeoff by construction."""
+    if content_type not in _PHOTO_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=422, detail="unsupported image type; use JPEG, PNG, or WebP"
+        )
+    if not data:
+        raise HTTPException(status_code=422, detail="empty upload")
+    if len(data) > _PHOTO_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"image too large; max {_PHOTO_MAX_BYTES // (1024 * 1024)}MB",
+        )
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            img.verify()
+    except (UnidentifiedImageError, OSError) as exc:
+        raise HTTPException(status_code=422, detail="file is not a readable image") from exc
+
+
+def _photo_answer(receipt: Receipt) -> str:
+    """Deterministic answer text built from the receipt alone — no extra model call, and
+    nothing said here the receipt doesn't already contain. ``created`` summaries are the
+    vision model's own short rendering of what it saw (engine/model.py ExtractedEvent.summary),
+    so this never invents anything beyond what was already extracted."""
+    names = [ref.summary for ref in receipt.created if ref.summary]
+    if names:
+        return "Logged from your photo: " + "; ".join(names)
+    return receipt.message
+
+
+@router.post("/chat/photo")
+def chat_photo(
+    request: Request,
+    image: UploadFile = File(...),
+    message: str = Form(""),
+    thread_id: str | None = Form(None),
+    user_id: UUID = Depends(get_current_user),
+) -> dict:
+    """Photo counterpart to ``POST /api/chat`` (M7): attach a food photo, optionally with a
+    caption, and get back the same turn shape — ``answer``/``citations``/``receipts``/
+    ``trace``/``turn_id``/``errors`` — a text turn gets.
+
+    Deliberately bypasses the LangGraph plan/retrieve/narrate spine: a photo attachment is an
+    unambiguous ingest signal needing no NL classification, the same posture already taken for
+    ``log_memory`` (dispatched directly in ``agent/graph.py``'s ``ingest_node`` rather than run
+    through retrieval). It still calls ``assemble``/``persist_turn`` directly — exactly what a
+    pure-ingest graph turn already does after ``ingest_node`` — so the turn shows up correctly
+    in ``GET /api/turns`` history and ``GET /api/turns/{id}/trace`` like any other turn.
+    """
+    data = image.file.read()
+    _validate_photo(image.content_type, data)
+    if thread_id is not None and (not thread_id.strip() or len(thread_id) > MAX_CLIENT_THREAD_ID):
+        raise HTTPException(status_code=422, detail="invalid thread_id")
+
+    settings = request.app.state.settings
+    svc: IngestionService = request.app.state.ingestion
+    db: Database = request.app.state.db
+
+    client_thread_id = thread_id or uuid4().hex
+    caption = message.strip()
+    question = caption or "(photo)"
+
+    try:
+        receipt = svc.ingest_photo(
+            user_id, data, image.content_type, caption=caption, tz=settings.default_tz
+        )
+        answer = _photo_answer(receipt)
+        _, trace = assemble(question, [])
+        with db.transaction() as cur:
+            turn_record = persist_turn(
+                cur,
+                user_id=user_id,
+                thread_id=thread_key(user_id, client_thread_id),
+                question=question,
+                answer=answer,
+                memory_ids=[ref.id for ref in receipt.created],
+                trace=trace,
+            )
+    except psycopg.OperationalError as exc:
+        logger.warning("photo turn failed for user %s: database connection lost: %s", user_id, exc)
+        raise HTTPException(
+            status_code=503, detail="chat is temporarily unavailable"
+        ) from exc
+
+    return {
+        "thread_id": client_thread_id,
+        "answer": answer,
+        "citations": [],
+        "citation_report": None,
+        "receipts": [receipt_json(receipt)],
+        "trace": trace.to_json(),
+        "turn_id": str(turn_record.assistant_turn_id),
+        "errors": [],
+    }

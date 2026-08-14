@@ -52,13 +52,26 @@
 > violations. Detail: [engineering/glass-box-architecture.md](../engineering/glass-box-architecture.md),
 > [DESIGN.md §0](../../DESIGN.md#0-frontend-foundation-status).
 >
+> **2026-08-14: Phase 5's M7 (photo ingestion) shipped**, reintroduced from its 2026-08-06 cut —
+> as an **ephemeral-storage variant, no S3** (AWS access still unavailable; see
+> [engineering/consolidation-architecture.md](../engineering/consolidation-architecture.md) §4.17's
+> amendment). New tests: `engine/tests/test_photo_ingestion.py` (5 tests — vision success with
+> correct `qty_basis` honesty, vision failure → note fallback, no-food-in-photo noop, validation
+> failure → note) and `api/tests/test_chat_photo.py` (6 tests — happy path, auth, unsupported
+> content type, malformed image, oversized image, vision-failure-preserves-caption), all green
+> against real CockroachDB.
+>
 > **Still planned:** the latency profile (Phase 5's M6/T12 — postponed, not skipped, see
-> `TODOS.md`), photo/S3 ingestion (Phase 5's M7 — deferred post-hackathon, see `TODOS.md`), **2 of
+> `TODOS.md`; measurement tooling `cli/latency_probe.py` now exists and is shaken down locally,
+> but the actual production measurement is still blocked on AWS access), **2 of
 > the 4** Playwright E2E paths (slow-Bedrock UI state; cross-user denial — the properties
 > themselves are tested elsewhere: I-28 cross-user 404s are asserted per-route in
 > `api/tests/test_glassbox.py`, and the staged-progress line is exercised indirectly by every
 > E2E turn, but neither has a dedicated spec), and both live-model eval lanes (T14 — `evals/`
-> holds no golden-set suite yet). All four are Phase 7 scope, not Phase 6 gaps.
+> holds no golden-set suite yet). All three are Phase 7 scope, not Phase 6 gaps. No dedicated
+> Playwright coverage was added for the photo-upload UI either — explicitly out of scope for the
+> 2026-08-14 pass per the user's own time-constraint instruction; covered by the backend tests
+> above plus manual smoke-testing.
 >
 > **Naming note:** "M6"/"M7" appear twice in this project with different meanings — Phase 5's
 > M6 (latency profile) and M7 (photo ingestion) in `TODOS.md`, versus Phase 6's frontend M6
@@ -74,8 +87,10 @@ CODE PATHS                                               USER FLOWS
   ├── 16A: extraction fails → note persists,              ├── empty-account states (timeline, stats,
   │        receipt "saved — parsing incomplete"           │        insights, engine pane) — T11
   ├── retry succeeds → typed events supersede note        [+] Mature-account flows (builder data)
-  ├── photo → S3 → vision extraction                      ├── [→E2E] money question → cited answer
-  ├── S3 failure → turn still persists                    │        → chips resolve → trace panel
+  ├── [+] photo → vision extraction (no S3 — in-memory,   ├── [→E2E] money question → cited answer
+  │        discarded after the call; 2026-08-14)          │        → chips resolve → trace panel
+  ├── vision failure → note (caption or literal),         │
+  │        original photo not recoverable (no S3)         │
   ├── embedding fails → NULL embedding row                ├── "protein in June" → aggregate matches
   └── backfill (next-ingest + CLI) re-embeds ✓            │        known account numbers
 [+] engine/types (6A registry)                            [+] Interaction edges
@@ -140,7 +155,7 @@ TOTAL: 33 paths  |  E2E: 4 (Playwright)  |  EVAL: 2 (live-model lane)
 |---|---|---|---|---|
 | Extraction | Bedrock throttles mid-turn | yes | 16A note-fallback | "saved — parsing incomplete" |
 | Embedding | Bedrock embed call fails | yes | NULL + backfill | receipt notes pending embedding |
-| Photo upload | S3 failure | yes | turn persists without photo | clear partial-save message |
+| Photo upload | vision call fails (no S3 in the shipped design — 2026-08-14) | yes | note fallback (caption or literal), same as 16A | "saved — parsing incomplete"; original photo not recoverable |
 | Consolidation | scan exceeds budget | yes | defer to on-demand | nothing (by design; insight arrives later) |
 | Trace persistence | turn-commit failure | yes | single transaction (13.14) | turn retriable, never half-recorded |
 | Citation | model cites bad ID | yes | validation flag | visible flag in UI |

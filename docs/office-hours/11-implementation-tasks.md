@@ -76,9 +76,9 @@
 - [x] **T11 (P2, ~1.5d / ~2h)** — web — Empty-state design for new accounts (timeline, stats, insights, engine pane): inviting, not broken ✅ 2026-08-08: all four surfaces shipped across M4 (stats, engine pane, guided first turn) and M7 (timeline's "your memory starts here")
   - Surfaced by: Outside voice #3 — consequence of the multi-user model (ADR-13.4); rank 4 in the [07 build order](07-glass-box-ui.md)
   - Files: `web/src/components/EmptyStates.tsx`
-- [ ] **T12 (P2, ~1d / ~1.5h)** — api — Measure + document end-to-end turn latency (ingest / query / both); receipt < 3s perceived target
+- [ ] **T12 (P2, ~1d / ~1.5h)** — api — Measure + document end-to-end turn latency (ingest / query / both); receipt < 3s perceived target — ⏸ 2026-08-14: measurement tool built (`cli/latency_probe.py`), shaken down locally; the actual measurement is still blocked on AWS access (see `TODOS.md` → *M6 — Latency profile (T12)*)
   - Surfaced by: Outside voice #13 — only consolidation was budgeted
-  - Files: `docs/latency.md`
+  - Files: `docs/latency.md` *(not yet written)*, `cli/latency_probe.py` *(new)*
 - [x] **T13 (P2, ~0.5d / ~30min)** — docs — Re-derive the budget line-item (Fargate + ALB share per ADR-13.3 amendment, CockroachDB tier, cached replay Bedrock cost, live eval lane) ✅ 2026-07-19: ≈$43–63 for the remaining window, inside the $50–100 envelope — table in [README.md → Budget line-item](README.md#budget-line-item-t13-re-derived-2026-07-19)
   - Surfaced by: Outside voice #16 — $50–100 predates the locked choices
   - Files: `docs/office-hours/README.md`

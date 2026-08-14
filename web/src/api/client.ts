@@ -55,7 +55,11 @@ async function request<S extends z.ZodType>(
   // Built rather than spread with a conditional `headers`, because under
   // `exactOptionalPropertyTypes` an explicit `undefined` is not the same as an absent key.
   const requestInit: RequestInit = { credentials: "same-origin", ...init };
-  if (init?.body) requestInit.headers = { "content-type": "application/json" };
+  // A FormData body (photo upload) must NOT get a JSON content-type — the browser sets its
+  // own `multipart/form-data; boundary=...` header, and overriding it breaks parsing.
+  if (init?.body && !(init.body instanceof FormData)) {
+    requestInit.headers = { "content-type": "application/json" };
+  }
 
   const response = await fetch(path, requestInit);
 
@@ -210,3 +214,17 @@ export const sendMessage = (message: string, threadId?: string) =>
     method: "POST",
     body: JSON.stringify(threadId ? { message, thread_id: threadId } : { message }),
   });
+
+/**
+ * Photo counterpart to `sendMessage` (M7 — DESIGN.md §16 Decisions Log, 2026-08-14). Attach a
+ * food photo, optionally with a caption; the backend returns the same `ChatResponse` shape a
+ * text turn gets, so nothing downstream (Answer, EvidencePane, Receipt) needs to know which
+ * path produced it. `multipart/form-data`, not JSON — see `request()`'s `FormData` handling.
+ */
+export const sendPhotoMessage = (image: File, message: string, threadId?: string) => {
+  const form = new FormData();
+  form.set("image", image);
+  form.set("message", message);
+  if (threadId) form.set("thread_id", threadId);
+  return request(`/api/chat/photo`, ChatResponse, { method: "POST", body: form });
+};

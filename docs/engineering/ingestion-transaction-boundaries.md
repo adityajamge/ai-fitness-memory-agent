@@ -94,6 +94,45 @@ The transaction boundary is at **(D)/(D')** only. Everything above it is retryab
 work with no durable side effects; everything at it is atomic; everything below it
 (receipt, backfill) observes already-committed state.
 
+### 4.1 The photo branch (Phase 5 M7, shipped 2026-08-14 — ephemeral-storage variant)
+
+`IngestionService.ingest_photo(user_id, image_bytes, mime_type, *, caption, ...)` is the same
+shape with stage (A) swapped:
+
+```
+ingest_photo(user_id, image_bytes, mime_type, caption)
+│
+├─ (A') VISION EXTRACTION    model call, no inline retry        ── no DB ──┐
+│        │ success → list[ExtractedEvent]                                  │  same as (A):
+│        │ failure (VisionError) ──────────────────────────────► NOTE PATH │  no DB touched
+│        ▼                                                                 │  before (D)
+├─ (B)–(F₁)  identical to ingest_text from here — shared via                │
+│            _build_memories / _persist_validated                          │
+```
+
+Two deliberate differences from the text path, both load-bearing:
+
+- **No inline retry on vision failure.** A photo call is heavier (larger request, slower
+  round trip) than a text one, and the note fallback already preserves the caption — a second
+  identical attempt buys little for the extra latency it costs the turn. (Text extraction's
+  retry exists because it is comparatively cheap and the empty-result contract makes a
+  transient failure worth one more try before falling back.)
+- **The note fallback's text is `caption or "[photo, not parsed]"`, never the empty string.**
+  `NotePayload.text` stays required (§5's rule extends here unchanged) — a photo with no
+  caption and a failed vision call still writes an honest literal, never an empty or invented
+  description of an image nobody could read.
+
+**What is NOT durable here, unlike the text path's raw string:** the image bytes themselves.
+`ingest_photo` never writes them anywhere — no S3, no disk, no blob column — so a `VisionError`
+loses the photo permanently; only the note (caption or the literal marker) survives. This is
+the one place this document's "input is never lost given a reachable database" guarantee (§2)
+is narrower for a photo turn than for a text one: the *fact that something was submitted*
+is never lost, but the *original photo* can be, on vision failure specifically. The mitigation
+lives at the UI layer (the composer keeps the draft and the attached image after a failed
+send, so resending is one click), not in this pipeline. Full rationale for shipping without
+S3: `TODOS.md` → *M7 — Photo ingestion*; `docs/engineering/consolidation-architecture.md`
+§4.17's 2026-08-14 amendment.
+
 ## 5. Partial extraction and validation failure — the all-or-nothing rule
 
 A turn may extract to several events (though most single turns produce one). Two sub-cases:
@@ -227,12 +266,18 @@ didn't initiate, and belongs with Phase 3's agent turn model if it belongs anywh
 | Backfill fails (F) | own txn | nothing extra | `ok` (unchanged) | nothing | next backfill pass |
 | `reprocess_note` extraction fails | no | nothing | — | note unchanged | reprocess later |
 | `reprocess_note` DB write fails | yes | nothing (rollback) | — | note unchanged | reprocess later |
+| Vision extraction fails (§4.1) | no | 1 note (caption or `"[photo, not parsed]"`) | `incomplete` | "saved — parsing incomplete" | re-attach + resend (no `reprocess_note` — the photo itself isn't stored to retry from) |
+| Vision returns empty, model affirms no food in photo | no | nothing | `ok` | "nothing to log" | n/a (no-op by design) |
+| One+ photo-derived events fail validation | no | 1 note (caption or the literal) | `incomplete` | "saved — parsing incomplete" | re-attach + resend |
 
 **Silent-loss cells: zero** (restored 2026-07-21 when D1 was fixed —
 [§13](#13-known-deviations-audited-2026-07-21)). Every non-success outcome is either an honest
 receipt, an honest retriable error, or a no-op that leaves recoverable state. The "empty on
 real input" row depends on providers honoring the empty-result contract; `BedrockProvider`
-enforces it, and any new provider must too.
+enforces it, and any new provider must too. **One narrower cell, added 2026-08-14 (§4.1):** the
+two photo-failure rows lose the original image, not the fact that something was submitted —
+recoverable by the user re-sending, not by a server-side retry, since no copy of the photo is
+kept anywhere.
 
 ## 10. Double-submit (defined behavior)
 
@@ -290,6 +335,16 @@ completes"). This document's boundary does not move — the trace/turn writes ar
 statements inside the *existing* single transaction, preserving rule 2 (atomic turn) and the
 turn-commit-failure guarantee.~~ Phase 2 creates those tables but does not write to them;
 Phase 6 M1 writes them at stage (G), above.
+
+**Stage (G) reused directly by the photo endpoint (Phase 5 M7, 2026-08-14).**
+`POST /api/chat/photo` (`api/routers/chat.py::chat_photo`) is not a graph turn — it calls
+`IngestionService.ingest_photo` directly rather than routing through `agent/graph.py`'s
+`plan`/`retrieve`/`narrate` nodes (a photo attachment is an unambiguous ingest signal, no NL
+classification needed). It still calls `engine.assembly.assemble(question, outcomes=[])` for a
+valid-but-empty trace and `engine.turns.persist_turn` in its own transaction, exactly stage (G)'s
+shape — so a photo turn shows up in `GET /api/turns` and `GET /api/turns/{id}/trace` identically
+to a graph-routed one. This does not change stage (G)'s guarantees above; it is a second caller
+of the same stage, not a new one.
 
 **Stage (F₀) sits outside that transaction and must stay there** (§7.1, I-14). An insight is
 derived data: losing it costs one re-derivation, whereas widening the atomic turn to cover it

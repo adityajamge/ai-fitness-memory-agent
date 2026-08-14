@@ -48,6 +48,14 @@ class EmbeddingError(Exception):
     backfill — never fails the turn (transaction-boundaries doc §6)."""
 
 
+class VisionError(Exception):
+    """Raised when photo extraction fails (call error, malformed output, or unreadable image).
+    Same posture as ExtractionError: triggers the note fallback so the turn is never lost —
+    see IngestionService.ingest_photo. There is no S3-backed durability for the photo itself
+    (M7's ephemeral-storage variant, TODOS.md), so a VisionError does mean the original image
+    cannot be recovered; only the caption (or an honest placeholder) survives as a note."""
+
+
 class NutritionError(Exception):
     """Raised when the nutrition estimate call fails (call error, malformed output, or no
     tool call). Handled exactly like an embedding failure: the meal commits **without**
@@ -127,6 +135,36 @@ class ModelProvider(Protocol):
         """Return one normalized 512-dim vector per input text, in order. Titan V2 with
         ``normalize=true`` (ADR-13.2). Raises EmbeddingError on failure. All-or-nothing:
         either every text embeds or the call raises (transaction-boundaries doc §6)."""
+        ...
+
+    def extract_from_image(
+        self, image_bytes: bytes, mime_type: str, *, now: datetime, tz: str, caption: str = ""
+    ) -> list[ExtractedEvent]:
+        """Turn a food photo (plus an optional caption) into typed events — M7's vision
+        counterpart to ``extract_events``, same three-outcome contract:
+
+        =========================  ===================================================
+        Outcome                    Meaning
+        =========================  ===================================================
+        ``[ExtractedEvent, ...]``  Loggable food found and typed.
+        ``[]``                     **The provider affirms the photo holds nothing
+                                   loggable** — not food, or nothing identifiable.
+        ``VisionError``            The call failed, the output was malformed, or the
+                                   image could not be read. The engine falls back to a
+                                   note (the caption, or an honest placeholder) — see
+                                   ``IngestionService.ingest_photo``.
+        =========================  ===================================================
+
+        **Load-bearing quantity rule, honored by every implementation:** a ``MealItem``'s
+        ``qty_g``/``qty`` must be set ONLY when ``caption`` explicitly states the amount —
+        never from a visual guess. A quantity the provider only *sees* (never stated in
+        words) belongs in ``qty_text`` as a described estimate, with ``qty_g``/``qty`` left
+        ``None``. This is what keeps ``engine.nutrition``'s existing ``qty_basis`` honesty
+        machinery correct without any change to that module: ``nutrition_items_prompt``
+        (``agent/providers/_prompts.py``) renders a present ``qty_g`` as "stated", so a
+        vision-inferred gram figure placed there would silently mislabel an AI guess as
+        something the user said.
+        """
         ...
 
     def estimate_nutrition(self, items: list[dict], *, context: str = "") -> list[dict]:

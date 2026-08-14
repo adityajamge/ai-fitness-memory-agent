@@ -20,6 +20,7 @@ import {
   getTrace,
   getTurns,
   sendMessage,
+  sendPhotoMessage,
   submitOnboarding,
   updateProfile,
   type OnboardingInput,
@@ -171,6 +172,27 @@ export function useSendMessage() {
   return useMutation({
     mutationFn: ({ message, threadId }: { message: string; threadId?: string }) =>
       sendMessage(message, threadId),
+    onSuccess: () => invalidateTurnDerivedQueries(queryClient),
+  });
+}
+
+/** M7 (DESIGN.md §16 Decisions Log, 2026-08-14) — the photo counterpart to `useSendMessage`.
+ * Same cache invalidation on success: a logged meal moves stats/timeline/review exactly like
+ * a text-logged one. No SSE twin — a photo turn skips the streamed engine pane by design
+ * (api/routers/chat.py's `chat_photo` doesn't route through the graph), so there is only
+ * ever this one transport for it. */
+export function useSendPhotoMessage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      image,
+      message,
+      threadId,
+    }: {
+      image: File;
+      message: string;
+      threadId?: string;
+    }) => sendPhotoMessage(image, message, threadId),
     onSuccess: () => invalidateTurnDerivedQueries(queryClient),
   });
 }

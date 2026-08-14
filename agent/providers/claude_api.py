@@ -35,6 +35,7 @@ Two Claude API specifics this file depends on:
 
 from __future__ import annotations
 
+import base64
 import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -49,12 +50,14 @@ from agent.providers._prompts import (
     NUTRITION_TOOL,
     PLAN_SYSTEM,
     SYSTEM_PROMPT,
+    VISION_SYSTEM,
     extract_tool_schema,
     nutrition_items_prompt,
     nutrition_tool_schema,
     parse_extracted_events,
     parse_nutrition_components,
     render_context,
+    vision_prompt_text,
 )
 from engine.model import (
     EmbeddingError,
@@ -65,6 +68,7 @@ from engine.model import (
     PlanningError,
     ToolCall,
     ToolSpec,
+    VisionError,
 )
 
 if TYPE_CHECKING:
@@ -84,6 +88,10 @@ _EFFORT_UNSUPPORTED_PREFIXES = ("claude-haiku-4-5", "claude-sonnet-4-5", "claude
 
 # Escape hatch: any of these as CLAUDE_API_EFFORT omits the parameter entirely.
 _EFFORT_DISABLED = frozenset({"", "none", "off", "default"})
+
+# The API layer (api/routers/chat.py) already restricts uploads to this same allowlist
+# before a request ever reaches here; this is the belt to that suspenders.
+_CLAUDE_IMAGE_MEDIA_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
 
 
 class ClaudeAPIProvider:
@@ -142,6 +150,49 @@ class ClaudeAPIProvider:
 
         _reject_refusal(response, ExtractionError)
         tool_input = _tool_input(response, EXTRACT_TOOL, ExtractionError)
+        return parse_extracted_events(tool_input, now=now, tz=tz, default_tz=self._default_tz)
+
+    # ── vision extraction (M7: a photo instead of text) ────────────────────────────────
+    def extract_from_image(
+        self, image_bytes: bytes, mime_type: str, *, now: datetime, tz: str, caption: str = ""
+    ) -> list[ExtractedEvent]:
+        """Same forced-tool contract as ``extract_events``, with an image content block
+        alongside the caption text. See ``engine.model.ModelProvider.extract_from_image``
+        for the qty_g-only-when-stated rule this relies on ``VISION_SYSTEM`` to enforce."""
+        if mime_type not in _CLAUDE_IMAGE_MEDIA_TYPES:
+            raise VisionError(f"unsupported image type for vision: {mime_type!r}")
+
+        prompt = vision_prompt_text(caption, now=now, tz=tz)
+        try:
+            response = self._client.messages.create(
+                model=self._model_id,
+                max_tokens=_MAX_TOKENS_STRUCTURED,
+                system=VISION_SYSTEM,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": mime_type,
+                                    "data": base64.b64encode(image_bytes).decode("ascii"),
+                                },
+                            },
+                            {"type": "text", "text": prompt},
+                        ],
+                    }
+                ],
+                tools=[extract_tool_schema()],
+                tool_choice={"type": "tool", "name": EXTRACT_TOOL},
+                **self._effort_kwargs(),
+            )
+        except anthropic.APIError as exc:
+            raise VisionError(f"claude api vision extraction failed: {exc}") from exc
+
+        _reject_refusal(response, VisionError)
+        tool_input = _tool_input(response, EXTRACT_TOOL, VisionError)
         return parse_extracted_events(tool_input, now=now, tz=tz, default_tz=self._default_tz)
 
     # Recorded on every nutrition estimate this provider produces (engine/nutrition.py).

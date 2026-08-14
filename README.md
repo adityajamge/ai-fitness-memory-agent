@@ -35,8 +35,11 @@ retraction, and construction of `EvidenceTrace` artifacts that drive the UI. A m
 typed tool calls; the LLM narrates but never generates SQL and never feeds the glass box.
 Storage is **CockroachDB** (typed JSONB payloads + `VECTOR(512)` embeddings in one
 transactionally consistent store); hosting is a single Docker image on **Amazon ECS
-Express Mode** (Fargate + ALB);
-photos/reports live in **S3**. Standard multi-user SaaS — every account starts with empty
+Express Mode** (Fargate + ALB). Photo ingestion (a chat-attached meal photo) uses
+Bedrock/Claude vision directly — **no S3**: the image is decoded, validated, sent to the
+vision model, and discarded, never persisted (an explicit ephemeral-storage tradeoff made
+2026-08-14 while AWS access was unavailable; see `TODOS.md` → *M7 — Photo ingestion*).
+Standard multi-user SaaS — every account starts with empty
 memory. Full design: [docs/office-hours/](docs/office-hours/README.md).
 
 ## Repository structure
@@ -160,8 +163,9 @@ embedded, never qualify for backfill, and silently degrade recall forever. So if
 
 - **CockroachDB tools:** Distributed Vector Indexing (runtime), Managed MCP Server
   (AI-assisted development), ccloud CLI (cluster provisioning — recorded)
-- **AWS services:** Amazon Bedrock (LLM, vision, Titan embeddings), Amazon S3, Amazon ECS
-  (Express Mode)
+- **AWS services:** Amazon Bedrock (LLM, vision, Titan embeddings), Amazon ECS (Express Mode).
+  (Amazon S3 was in the original architecture for photo storage; shipped photo ingestion
+  (2026-08-14) does not use it — see the ephemeral-storage note above.)
 
 ## License
 

@@ -31,8 +31,9 @@ now).
 ## Modules
 
 ### 1. Ingestion
-- Input: free text, meal photos (via S3), report files, structured updates — all through
-  conversation.
+- Input: free text, meal photos (vision extraction, in-memory only — no S3; shipped 2026-08-14
+  as an ephemeral-storage variant, see `TODOS.md` → *M7 — Photo ingestion*), report files,
+  structured updates — all through conversation.
 - Bedrock (via the injected model interface) extracts **typed events**: infers date/time and
   timezone, meal type, quantities. Payloads are validated through the
   **Pydantic type registry** (`engine/types.py`, one model per memory type, `extra="allow"` —

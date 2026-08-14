@@ -18,7 +18,7 @@ flowchart TB
     end
 
     subgraph ME["Memory Engine (the centerpiece — internal package)"]
-        INGEST["Ingestion<br/>(extraction → typed events + embeddings)"]
+        INGEST["Ingestion<br/>(extraction → typed events + embeddings;<br/>photo turns: vision, no S3 — 2026-08-14)"]
         RETRIEVE["Hybrid retrieval<br/>(SQL aggregation + vector search)"]
         CONSOLIDATE["Event-driven consolidation<br/>(changepoints, lagged correlations →<br/>derived insight memories)"]
         ASSEMBLE["Context assembly + ranking"]
@@ -27,7 +27,6 @@ flowchart TB
 
     subgraph AWS["AWS"]
         BEDROCK["Amazon Bedrock<br/>(LLM · vision · Titan embeddings 512-dim)"]
-        S3["Amazon S3<br/>(meal photos · report files)"]
         ECSEXPRESS["Amazon ECS Express Mode<br/>(Fargate + ALB — hosts the single app container)"]
     end
 
@@ -40,7 +39,6 @@ flowchart TB
     ROUTER --> TOOLS
     TOOLS --> ME
     INGEST --> BEDROCK
-    INGEST --> S3
     INGEST --> MEMORIES
     INGEST -->|"on ingest"| CONSOLIDATE
     CONSOLIDATE --> MEMORIES
@@ -66,8 +64,15 @@ flowchart TB
 | Service | Role | Load-bearing? |
 |---|---|---|
 | **Amazon Bedrock** | Default LLM for the agent; vision extraction for meal photos; Titan V2 embeddings (512-dim, normalized) | Yes — primary |
-| **Amazon S3** | Meal photos and blood-report file storage (referenced from memory payloads) | Yes |
 | **Amazon ECS Express Mode** | Hosts the single Docker image (FastAPI + built Vite/React SPA) on Fargate + shared ALB; deploys in Milestone 1 (deploy-early). *Originally App Runner — closed to new customers 2026-04-30; ADR-13.3 amendment* | Yes |
+
+**Amazon S3 was in this diagram's original plan** (meal photo/report storage) and is **not
+used by what shipped**: photo ingestion (Phase 5 M7, shipped 2026-08-14) processes an uploaded
+image in memory and discards it — no S3, no disk, no blob column — an explicit tradeoff made
+because AWS access was unavailable when M7 was built and the product decision was not to stand
+up storage infrastructure for one feature. See
+[consolidation-architecture.md §4.17](../engineering/consolidation-architecture.md)'s
+2026-08-14 amendment and `TODOS.md` → *M7 — Photo ingestion* for the full account.
 
 **Lambda is not in the runtime architecture** — consolidation runs synchronously in the
 ingestion request with a time budget ([ADR-13.1](09-decisions.md#adr-13)); no scheduler, no
@@ -92,10 +97,10 @@ the checkpointer's serialization path ([ADR-14.9/14.13](09-decisions.md#adr-14),
 
 ## Data flow — the two core paths
 
-**Ingestion turn** (user sends "250g curd, 3 eggs" + photo):
-photo → S3; text+photo → Bedrock extraction → typed event rows (+ embeddings) →
-CockroachDB → consolidation check on affected series → inline **memory receipt** in chat +
-engine pane update.
+**Ingestion turn** (user sends "250g curd, 3 eggs", or a photo + caption):
+text or photo → Bedrock/Claude vision extraction (no S3 — see the AWS table note above) →
+typed event rows (+ embeddings) → CockroachDB → consolidation check on affected series →
+inline **memory receipt** in chat + engine pane update.
 
 **Query turn** (user asks the money question):
 question → agent plans retrieval (**one planning call — selecting tools *is* the routing**)

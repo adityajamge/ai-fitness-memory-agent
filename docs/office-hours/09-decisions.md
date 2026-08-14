@@ -656,11 +656,19 @@ open question Q3 (does the deferral path need a catch-up trigger?) rides with it
 memories is T7's call alongside ADR-14.8, and is asserted by test so that widening the surface
 must be deliberate. A citable surface is far easier to widen later than to narrow.
 
-### Cut
+### Cut, then reintroduced
 
-**M7 — photo ingestion** (S3 + Bedrock vision) was the designated first-to-cut milestone and was
-cut on 2026-08-06. Invariant **I-23** (a photo turn persists something for every outcome) stands
-in §5 as unimplemented, not withdrawn. Remaining work is in [TODOS.md](../../TODOS.md).
+**M7 — photo ingestion** (originally scoped as S3 + Bedrock vision) was the designated
+first-to-cut milestone and was cut on 2026-08-06. It was reintroduced at the user's explicit
+request and **shipped 2026-08-14** — but as a smaller, ephemeral-storage variant, not the
+S3-backed design this ADR originally described: AWS access was still unavailable, and the
+product decision was explicitly not to build storage infrastructure just for this feature.
+Invariant **I-23** (a photo turn persists something for every outcome) now holds unconditionally
+on the vision-success path and holds a narrower guarantee on the vision-failure path (a note
+persists; the original photo does not, absent S3). Full account:
+[docs/engineering/consolidation-architecture.md](../engineering/consolidation-architecture.md)
+§4.17's 2026-08-14 amendment; status record in [TODOS.md](../../TODOS.md) → *M7 — Photo
+ingestion*.
 
 ## ADR-17 — User profile & onboarding — *accepted 2026-08-11*
 

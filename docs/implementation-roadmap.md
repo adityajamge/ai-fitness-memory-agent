@@ -255,6 +255,21 @@
 > > and it was measured to break conformance tests for all four `ModelProvider`
 > > implementations at once — so there is no cheap partial version. Remaining work, in build
 > > order, is in [TODOS.md](../TODOS.md) → *M7 — Photo ingestion*. Post-hackathon.
+> >
+> > **✅ Reintroduced and SHIPPED 2026-08-14**, at the user's explicit request, as a smaller
+> > **ephemeral-storage variant** — no S3, image bytes processed in memory and discarded, never
+> > the originally-cut S3-first design (AWS access was still unavailable; the product decision
+> > was explicitly not to build storage infrastructure for this feature). The
+> > `@runtime_checkable` conformance risk called out above was real and was paid in one commit
+> > across all four providers, as predicted. `_NOTE_CONFIDENCE` parameterization — mentioned
+> > below as riding this milestone — did **not** happen; that TODO remains open and separately
+> > tracked, unaffected because the photo path never claims `reconstructed` provenance. Full
+> > account: [docs/engineering/consolidation-architecture.md](engineering/consolidation-architecture.md)
+> > §4.17's 2026-08-14 amendment; status in [TODOS.md](../TODOS.md) → *M7 — Photo ingestion*.
+> >
+> > ⏸ **M6 (T12) tooling was also built 2026-08-14** (`cli/latency_probe.py`) while confirming
+> > M7's AWS-access blocker was still real — the measurement itself remains postponed for the
+> > same reason as 2026-08-06; see the M6 bullet above and TODOS.md.
 >
 > **Consolidation is live in the deployed app as of M5c**: the composition root now builds one
 > `ConsolidationService` and shares it between the ingestion tail's stage (F₀) and the graph's
@@ -284,7 +299,9 @@
 > "had already flagged it" clause would be false. **(3)** Scope calls: entity canonicalization
 > and period-aware aggregation (both handed here by replay-architecture §8) are **deliberately
 > deferred** — canonicalization's cheap pre-replay window closed on 2026-08-02 and the
-> recommended design does not need it; note-confidence threading rides the photo milestone.
+> recommended design does not need it; note-confidence threading was expected to ride the photo
+milestone but did not — see the M7 2026-08-14 amendment above — and remains a separate open
+TODO.
 >
 > Estimate raised 4–5 → 5–6 days for the added CLI and the M0 fixture work; photo ingestion
 > (M7) is the **designated first cut** if the phase overruns.

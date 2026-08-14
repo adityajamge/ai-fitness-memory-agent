@@ -868,8 +868,8 @@ cheaper and less invasive than adding machinery.
 
 ### 4.17 Photo ingestion, and never-lose-input for a photo *(resolves R10)*
 
-**Decision.** Photo ingestion lands as an **independent lane (M7), first-to-cut**, and closes the
-never-lose-input hole explicitly:
+**Decision, as originally planned (2026-08-06, before the cut).** Photo ingestion lands as an
+**independent lane (M7), first-to-cut**, and closes the never-lose-input hole explicitly:
 
 - `ModelProvider` gains `extract_from_image(s3_key, *, now, tz, caption) -> list[ExtractedEvent]`
   with the same three-outcome contract as `extract_events` (typed events / affirmed-empty /
@@ -895,6 +895,42 @@ photo failure (silently drops input — the one thing ADR-13.5 forbids).
 **Docs to update:** ingestion-transaction-boundaries.md (§4 photo branch, §9 matrix), TODOS.md
 (close the note-confidence entry).
 **New invariants:** I-23 (a photo turn persists something for every outcome).
+
+---
+
+**Amendment, 2026-08-14 — what actually shipped.** M7 was reintroduced and built without S3: AWS
+access was still unavailable (the same expired session §7/§8 below describe), and the product
+decision was explicitly not to build storage infrastructure just for this feature. The decision
+above is **not** what runs in production; the ephemeral-storage variant is (full writeup:
+TODOS.md → "M7 — Photo ingestion: SHIPPED 2026-08-14"). What changed from the decision above:
+
+- `extract_from_image` takes `(image_bytes: bytes, mime_type: str, *, now, tz, caption)`, not
+  `(s3_key, ...)` — there is no S3 key. The image is decoded, validated (content-type allowlist,
+  size cap, a Pillow `verify()` check — `api/routers/chat.py::_validate_photo`), sent to the
+  vision model, and discarded. `MealPayload.photo_s3_key` stays unused.
+- **I-23 now holds only on the success path.** On a `VisionError`, the note fallback still writes
+  (caption, or `"[photo, not parsed]"`) exactly as decided above — but the photo itself cannot be
+  recovered from that note the way an S3-backed design would let it be. The mitigation is at the
+  UI layer, not the storage layer: the composer keeps the draft and the attached image after a
+  failed send, so resending is one click (`web/src/routes/AppScreen.tsx::sendPhotoTurn`,
+  `web/src/components/layout/Composer.tsx`).
+- The note-confidence parameterization in the original decision **did not happen** —
+  `IngestionService.ingest_photo` reuses `_persist_note` with the existing fixed
+  `_NOTE_CONFIDENCE = 1.0`, same as `ingest_text`. That TODO (`TODOS.md` → "Note-fallback
+  confidence during replay") remains open and unaffected: `ingest_photo` defaults
+  `provenance="live"`, never routes through `ingest_text`, and never claims `reconstructed`
+  provenance, so the confidence-over-claim concern that entry describes still does not apply here.
+- **One rule that wasn't anticipated in the original decision, discovered while implementing:** a
+  vision-derived `MealItem.qty_g`/`qty` must be set only when the caption text states the amount —
+  never from a visual guess. `nutrition_items_prompt` (`agent/providers/_prompts.py`) renders a
+  present `qty_g` as `"stated"`, so a vision-inferred number placed there would silently mislabel
+  an AI estimate as user-stated. `VISION_SYSTEM` encodes this; `engine/nutrition.py` needed no
+  changes as a result.
+- If/when AWS access returns, upgrading to the S3-backed design above is additive — an upload step
+  before the vision call — not a rework of what shipped.
+
+**New invariants (revised):** I-23 holds for the vision-success path unconditionally; on the
+vision-failure path it guarantees a note (caption or the literal marker) but not photo recovery.
 
 ---
 
@@ -1127,33 +1163,48 @@ live write path → measurement → orthogonal lane*, the same shape that made P
   that owns the logic; a 10-series smoke run before the full sweep.
 - **Rollback:** the (F₀) hook is one call site behind a config toggle; the CLI is a leaf.
 
-**M6 — Latency profile (T12)** — ⏸ *postponed 2026-08-06; see §11.4 and TODOS.md*
+**M6 — Latency profile (T12)** — ⏸ *tooling built 2026-08-14, measurement still postponed; see
+§11.4 and TODOS.md*
 - **Objective:** measure ingest / query / both turns against the **deployed** cross-region topology;
   write `docs/latency.md`; confirm or amend ADR-13.1's budget honestly.
-- **Prerequisite (added 2026-08-06):** a production deploy whose *running task* is verified to
-  hold the Secrets Manager configuration, with CockroachDB Cloud and Bedrock connectivity
-  confirmed. `/healthz` is not evidence of this — the lifespan tolerates a dead database.
-- **Files:** `docs/latency.md` *(new)*, light timing instrumentation.
+- **Prerequisite (added 2026-08-06, re-confirmed still unmet 2026-08-14):** a production deploy
+  whose *running task* is verified to hold the Secrets Manager configuration, with CockroachDB
+  Cloud and Bedrock connectivity confirmed. `/healthz` is not evidence of this — the lifespan
+  tolerates a dead database.
+- **Files:** `docs/latency.md` *(not yet written — no production numbers exist)*,
+  `cli/latency_probe.py` *(new 2026-08-14 — the "light timing instrumentation" below; shaken down
+  against a local dev server only, per its own module docstring)*.
 - **Invariants:** no infrastructure built solely for completeness; measurement must not alter the
-  measured path.
+  measured path. `cli/latency_probe.py` is a plain HTTP client — nothing added to the request path.
 - **Tests:** none required — the artifact is the deliverable.
 - **Rollback:** docs-only.
 
-**M7 — Photo ingestion** *(orthogonal; first to cut)* — ✂️ *cut 2026-08-06; see §11.4 and TODOS.md*
+**M7 — Photo ingestion** *(orthogonal; first to cut)* — ✅ *shipped 2026-08-14 as the
+ephemeral-storage variant; see §4.17's amendment, TODOS.md, and §11.4*
 
-> Measured when the cut was taken: `ModelProvider` is `@runtime_checkable`, so adding
+> Measured when the cut was taken (2026-08-06): `ModelProvider` is `@runtime_checkable`, so adding
 > `extract_from_image` breaks conformance for **four** implementations at once (Bedrock,
-> Claude API, Composite, Fake). There is no contracts-only first lane, which is part of why
-> this was the right thing to cut rather than half-build.
+> Claude API, Composite, Fake). There is no contracts-only first lane — confirmed true on
+> 2026-08-14: the shipped change landed as one commit touching all four.
 
-- **Objective:** presigned S3 upload → Bedrock vision → meal events; every failure outcome persists
-  something.
-- **Files:** `engine/model.py`, both providers + `CompositeProvider`, `engine/ingestion.py`,
-  `api/routers/ingest.py`, IAM/task-role, `Dockerfile`.
-- **Invariants:** I-23; never-lose-input extended, not weakened; `_NOTE_CONFIDENCE` parameterised.
-- **Tests:** vision success → typed meal with `photo_s3_key`; vision failure → note with the honest
-  literal + the S3 key; S3 failure → turn persists with a clear partial-save message; the
-  three-outcome provider contract holds for the vision surface.
+- **Objective, as shipped:** in-memory decode + validate → vision model → meal events; every
+  failure outcome persists a note. **Not** presigned S3 upload — see §4.17's 2026-08-14 amendment
+  for why (AWS access still unavailable; explicit product decision not to build storage
+  infrastructure for this feature) and for what I-23 guarantees under this variant.
+- **Files:** `engine/model.py`, both providers + `CompositeProvider` + `agent/providers/_prompts.py`
+  (`VISION_SYSTEM`), `engine/ingestion.py` (`ingest_photo`), `api/routers/chat.py`
+  (`POST /api/chat/photo` — not `api/routers/ingest.py`, since the product surface is the chat
+  composer, not a standalone ingest route), `pyproject.toml` (`python-multipart`, `pillow`).
+  No IAM/task-role/Dockerfile changes — no S3 client exists to need them.
+- **Invariants:** I-23 (success path unconditional, failure path narrower than originally planned
+  — §4.17 amendment); never-lose-input extended, not weakened; `_NOTE_CONFIDENCE` **not**
+  parameterised (stayed fixed at 1.0 — the note-confidence TODO remains open and unaffected, since
+  `ingest_photo` never claims `reconstructed` provenance).
+- **Tests:** vision success → typed meal with correct `qty_basis` (never a vision guess labeled
+  "stated"); vision failure → note with the honest literal; no-food-in-photo → noop, not a note;
+  invalid/oversized/malformed upload rejected before any model call; a failed send preserves the
+  caption and the photo (composer-level, not storage-level). See
+  `engine/tests/test_photo_ingestion.py`, `api/tests/test_chat_photo.py`.
 - **Rollback:** additive route + provider method — delete.
 
 ---
@@ -1286,15 +1337,21 @@ by construction. **Not a trigger:** a desire to say "changepoint detection" in t
 | M5d | `cli/consolidate.py` | ✅ `2dfb854` |
 | — | Teardown fix + CockroachDB engineering record | ✅ `6d02f15` |
 | — | Declarative ECS runtime configuration | ✅ `adb4598` |
-| M6 | Latency profile (T12) | ⏸ **POSTPONED 2026-08-06** — owed, not cut. Blocked on a verified production deploy; see [TODOS.md](../../TODOS.md) → *M6 — Latency profile (T12)* |
-| M7 | Photo ingestion | ✂️ **CUT 2026-08-06** — the designated first cut, taken. Deferred post-hackathon; remaining work in [TODOS.md](../../TODOS.md) → *M7 — Photo ingestion* |
+| M6 | Latency profile (T12) | ⏸ **TOOLING BUILT 2026-08-14, measurement still POSTPONED** — owed, not cut. AWS access re-confirmed unavailable 2026-08-14 (expired `aws login` session, `gh` unavailable); `cli/latency_probe.py` exists and is shaken down locally, ready to run against a verified deploy. See [TODOS.md](../../TODOS.md) → *M6 — Latency profile (T12)* |
+| M7 | Photo ingestion | ✅ **SHIPPED 2026-08-14** — as the ephemeral-storage variant (no S3; §4.17's amendment), not the originally-cut S3-first design. See [TODOS.md](../../TODOS.md) → *M7 — Photo ingestion* |
 
 **On the M6 postponement.** Deferred deliberately rather than measured locally: the number's
 entire value is the `us-east-1` → `ap-south-1` hop, so a local figure would describe something
 other than production and would then be cited in an ADR-13.1 amendment. Phase 5 does **not**
 close without it. The blockers, the deliverables, and the resume point are recorded in TODOS.md
-so the work restarts cold without re-deriving context; nothing was started in code, so there is
-no partial state to reconcile.
+so the work restarts cold without re-deriving context; the measurement tool now exists in code
+(`cli/latency_probe.py`, 2026-08-14) but has only ever been run against a local dev server — the
+production run itself is still blocked on the AWS/GitHub access described there.
+
+**On the M7 reintroduction.** Cut 2026-08-06, reintroduced and shipped 2026-08-14 at the user's
+explicit request, as a deliberately smaller variant than the original decision (§4.17's amendment
+above has the full account). The `@runtime_checkable` blast radius predicted at cut time was
+confirmed real and paid in one commit, as the cut record anticipated.
 
 *Hashes are the **post-amend** ones on `main`. Three entries previously cited pre-amend
 objects — writing a hash into the doc and then amending the commit changes it. Record the

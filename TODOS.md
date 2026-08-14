@@ -54,24 +54,42 @@
   — deliberately left for the research pass that follows the profile/onboarding + Today
   foundation, not this milestone.
 
-## M6 — Latency profile (T12): POSTPONED 2026-08-06, not skipped
+## M6 — Latency profile (T12): tooling built 2026-08-14, still POSTPONED — blocked on AWS access
 
-- **Status:** intentionally deferred, still **owed**. Phase 5 is not complete without it, and
-  it is a scored deliverable (T12, `docs/latency.md`). This is a scheduling decision, not a
-  cut. The item to cut, if one must be cut, is M7 — see `consolidation-architecture.md` §7.
+- **Status:** the measurement tool is now written and shaken down locally; the actual T12
+  measurement is still **owed** and cannot be honestly closed yet. Phase 5 is not complete
+  without it (T12, `docs/latency.md`). Re-audited 2026-08-14 while shipping M7 (below): the
+  local AWS session is still expired (`aws sts get-caller-identity` → "Your session has
+  expired. Please reauthenticate using 'aws login'") and `gh` is unavailable in this
+  environment, so the 3 GitHub repo variables could not be re-checked either. Nothing below
+  has changed except that the blockers are now independently re-confirmed, not assumed stale.
 - **Why deferred:** the whole value of T12 is the **cross-region hop** — the app runs on ECS
   in `us-east-1`, the CockroachDB Cloud cluster is in `ap-south-1`. A local measurement would
   not measure the thing the number exists to describe, so producing one now would be worse
   than producing none: it would put a wrong figure into an ADR amendment.
-- **Blocked on (all three, in order):**
+- **Blocked on (all three, in order, unchanged from 2026-08-06):**
   1. The AWS-side prerequisites in [docs/deploy.md](docs/deploy.md) → *One-time AWS setup for
      the above*: two Secrets Manager secrets, `secretsmanager:GetSecretValue` on the execution
      role, a task role with `bedrock:InvokeModel`, `iam:PassRole` on it for `ci-deploy`, and
-     three GitHub repo variables. Not done — the local AWS session was expired (`aws login`).
+     three GitHub repo variables. Not done — the local AWS session is expired (`aws login`).
   2. A completed deploy from `main` carrying commit `adb4598` (declarative config) or later.
   3. Verification that the **running task** actually has the config, plus a real signup +
      ingest proving CockroachDB Cloud and Bedrock connectivity. A green `/healthz` proves
-     nothing here — `api/main.py`'s lifespan tolerates an unreachable database by design.
+     nothing here — `api/main.py`'s lifespan tolerates an unreachable database by design. (The
+     deployed URL itself answered 200 on `/healthz`/`/`/`/docs` as of 2026-08-14 — that is the
+     "proves nothing" case exactly, not evidence the write path is verified.)
+- **Tooling now exists** (`cli/latency_probe.py`, added 2026-08-14): a non-invasive HTTP client
+  that signs up a throwaway account, runs N ingest/query/both turns against a given `--url`,
+  computes p50/p95, separates the first request ("cold," an approximation — see the script's
+  docstring for why it isn't a true infra cold start) from the rest, and writes `docs/latency.md`
+  in the shape M6 needs. Refuses to run without `--i-understand-this-mutates-production`, since
+  it creates a real account and real memory rows on whatever `--url` points at. **Shaken down
+  locally only** — `python -m cli.latency_probe --url http://127.0.0.1:8091 --samples 2 --out
+  <scratch path>` against a local dev server pointed at the test-only cluster, never against
+  `DATABASE_URL` (two-cluster rule) and never written to `docs/latency.md` (local numbers are
+  not production numbers, per this entry's own rule below). Closing T12 is now exactly one
+  command once the blockers above clear:
+  `python -m cli.latency_probe --url <deployed-url> --samples 20 --i-understand-this-mutates-production`.
 - **What M6 must produce when resumed:**
   - `docs/latency.md` — ingest turn, query turn, and both, measured against the deployed URL.
   - A confirm-or-amend verdict on **ADR-13.1's 300 ms** consolidation budget. It is already
@@ -83,10 +101,71 @@
     deferral path need a catch-up trigger?
 - **Constraints carried forward:** no infrastructure built solely for completeness;
   instrumentation must not alter the path it measures (`consolidation-architecture.md` §8, M6).
-- **Resume from:** this entry + §8 M6 + §11.3's measured table. Nothing was started in code,
-  so there is no partial work to reconcile — only the blockers above to clear.
+  `cli/latency_probe.py` honors this — it is a plain HTTP client timing full round trips, with
+  nothing added to the measured request path itself.
+- **Resume from:** this entry + §8 M6 + §11.3's measured table + `cli/latency_probe.py --help`.
+  The only remaining work is clearing the AWS/GitHub blockers above and running the one command.
 
-## M7 — Photo ingestion (S3 + Bedrock vision): DEFERRED 2026-08-06, post-hackathon
+## M7 — Photo ingestion: SHIPPED 2026-08-14 — ephemeral-storage variant, not the original S3 design
+
+- **Status:** reintroduced and shipped 2026-08-14, after being cut 2026-08-06 (history below,
+  kept for the record). **This is not the S3-backed design originally planned** — AWS access
+  was still unavailable when this was built (same expired session as M6 above), and the user
+  explicitly asked not to build storage infrastructure just for this feature. The variant that
+  shipped instead:
+  - **No S3, no durable image storage at all.** An uploaded photo is decoded, validated
+    (`api/routers/chat.py::_validate_photo` — content-type allowlist, size cap, a Pillow
+    `verify()` decode check), sent to the vision model, and then discarded. Nothing is written
+    to disk or a bucket. `MealPayload.photo_s3_key` (engine/types.py) stays unused/`None`.
+  - **Invariant I-23 is honored on the vision-success path and weakened on the failure path.**
+    On success, the structured data the vision call produced is what persists — same as a
+    successfully-parsed text turn never needing its raw string preserved separately. On
+    `VisionError`, the turn still falls back to a note (caption, or the honest literal
+    `"[photo, not parsed]"`, exactly as originally planned) — but unlike the S3-first design,
+    **the original photo itself is not recoverable** on that path. Re-attaching and resending
+    is the only recovery, and the composer keeps the draft + image after a failed send
+    specifically so that's a one-click action (`web/src/routes/AppScreen.tsx::sendPhotoTurn`).
+  - **If/when AWS access returns**, upgrading to S3-backed durability is additive — an upload
+    step before the vision call, wiring a bucket + IAM task-role policy — not a rework of
+    what shipped.
+  - **`extract_from_image`'s signature differs from the original plan.** It takes
+    `(image_bytes: bytes, mime_type: str, *, now, tz, caption)`, not `(s3_key, *, now, tz,
+    caption)` — there is no S3 key to pass. Same three-outcome contract (typed events /
+    affirmed-empty / raise `VisionError`) as always planned.
+  - **The `@runtime_checkable` blast radius predicted 2026-08-06 was real** and was paid in one
+    commit as predicted: `engine/model.py`'s Protocol, `BedrockProvider`, `ClaudeAPIProvider`,
+    `CompositeProvider`, and the test `FakeModelProvider` all gained `extract_from_image`
+    together. `BedrockProvider` and `ClaudeAPIProvider` both have **real** vision
+    implementations (Converse image blocks / Anthropic image content blocks) — this was not
+    stubbed to satisfy conformance only.
+  - **The one load-bearing correctness rule**, not in the original plan because it only became
+    obvious while implementing: a vision-derived `MealItem.qty_g`/`qty` must be set **only**
+    when the caption text explicitly states the amount — never from a visual guess, even a
+    confident one. `agent/providers/_prompts.py::nutrition_items_prompt` renders a present
+    `qty_g` as `"... g stated"`, so a vision-inferred gram figure placed there would silently
+    mislabel an AI guess as something the user said. Respecting this in `VISION_SYSTEM`
+    (`agent/providers/_prompts.py`) means `engine/nutrition.py` needed **zero changes** — its
+    existing `qty_basis: stated|ai_estimated` / `confidence_class` machinery, and the frontend's
+    existing `CitationChip`/`EvidenceRow` rendering of it, produce correct labels for
+    photo-derived meals automatically.
+  - **No LangGraph routing.** `POST /api/chat/photo` (`api/routers/chat.py`) calls
+    `IngestionService.ingest_photo` directly and then `engine.assembly.assemble` +
+    `engine.turns.persist_turn` — the same pattern `log_memory` already uses (dispatched
+    outside `plan`/`retrieve`, per `agent/graph.py::ingest_node`) — rather than teaching the
+    planner about attached images. The turn still shows up correctly in `GET /api/turns` and
+    `GET /api/turns/{id}/trace`.
+  - **Files touched:** `engine/model.py`, `agent/providers/{bedrock,claude_api,__init__,_prompts}.py`,
+    `engine/ingestion.py` (`ingest_photo`), `api/routers/chat.py` (`POST /api/chat/photo`),
+    `engine/tests/conftest.py` (`FakeModelProvider` vision fake), `pyproject.toml`
+    (`python-multipart`, `pillow` — new runtime deps), `web/src/components/layout/Composer.tsx`,
+    `web/src/routes/AppScreen.tsx`, `web/src/api/{client,queries}.ts`. Tests:
+    `engine/tests/test_photo_ingestion.py`, `api/tests/test_chat_photo.py`.
+  - **Not built:** the Playwright/E2E coverage other Phase 6 surfaces have — explicitly out of
+    scope for this pass per the user's own time-constraint instruction. Manual smoke-tested
+    instead.
+
+<details>
+<summary>Original cut record, 2026-08-06 (superseded by the above, kept for history)</summary>
 
 - **Status:** intentionally deferred, **not abandoned**. This was the designated first-to-cut
   milestone from the day Phase 5 was planned (`consolidation-architecture.md` §7, §8), so
@@ -106,31 +185,15 @@
      failed on `isinstance(..., ModelProvider)`. The change was reverted; the tree is clean.
      **There is no contracts-only first lane** — M7's first commit is necessarily the protocol
      plus all four providers.
-- **What remains, in build order:**
-  1. `engine/model.py`: `VisionError` + `extract_from_image(s3_key, *, now, tz, caption)` on
-     the Protocol, with the same three-outcome contract as `extract_events` (typed events /
-     affirmed-empty / raise). Draft wording is in the reverted probe — see §4.17 for the rule
-     it must encode: a provider that cannot tell "no loggable content" from "I failed to
-     parse this" **must raise**.
-  2. All four provider implementations above, or the conformance tests stay red.
-  3. An S3 seam (upload before extraction — the bytes are durable *first*, so a vision failure
-     loses nothing) plus bucket + IAM task-role policy.
-  4. `engine/ingestion.py`: the photo branch. `NotePayload.text` stays **required**; a failed
-     vision turn writes the caption when present, otherwise the honest literal
-     `"[photo, not parsed]"`, with `photo_s3_key` as an extra payload key.
-  5. `_NOTE_CONFIDENCE` parameterised (default 1.0 for live chat) so a photo fallback can
-     carry a lower value — this is what closes the note-confidence TODO below.
-  6. `api/routers/ingest.py` photo route; `Dockerfile` if the S3 client needs anything.
-  7. Tests per §8 M7: vision success → typed meal with `photo_s3_key`; vision failure → note
-     with the honest literal + the key; S3 failure → turn persists with a partial-save
-     message; the three-outcome contract holds for the vision surface.
 - **Invariant it owes:** **I-23** — a photo turn persists something for every failure outcome.
-  Already written into §5's invariant table; it is unimplemented, not withdrawn.
-- **Docs owed on resume:** `ingestion-transaction-boundaries.md` (§4 photo branch, §9 matrix),
-  and close the note-confidence entry below.
+  Already written into §5's invariant table; it is unimplemented, not withdrawn. (2026-08-14:
+  see the shipped-variant note above — I-23 now holds on the success path; the failure path is
+  a documented, narrower guarantee than originally planned.)
 - **Do not:** make `NotePayload.text` optional to accommodate a textless photo note. That
   weakens never-lose-input for the *text* path it was written for, and §4.17 rejected it
-  explicitly. The literal marker is the decided answer.
+  explicitly. The literal marker is the decided answer. (Honored by the shipped variant.)
+
+</details>
 
 ## Production abuse & spend controls (deferred 2026-07-12, /plan-eng-review D14)
 

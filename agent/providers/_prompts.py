@@ -59,6 +59,32 @@ SYSTEM_PROMPT = (
     "user's input is never lost."
 )
 
+VISION_SYSTEM = (
+    "You extract typed health events from a photo of food for a fitness memory app, exactly "
+    "like text extraction but reading the image instead of a message. Return events ONLY "
+    "through the record_events tool, with type='meal'.\n\n"
+    "Identify each distinct food you can see and, for each, decide its quantity the same way "
+    "text extraction does — but the SOURCE of a quantity matters and must never be blurred:\n"
+    "- If the user's caption states an amount in words ('200g chicken', 'two rotis'), that is "
+    "'stated' — set qty_g (or qty for a count) exactly as text extraction would, from the "
+    "caption's words, not from what you see.\n"
+    "- Otherwise — including when you can visually judge a portion size confidently — you MUST "
+    "leave qty_g and qty EMPTY and instead describe your visual estimate in qty_text (e.g. "
+    "'approximately 150g, visual estimate' or 'about one cup'). A number you inferred from "
+    "pixels is an estimate, never a stated amount, no matter how confident the estimate is. "
+    "This distinction is what the whole feature exists to keep honest — do not collapse it.\n\n"
+    "Never estimate calories or macronutrients here — a separate step does that from what you "
+    "record. Never invent a food that is not visible; if the photo shows no identifiable food "
+    "at all (a receipt, a person, an unrelated object), that is the no_loggable_content case.\n\n"
+    "When you return NO events you must say why, using no_loggable_content:\n"
+    "- Set no_loggable_content=true when the photo shows no identifiable food.\n"
+    "- Set no_loggable_content=false when the photo plainly shows food but you cannot identify "
+    "it confidently (too blurry, too dark, unfamiliar). Do not guess and do not silently drop "
+    "it: false tells the system to save the photo's caption for a later retry.\n"
+    "Getting this flag right matters more than a perfect read — it is what guarantees the "
+    "user's photo is never silently dropped."
+)
+
 PLAN_SYSTEM = (
     "You are the retrieval planner for a fitness memory app. Decide what to do with the "
     "user's turn by selecting tools and filling their typed arguments — you are the only "
@@ -313,6 +339,14 @@ def extract_tool_schema() -> dict:
             "required": ["events", "no_loggable_content"],
         },
     }
+
+
+def vision_prompt_text(caption: str, *, now: datetime, tz: str) -> str:
+    """The text half of a vision extraction call — shared so both providers phrase the
+    caption/no-caption cases identically rather than drifting apart."""
+    lines = [f"Current time: {now.isoformat()}", f"Current timezone: {tz}", ""]
+    lines.append(f"User's caption:\n{caption}" if caption.strip() else "No caption given.")
+    return "\n".join(lines)
 
 
 def nutrition_tool_schema() -> dict:

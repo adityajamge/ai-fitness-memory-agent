@@ -24,6 +24,11 @@ dependencies = [
     "boto3>=1.34",                       # Phase 2 — Bedrock extraction + Titan V2 embeddings
     "tzdata>=2024.1",                    # Phase 3 — IANA db for tz slot validation (zoneinfo
                                          # has no system db on Windows / slim images)
+    "python-multipart>=0.0.9",           # Phase 5 (M7) — required by FastAPI/Starlette for the
+                                         # photo-upload endpoint's multipart/form-data parsing
+    "pillow>=10.0",                      # Phase 5 (M7) — verify an upload actually decodes as
+                                         # an image before it is trusted, and strip EXIF before
+                                         # it reaches the vision model
 ]
 
 [dependency-groups]

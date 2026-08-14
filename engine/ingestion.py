@@ -24,6 +24,7 @@ from engine.model import (
     ExtractionError,
     ModelProvider,
     NutritionError,
+    VisionError,
 )
 from engine.nutrition import EstimateMethod, build_nutrition, is_engine_authored
 from engine.profile import get_profile
@@ -47,6 +48,10 @@ _NOTE_CONFIDENCE = 1.0  # we're certain the user said it; only the *parse* is in
 _MSG_OK = "saved"
 _MSG_NOOP = "nothing to log"
 _MSG_INCOMPLETE = "saved — parsing incomplete"
+#: The honest literal for a photo whose vision call failed and carried no caption (M7,
+#: consolidation-architecture.md §4.17) — never invent a description of an image no one
+#: could parse.
+_PHOTO_FALLBACK_TEXT = "[photo, not parsed]"
 
 
 @dataclass(frozen=True)
@@ -134,6 +139,63 @@ class IngestionService:
         except (ValidationError, UnknownMemoryType) as exc:
             logger.info("validation failed for user %s (%s); note fallback", user_id, exc)
             return self._persist_note(user_id, text, source, provenance, now, tz)
+
+        return self._persist_validated(user_id, memories)
+
+    def ingest_photo(
+        self,
+        user_id: UUID,
+        image_bytes: bytes,
+        mime_type: str,
+        *,
+        caption: str = "",
+        source: str = "photo_upload",
+        provenance: str = "live",
+        now: datetime | None = None,
+        tz: str | None = None,
+    ) -> Receipt:
+        """Photo counterpart to ``ingest_text`` (M7). Stage A calls the provider's vision
+        extraction instead of text extraction; stages B onward — validation, nutrition,
+        embeddings, insert, receipt, consolidation — are shared verbatim via
+        ``_build_memories``/``_persist_validated``, the same reuse ``ingest_text`` already
+        gets from ``_with_nutrition``.
+
+        **No image durability** (M7's ephemeral-storage variant — see TODOS.md and
+        consolidation-architecture.md §4.17 for the tradeoff against the original S3-first
+        design). ``image_bytes`` is held only for this call and never written anywhere. On
+        ``VisionError`` the raw photo is therefore not recoverable — only the caption (or the
+        honest ``_PHOTO_FALLBACK_TEXT`` placeholder) survives as a note, the same
+        never-lose-input fallback shape a failed text extraction already gets.
+        """
+        now = now or datetime.now(timezone.utc)
+        tz = tz or self.default_tz
+
+        # (A) vision extraction — off-transaction, no inline retry (a photo call is heavier
+        # than a text one; the note fallback already preserves the caption, so a second
+        # identical attempt buys little for the extra latency it costs the turn).
+        try:
+            events = self.model.extract_from_image(
+                image_bytes, mime_type, now=now, tz=tz, caption=caption
+            )
+        except VisionError:
+            logger.info("vision extraction failed for user %s; falling back to note", user_id)
+            return self._persist_note(
+                user_id, caption or _PHOTO_FALLBACK_TEXT, source, provenance, now, tz
+            )
+
+        # Empty result means the provider judged the photo contentless (no food visible) —
+        # mirrors ingest_text's empty-result contract exactly.
+        if not events:
+            return Receipt(parse_status="ok", message=_MSG_NOOP)
+
+        # (B) validation — all-or-nothing per turn (transaction-boundaries doc §5)
+        try:
+            memories = self._build_memories(user_id, events, source, provenance)
+        except (ValidationError, UnknownMemoryType) as exc:
+            logger.info("validation failed for user %s (%s); note fallback", user_id, exc)
+            return self._persist_note(
+                user_id, caption or _PHOTO_FALLBACK_TEXT, source, provenance, now, tz
+            )
 
         return self._persist_validated(user_id, memories)
 

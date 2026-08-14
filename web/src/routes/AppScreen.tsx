@@ -20,6 +20,7 @@ import {
   useInvalidateAfterTurn,
   useMemoriesByDay,
   useSendMessage,
+  useSendPhotoMessage,
   useStats,
   useTurns,
 } from "@/api/queries";
@@ -53,6 +54,7 @@ export function AppScreen() {
   const navigate = useNavigate();
   const stats = useStats();
   const send = useSendMessage();
+  const sendPhoto = useSendPhotoMessage();
   const invalidateAfterTurn = useInvalidateAfterTurn();
   const sessionExpired = useSessionExpired();
   const reduce = useReducedMotion();
@@ -61,6 +63,10 @@ export function AppScreen() {
   const streamAbortRef = useRef<AbortController | null>(null);
 
   const [draft, setDraft] = useState("");
+  // M7 (DESIGN.md §16 Decisions Log, 2026-08-14). Lives beside `draft`, not inside Composer,
+  // for the same reason `draft` does: it must survive a failed send so the user can just hit
+  // Send again rather than re-attaching the photo (§6.11.1's "draft survives a 401", extended).
+  const [attachedImage, setAttachedImage] = useState<File | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null);
   // Always defined from the first render — persisted per `session/threadStore.ts`, not lazily
@@ -363,6 +369,104 @@ export function AppScreen() {
   }, [threadId, turns.length, send.mutate, invalidateAfterTurn]);
 
   /**
+   * Photo counterpart to `sendTurn` (M7, DESIGN.md §16 Decisions Log, 2026-08-14). Same
+   * pending/assistant/failed turn shapes so the rest of the conversation renderer needs no
+   * new cases — but no SSE transport: `POST /api/chat/photo` doesn't route through the graph
+   * (api/routers/chat.py), so there is no staged-progress stream to attach to, only the plain
+   * mutation.
+   *
+   * **Clears `draft`/`attachedImage` only on success.** Unlike `handleSubmit`'s text path
+   * (which clears the composer immediately and relies on the failed-turn bubble to carry the
+   * message for retry), a failed photo upload leaves the composer exactly as the user left
+   * it — the image is never re-attachable from a failed bubble, so the composer itself is
+   * where "nothing was lost" has to be true.
+   */
+  const sendPhotoTurn = useCallback(
+    (image: File, message: string, replaceId?: string) => {
+      const pendingId = nextId();
+      const sentAt = new Date().toISOString();
+      const label = message ? message : "[Photo]";
+      setTurns((prev) =>
+        replaceId
+          ? prev.map((t) =>
+              t.id === replaceId ? { kind: "pending", id: pendingId, stages: [] } : t,
+            )
+          : [
+              ...prev,
+              { kind: "user", id: nextId(), content: label, createdAt: sentAt },
+              { kind: "pending", id: pendingId, stages: [] },
+            ],
+      );
+      setShowAskHint(false);
+      setActiveCitation(null);
+      setSelectedTurnId(null);
+      setDayView(null);
+
+      const onSuccess = (response: ChatResponse) => {
+        setThreadId(response.thread_id);
+        if (response.receipts.some((r) => r.created.length > 0) && turns.length === 0) {
+          setShowAskHint(true);
+        }
+        setTurns((prev) =>
+          prev.map((turn) =>
+            turn.id === pendingId
+              ? {
+                  kind: "assistant",
+                  id: pendingId,
+                  content: response.answer,
+                  receipts: response.receipts,
+                  citations: response.citations,
+                  citationReport: response.citation_report,
+                  trace: response.trace,
+                  turnId: response.turn_id,
+                  errors: response.errors,
+                  createdAt: new Date().toISOString(),
+                }
+              : turn,
+          ),
+        );
+        setDraft("");
+        setAttachedImage(null);
+      };
+
+      const onFailure = (error: unknown) => {
+        const detail =
+          error instanceof ApiError && error.status >= 500
+            ? "The server couldn't complete it."
+            : error instanceof ApiError
+              ? error.message
+              : "Couldn't reach the server.";
+        setTurns((prev) =>
+          prev.map((t) =>
+            t.id === pendingId ? { kind: "failed" as const, id: pendingId, message: label, detail } : t,
+          ),
+        );
+      };
+
+      sendPhoto.mutate(
+        threadId ? { image, message, threadId } : { image, message },
+        { onSuccess, onError: onFailure },
+      );
+    },
+    [threadId, turns.length, sendPhoto.mutate],
+  );
+
+  /** Combined retry for both transports (§6.11's "send again"). Branches on whether a photo
+   * is still attached rather than storing one on the failed turn itself — `attachedImage`
+   * already survives a failure (see `sendPhotoTurn` above), so this is the same state the
+   * user would resend by hand. */
+  const handleRetry = useCallback(
+    (message: string, failedId: string) => {
+      if (attachedImage) {
+        sendPhotoTurn(attachedImage, draft, failedId);
+      } else {
+        sendTurn(message, failedId);
+      }
+    },
+    [attachedImage, draft, sendPhotoTurn, sendTurn],
+  );
+
+  /**
    * The day-view handoff from Review (`routes/Review.tsx`).
    *
    * Review has **no day-view renderer of its own** (§6.20's "no machinery" rule) — clicking its
@@ -389,6 +493,12 @@ export function AppScreen() {
 
   function handleSubmit() {
     const message = draft.trim();
+    // A photo carries its own intent even with no caption ("attach + send" is a complete
+    // action) — text-only still requires non-empty content, same as before M7.
+    if (attachedImage) {
+      sendPhotoTurn(attachedImage, message);
+      return;
+    }
     if (!message) return;
     setDraft("");
     sendTurn(message);
@@ -475,7 +585,7 @@ export function AppScreen() {
               missing={missing}
               activeId={activeCitation}
               onActivateCitation={activateCitation}
-              onRetry={sendTurn}
+              onRetry={handleRetry}
               scrubDay={scrubDay}
               onScrubHandled={clearScrubDay}
             />
@@ -495,6 +605,9 @@ export function AppScreen() {
                 onSubmit={handleSubmit}
                 isLocked={sessionExpired}
                 isSending={isSending}
+                image={attachedImage}
+                onAttachImage={setAttachedImage}
+                onRemoveImage={() => setAttachedImage(null)}
               />
             </div>
           </div>

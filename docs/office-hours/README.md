@@ -31,6 +31,13 @@
 > latency profile and photo ingestion) is Phase 7 scope; detail in
 > [12-test-plan.md](12-test-plan.md) and [TODOS.md](../../TODOS.md).
 >
+> **Documentation audit 2026-08-14:** photo ingestion, listed above as Phase 7 scope, shipped
+> — reintroduced from its 2026-08-06 cut as an ephemeral-storage variant (no S3; AWS access was
+> unavailable). The latency profile remains Phase 7 scope, still blocked on the same AWS access;
+> measurement tooling (`cli/latency_probe.py`) now exists. Detail:
+> [12-test-plan.md](12-test-plan.md), [TODOS.md](../../TODOS.md),
+> [engineering/consolidation-architecture.md §4.17](../engineering/consolidation-architecture.md).
+>
 > **Documentation audit 2026-08-11 (profile/onboarding foundation):** account creation was
 > email+password only, with no health profile — [ADR-17](09-decisions.md#adr-17) is the fix.
 > `user_profile` (defined since Phase 2, never read or written) is activated as a current-state
@@ -114,7 +121,7 @@ from per-request idle to an always-on Fargate task + ALB).
 | CockroachDB Cloud Basic (ap-south-1) | $15/mo free credit = 50M RUs + 10 GiB storage; demo scale sits well inside; overage $0.20/M RU, $0.50/GiB-mo | **$0** (monitor console) |
 | ECS Fargate task (0.25 vCPU / 0.5 GB, 24/7, us-east-1) | ≈ $0.0123/hr ≈ $0.30/day | **~$9** |
 | Application Load Balancer (Express Mode; sole service, so full ALB) | $0.0225/hr + LCUs (negligible at demo traffic) | **~$17** |
-| ECR + S3 | image tags ($0.10/GiB-mo) + meal photos/report files | **<$2** |
+| ECR (S3 line dropped 2026-08-14 — photo ingestion shipped without S3, see doc-audit note above) | image tags ($0.10/GiB-mo) | **<$1** |
 | Bedrock — replay, one full pass | extraction over 6–12 months of history; **re-runs $0 by design** (T8 extraction cache) | **$5–15** |
 | Bedrock — dev/demo turns + live eval lanes | ~45 eval cases × a few runs, demo takes, vision extraction; Titan V2 embeddings negligible (512-dim, tiny inputs) | **$10–20** |
 | **Total** | | **≈ $43–63** |

@@ -48,12 +48,16 @@ from agent.providers._prompts import (
     SYSTEM_PROMPT as _SYSTEM_PROMPT,
 )
 from agent.providers._prompts import (
+    VISION_SYSTEM as _VISION_SYSTEM,
+)
+from agent.providers._prompts import (
     extract_tool_schema,
     nutrition_items_prompt,
     nutrition_tool_schema,
     parse_extracted_events,
     parse_nutrition_components,
     render_context,
+    vision_prompt_text,
 )
 from engine.model import (
     EmbeddingError,
@@ -64,6 +68,7 @@ from engine.model import (
     PlanningError,
     ToolCall,
     ToolSpec,
+    VisionError,
 )
 
 if TYPE_CHECKING:
@@ -91,6 +96,19 @@ def _forced_tool_config(tool: dict) -> dict:
 
 def _tool_config() -> dict:
     return _forced_tool_config(extract_tool_schema())
+
+
+_BEDROCK_IMAGE_FORMATS = {"image/jpeg": "jpeg", "image/png": "png", "image/webp": "webp"}
+
+
+def _bedrock_image_format(mime_type: str) -> str:
+    """Converse's image block format, from the upload's content-type. The API layer
+    (``api/routers/chat.py``) already restricts uploads to this same allowlist before a
+    request ever reaches here; this is the belt to that suspenders."""
+    try:
+        return _BEDROCK_IMAGE_FORMATS[mime_type]
+    except KeyError:
+        raise ValueError(f"unsupported image type for vision: {mime_type!r}") from None
 
 
 class BedrockProvider:
@@ -150,6 +168,45 @@ class BedrockProvider:
                 return block["toolUse"].get("input", {})
         # Model answered without calling the forced tool — treat as an unparseable turn.
         raise error(f"model did not return a {tool} tool call")
+
+    # ── vision extraction (M7: a photo instead of text) ────────────────────────────────
+    def extract_from_image(
+        self, image_bytes: bytes, mime_type: str, *, now: datetime, tz: str, caption: str = ""
+    ) -> list[ExtractedEvent]:
+        """Same forced-tool contract as ``extract_events``, with an image content block
+        alongside the caption text. See ``engine.model.ModelProvider.extract_from_image``
+        for the qty_g-only-when-stated rule this relies on ``_VISION_SYSTEM`` to enforce."""
+        try:
+            image_format = _bedrock_image_format(mime_type)
+        except ValueError as exc:
+            raise VisionError(str(exc)) from exc
+
+        prompt = vision_prompt_text(caption, now=now, tz=tz)
+        try:
+            response = self._client.converse(
+                modelId=self._extraction_model_id,
+                system=[{"text": _VISION_SYSTEM}],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"image": {"format": image_format, "source": {"bytes": image_bytes}}},
+                            {"text": prompt},
+                        ],
+                    }
+                ],
+                toolConfig=_tool_config(),
+                inferenceConfig={"maxTokens": 2048, "temperature": 0.0},
+            )
+        except (ClientError, BotoCoreError) as exc:  # throttling, timeouts, unsupported input
+            raise VisionError(f"bedrock converse (vision) failed: {exc}") from exc
+
+        return parse_extracted_events(
+            self._tool_input(response, _EXTRACT_TOOL, VisionError),
+            now=now,
+            tz=tz,
+            default_tz=self._default_tz,
+        )
 
     # ── nutrition estimation (the second, separate model call) ────────────────────────
     def estimate_nutrition(self, items: list[dict], *, context: str = "") -> list[dict]:

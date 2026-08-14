@@ -25,6 +25,7 @@ from engine.model import (
     PlanningError,
     ToolCall,
     ToolSpec,
+    VisionError,
 )
 from engine.tests.dbcleanup import register_user
 
@@ -84,11 +85,22 @@ class FakeModelProvider:
         narrate_error: bool = False,
         nutrition: list[dict] | None = None,
         nutrition_error: bool = False,
+        vision_events: list[ExtractedEvent] | None = None,
+        vision_error: bool = False,
     ) -> None:
         self.events = events or []
         self.extract_error = extract_error
         self.fail_first = fail_first
         self.embed_error = embed_error
+        # M7. ``None`` default means "this fake raises VisionError" (the failure/note-fallback
+        # path) — opting into a successful vision read is explicit, same posture as
+        # ``nutrition`` above.
+        self.vision_events = vision_events
+        self.vision_error = vision_error
+        self.vision_calls = 0
+        self.last_vision_caption: str | None = None
+        self.last_image_bytes: bytes | None = None
+        self.last_mime_type: str | None = None
         # Stage (B½). Default None means "this fake estimates nothing" — it raises, which is
         # the *failure* path, so every pre-nutrition test keeps writing meals with no nutrition
         # key and asserting exactly what it asserted before. Opting in is explicit.
@@ -115,6 +127,17 @@ class FakeModelProvider:
         if self.fail_first and self.extract_calls == 1:
             raise ExtractionError("forced first-attempt failure")
         return list(self.events)
+
+    def extract_from_image(
+        self, image_bytes: bytes, mime_type: str, *, now, tz, caption: str = ""
+    ) -> list[ExtractedEvent]:
+        self.vision_calls += 1
+        self.last_image_bytes = image_bytes
+        self.last_mime_type = mime_type
+        self.last_vision_caption = caption
+        if self.vision_error or self.vision_events is None:
+            raise VisionError("forced vision failure")
+        return list(self.vision_events)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         self.embed_calls += 1
