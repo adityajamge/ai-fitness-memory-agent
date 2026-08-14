@@ -116,6 +116,12 @@ class FakeModelProvider:
         self.narrate_error = narrate_error
         self.extract_calls = 0
         self.embed_calls = 0
+        # Per-instance salt so identical text embedded by *different* FakeModelProvider
+        # instances (e.g. one per test) lands on different vectors, avoiding a shared hot
+        # partition in the vector index across the suite. Stays constant within one
+        # instance's lifetime, so callers that embed the same text twice through the same
+        # provider (e.g. test_embed_query_matches_stored_pipeline) still get equal vectors.
+        self._embed_salt = uuid.uuid4().hex
         self.plan_invocations = 0
         self.narrate_invocations = 0
         self.last_tools: list[ToolSpec] = []
@@ -143,7 +149,7 @@ class FakeModelProvider:
         self.embed_calls += 1
         if self.embed_error:
             raise EmbeddingError("forced embedding failure")
-        return [_unit_vector(t) for t in texts]
+        return [_unit_vector(f"{self._embed_salt}:{t}") for t in texts]
 
     def estimate_nutrition(self, items: list[dict], *, context: str = "") -> list[dict]:
         self.nutrition_calls += 1
