@@ -73,7 +73,9 @@ def _opener() -> urllib.request.OpenerDirector:
     return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 
 
-def _post(opener: urllib.request.OpenerDirector, base_url: str, path: str, payload: dict) -> tuple[int, float]:
+def _post(
+    opener: urllib.request.OpenerDirector, base_url: str, path: str, payload: dict
+) -> tuple[int, float]:
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         base_url.rstrip("/") + path,
@@ -97,16 +99,22 @@ def _signup(opener: urllib.request.OpenerDirector, base_url: str) -> str:
     the (unlikely) case the generated email already exists."""
     email = f"latency-probe-{uuid.uuid4().hex}@example.com"
     password = uuid.uuid4().hex
-    status, _ = _post(opener, base_url, "/api/auth/signup", {"email": email, "password": password})
+    creds = {"email": email, "password": password}
+    status, _ = _post(opener, base_url, "/api/auth/signup", creds)
     if status not in (200, 201):
-        status, _ = _post(opener, base_url, "/api/auth/login", {"email": email, "password": password})
+        status, _ = _post(opener, base_url, "/api/auth/login", creds)
         if status != 200:
             raise SystemExit(f"could not authenticate against {base_url} (status {status})")
     return email
 
 
 def _measure(
-    opener: urllib.request.OpenerDirector, base_url: str, turn_type: str, message: str, thread_id: str, is_cold: bool
+    opener: urllib.request.OpenerDirector,
+    base_url: str,
+    turn_type: str,
+    message: str,
+    thread_id: str,
+    is_cold: bool,
 ) -> Sample:
     status, elapsed_ms = _post(
         opener, base_url, "/api/chat", {"message": message, "thread_id": thread_id}
@@ -124,10 +132,19 @@ def run(base_url: str, samples: int) -> list[Sample]:
         is_cold = i == 0
         now = datetime.now(timezone.utc).isoformat()
         results.append(
-            _measure(opener, base_url, "ingest", f"logged {100 + i}g rice at {now}", thread_id, is_cold)
+            _measure(
+                opener, base_url, "ingest", f"logged {100 + i}g rice at {now}", thread_id, is_cold
+            )
         )
         results.append(
-            _measure(opener, base_url, "query", "how much rice have I logged today?", thread_id, is_cold)
+            _measure(
+                opener,
+                base_url,
+                "query",
+                "how much rice have I logged today?",
+                thread_id,
+                is_cold,
+            )
         )
         results.append(
             _measure(
@@ -156,9 +173,10 @@ def _percentile(values: list[float], pct: float) -> float | None:
 def summarize(samples: list[Sample]) -> dict:
     summary: dict = {}
     for turn_type in _TURN_TYPES:
-        warm = [s.elapsed_ms for s in samples if s.turn_type == turn_type and not s.is_cold and s.status < 400]
-        cold = [s.elapsed_ms for s in samples if s.turn_type == turn_type and s.is_cold and s.status < 400]
-        failed = [s for s in samples if s.turn_type == turn_type and s.status >= 400]
+        this_type = [s for s in samples if s.turn_type == turn_type]
+        warm = [s.elapsed_ms for s in this_type if not s.is_cold and s.status < 400]
+        cold = [s.elapsed_ms for s in this_type if s.is_cold and s.status < 400]
+        failed = [s for s in this_type if s.status >= 400]
         summary[turn_type] = {
             "n_warm": len(warm),
             "n_cold": len(cold),
@@ -171,7 +189,9 @@ def summarize(samples: list[Sample]) -> dict:
     return summary
 
 
-def write_report(path: str, base_url: str, samples: int, results: list[Sample], summary: dict) -> None:
+def write_report(
+    path: str, base_url: str, samples: int, results: list[Sample], summary: dict
+) -> None:
     lines = [
         "# Latency profile (T12)",
         "",
