@@ -90,7 +90,8 @@ jobs:
           done
           # The SPA is served from this same container (ADR-13.3): "/" must return the built
           # shell, not the placeholder, or stage 1 silently produced nothing.
-          curl -fsS http://localhost:8080/ | grep -i "Memory Agent"
+          curl -fsS http://localhost:8080/ | grep -qi "AyuMind" \
+            || { echo "'/' did not serve the built SPA shell (title missing)"; docker logs app; exit 1; }
           curl -fsS http://localhost:8080/ | grep -q '<script type="module"' \
             || { echo "'/' did not serve the built SPA shell"; docker logs app; exit 1; }
           # A deep link must reach the shell so client-side routing survives a refresh...
