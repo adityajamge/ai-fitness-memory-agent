@@ -187,7 +187,11 @@ def chat_stream(
                 else:
                     yield _sse("stage", {"stage": item, "label": STAGE_LABELS[item]})
         except (PlanningError, NarrationError) as exc:
-            logger.warning("chat stream failed for user %s: %s", user_id, exc)
+            # exc_info surfaces the full chained traceback (PlanningError -> anthropic's
+            # APIError -> the underlying httpx transport error), which the plain str() here
+            # was hiding -- that chain is what actually says DNS failure vs. TCP timeout vs.
+            # TLS error, and "Connection error." alone doesn't distinguish those.
+            logger.warning("chat stream failed for user %s: %s", user_id, exc, exc_info=True)
             yield _sse(
                 "error", {"detail": "the assistant is unavailable right now; please retry"}
             )
