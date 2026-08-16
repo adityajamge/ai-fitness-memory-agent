@@ -29,6 +29,11 @@ dependencies = [
     "pillow>=10.0",                      # Phase 5 (M7) — verify an upload actually decodes as
                                          # an image before it is trusted, and strip EXIF before
                                          # it reaches the vision model
+    # The Claude API provider adapter (agent/providers/claude_api.py). Production, not just
+    # dev: ADR-13.2 (amended 2026-08-02) made LLM_PROVIDER=claude_api a first-class production
+    # configuration, and the deploy workflow (ci.yml) sets exactly that — so the deployed image
+    # needs this SDK even though EMBEDDING_PROVIDER stays on bedrock.
+    "anthropic>=0.69",
 ]
 
 [dependency-groups]
@@ -39,10 +44,6 @@ dev = [
     # Lets engine/config.py read a local .env (see .env.example). Dev-only on purpose: the
     # deployed image has no .env and reads real environment variables from the task definition.
     "python-dotenv>=1.0",
-    # Development-only: the Claude API provider adapter (MODEL_PROVIDER=claude_api) for
-    # running the app without Bedrock access. Bedrock remains the production default
-    # (ADR-13), so the deployed image does not need this. See agent/providers/claude_api.py.
-    "anthropic>=0.69",
 ]
 
 [tool.hatch.build.targets.wheel]

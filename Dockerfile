@@ -37,6 +37,17 @@ RUN pip install --no-cache-dir .
 # it only if index.html is present — so a build that skipped stage 1 still serves the API.
 COPY --from=web /web/dist ./web/dist
 
+# CockroachDB Cloud's serving cert chains to this root (public trust-anchor data, not a
+# secret — see docs/deploy.md → Runtime configuration). DATABASE_URL's sslrootcert points
+# here so `sslmode=verify-full` has somewhere to find it; nothing else on the image provides
+# one, and libpq refuses to connect without it.
+# The directory is created (and chmod'd) *before* the COPY on purpose: COPY --chmod applies
+# the same mode to any directory it auto-creates, and 444 on a directory strips its execute
+# bit, making it untraversable by the non-root `app` user — caught by running the image
+# locally as that user before this ever reached ECS.
+RUN mkdir -p /app/certs && chmod 755 /app/certs
+COPY --chmod=444 deploy/cockroachdb-ca.crt /app/certs/cockroachdb-ca.crt
+
 USER app
 EXPOSE 8080
 

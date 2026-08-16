@@ -131,7 +131,7 @@ so the values never appear in the task definition, the workflow, or CI logs.
 
 | Variable | Kind | Source |
 |---|---|---|
-| `DATABASE_URL` | **secret** | Secrets Manager → `vars.DATABASE_URL_SECRET_ARN` |
+| `DATABASE_URL` | **secret** | Secrets Manager → `vars.DATABASE_URL_SECRET_ARN`. Must include `sslmode=verify-full&sslrootcert=/app/certs/cockroachdb-ca.crt` — that file is baked into the image from [`deploy/cockroachdb-ca.crt`](../deploy/cockroachdb-ca.crt) (public trust-anchor data, not a secret). Without it, `verify-full` has nowhere to find a root cert and libpq refuses to connect — see the incident note below. |
 | `ANTHROPIC_API_KEY` | **secret** | Secrets Manager → `vars.ANTHROPIC_API_KEY_SECRET_ARN` |
 | `LLM_PROVIDER` = `claude_api` | env | workflow literal |
 | `EMBEDDING_PROVIDER` = `bedrock` | env | workflow literal |
@@ -147,7 +147,10 @@ so the values never appear in the task definition, the workflow, or CI logs.
 Run once per account; after this every deploy is fully automatic.
 
 ```bash
-# 1. Store the two secrets (reads from .env so the values never enter shell history)
+# 1. Store the two secrets (reads from .env so the values never enter shell history).
+#    DATABASE_URL's sslrootcert must point at the in-image cert path, not a local one — see
+#    "What is set where" above. Confirm .env has that before running this, or the deployed
+#    task will fail exactly as the 2026-08 incident did (see below).
 aws secretsmanager create-secret --name ai-fitness/DATABASE_URL \
   --secret-string "$(grep -E '^DATABASE_URL=' .env | cut -d= -f2-)"
 aws secretsmanager create-secret --name ai-fitness/ANTHROPIC_API_KEY \
@@ -235,6 +238,28 @@ exactly what the workflow's `environment-variables` and `secrets` inputs supply.
 > every `/api/*` route fails** — do not treat a green health check as proof the write path
 > is live. Verify with a real signup + ingest against the deployed URL, and update this
 > line with the result.
+
+> **Incident, 2026-08-15 — first real deploy attempt failed on two independent gaps.**
+> The first ECS task to actually start crashed with `ModuleNotFoundError: No module named
+> 'anthropic'`, and CloudWatch also showed the DB connection failing because
+> `/home/app/.postgresql/root.crt` did not exist. Root causes:
+> 1. `anthropic` was declared under `[dependency-groups].dev` in `pyproject.toml`, not
+>    `[project].dependencies` — so the production image (`pip install .`, no dev group)
+>    never had it, even though the workflow sets `LLM_PROVIDER=claude_api` for every deploy.
+>    This was the one that actually crashed the task: `api/main.py`'s `lifespan()` has no
+>    exception handling around `build_default_provider`, unlike the DB calls around it.
+> 2. `DATABASE_URL` used `sslmode=verify-full` with no `sslrootcert`, so libpq fell back to
+>    its default lookup path (`~/.postgresql/root.crt`) and found nothing — nothing in the
+>    image or task definition ever provisioned a cert. This one did *not* crash the task —
+>    `db.setup_schema()` catches `OperationalError` and logs a warning — which is exactly
+>    the silent-degradation trap the note above warns about: fixing only the `anthropic` gap
+>    would have shipped a task that passes `/healthz` while every DB-backed route stays dead.
+>
+> Fixed: `anthropic` moved to `[project].dependencies`; the real CockroachDB Cloud CA cert
+> (which chains to Let's Encrypt's ISRG Root X1/X2, not a private CockroachDB root) is now
+> committed at [`deploy/cockroachdb-ca.crt`](../deploy/cockroachdb-ca.crt) and baked into the
+> image (`Dockerfile`), and `DATABASE_URL` must set
+> `sslrootcert=/app/certs/cockroachdb-ca.crt` explicitly (see "What is set where" above).
 
 ## Operational notes
 
