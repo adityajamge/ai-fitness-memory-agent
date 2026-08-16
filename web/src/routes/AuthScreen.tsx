@@ -16,6 +16,8 @@ import { useState, type FormEvent } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 import { ApiError, login as loginRequest, signup as signupRequest } from "@/api/client";
+import Particles from "@/components/effects/Particles";
+import { VitalsFigure } from "@/components/effects/VitalsFigure";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
@@ -102,11 +104,31 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
 
   return (
     <main className="relative min-h-dvh overflow-hidden">
+      {/* A slow drifting field behind the graph rule, confined to the same right two-thirds so the
+          form column (§6.17: "the form sits directly on --background") stays untouched. Added
+          alongside VitalsFigure to close the gap between a single centered mark and the amount of
+          right-column space there actually is. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-y-0 right-0 hidden w-2/3 md:block"
+      >
+        <Particles className="opacity-70" particleCount={110} particleBaseSize={60} particleSpread={13} speed={0.07} />
+      </div>
+
       {/* The graph rule (§4.4), fading in from the right so it never sits behind the form. */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-y-0 right-0 hidden w-2/3 [background-image:var(--graph-rule)] [mask-image:linear-gradient(to_right,transparent,black_60%)] md:block"
       />
+
+      {/* Fills what used to be a blank right column on desktop — hidden below `lg` (1024px) rather
+          than `md` (768px) like the graph rule above, so it never fights the form for space at
+          in-between widths. Sized off the viewport (matching the source export's own `min(78vmin,
+          620px)`) rather than a fixed cap — a flat 420px left too much dead space around it once
+          seen running against the actual size of this column. */}
+      <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-1/2 items-center justify-center lg:flex">
+        <VitalsFigure className="w-full max-w-[min(78vmin,620px)] opacity-90" />
+      </div>
 
       <div className="relative flex min-h-dvh items-center px-6 md:px-[max(6vw,48px)]">
         <div className="w-full max-w-[380px]">

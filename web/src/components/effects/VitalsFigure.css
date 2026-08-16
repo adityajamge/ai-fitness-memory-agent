@@ -1,0 +1,105 @@
+/* Keyframes for VitalsFigure.tsx — own stylesheet rather than inline, same precedent as
+ * Logo.css/MoltenMetal.css: `@keyframes` are global, so defining them once here and referencing
+ * them by class name is both correct and the cheaper option if this ever renders more than once. */
+
+.vf-root {
+  transform-origin: 50% 50%;
+  animation: vf-drift 8s ease-in-out infinite;
+}
+
+.vf-spin {
+  transform-box: view-box;
+  transform-origin: 200px 200px;
+  animation: vf-spin 26s linear infinite;
+}
+
+.vf-halo {
+  transform-box: view-box;
+  transform-origin: 200px 240px;
+  animation: vf-halo 1.1s ease-in-out infinite;
+}
+
+.vf-beat {
+  animation: vf-beat 1.1s ease-in-out infinite;
+}
+
+.vf-sweep {
+  offset-rotate: 0deg;
+  animation: vf-sweep 2.6s linear infinite;
+}
+
+@keyframes vf-drift {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-7px);
+  }
+}
+
+@keyframes vf-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes vf-halo {
+  0%,
+  100% {
+    opacity: 0.26;
+    transform: scale(1);
+  }
+  10% {
+    opacity: 0.42;
+    transform: scale(1.035);
+  }
+  24% {
+    opacity: 0.3;
+    transform: scale(1.005);
+  }
+  34% {
+    opacity: 0.37;
+    transform: scale(1.02);
+  }
+  52% {
+    opacity: 0.26;
+    transform: scale(1);
+  }
+}
+
+@keyframes vf-beat {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  10% {
+    opacity: 0.85;
+  }
+  24% {
+    opacity: 0.6;
+  }
+  34% {
+    opacity: 0.74;
+  }
+  52% {
+    opacity: 0.55;
+  }
+}
+
+@keyframes vf-sweep {
+  0% {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  6% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 1;
+  }
+  100% {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+}
