@@ -104,15 +104,19 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
 
   return (
     <main className="relative min-h-dvh overflow-hidden">
-      {/* A slow drifting field behind the graph rule, confined to the same right two-thirds so the
-          form column (§6.17: "the form sits directly on --background") stays untouched. Added
-          alongside VitalsFigure to close the gap between a single centered mark and the amount of
-          right-column space there actually is. */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-y-0 right-0 hidden w-2/3 md:block"
-      >
-        <Particles className="opacity-70" particleCount={110} particleBaseSize={60} particleSpread={13} speed={0.07} />
+      {/* A slow drifting starfield across the full page (explicit user instruction — confining it
+          to the right column, the first pass here, read as the field stopping short rather than
+          as a deliberate composition). `pointer-events-none` throughout, so it never blocks the
+          form; white points rather than the brand cyan, also explicit instruction. */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 hidden md:block">
+        <Particles
+          className="opacity-85"
+          particleCount={200}
+          particleBaseSize={90}
+          particleSpread={6}
+          speed={0.06}
+          particleColors={["#ffffff"]}
+        />
       </div>
 
       {/* The graph rule (§4.4), fading in from the right so it never sits behind the form. */}

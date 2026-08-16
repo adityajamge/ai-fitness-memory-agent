@@ -5,12 +5,17 @@
  *
  * Ported from a design-tool export (`Neon Vitals Object.dc.html` + `assets/figure.png`, provided
  * directly and removed from `public/` once ported here — same precedent as `Logo.tsx`: the export
- * and its `support.js` templating runtime were never meant to be served as static assets). Three
- * counter-... no, a single spinning ring group (soft blur / mid blur / crisp, layered via SVG
- * `<use>`), a pulsing radial halo, a heartbeat-shaped trace whose bright dot sweeps the path on a
- * loop, a heartbeat-opacity ground shadow, and a slow whole-mark drift — all built around the
- * source raster figure (`vitals-figure.png`), which cannot be recolored, so the SVG accent colors
- * are picked to match its cyan glow rather than the brand mark's own teal/green ramp.
+ * and its `support.js` templating runtime were never meant to be served as static assets). A
+ * single spinning ring group (soft blur / mid blur / crisp, layered via SVG `<use>`), a pulsing
+ * radial halo, a heartbeat-shaped trace whose bright dot sweeps the path on a loop, and a slow
+ * whole-mark drift — all built around the source raster figure (`vitals-figure.png`), which cannot
+ * be recolored, so the SVG accent colors are picked to match its cyan glow rather than the brand
+ * mark's own teal/green ramp. The source export's fourth element, a blurred ellipse standing in
+ * for a ground shadow beneath the figure, was dropped: at this element's actual `stdDeviation`
+ * it read as a flat glowing bar/rectangle rather than a soft glow once seen against this screen's
+ * plain background (the source's own dark radial-gradient backdrop, not reused here, had hidden
+ * that same edge). DESIGN.md's own restraint rule (no shadows outside `--shadow-overlay`/
+ * `--shadow-popover`) argues for cutting it rather than re-tuning it.
  *
  * **This breaks rules 6 and 12 on purpose** (hardcoded hex colors, no gradients), the same
  * documented trade-off `Logo.tsx` and `MoltenMetal.tsx` already made — see DESIGN.md §16 Decisions
@@ -151,17 +156,6 @@ export function VitalsFigure({ className, animated = true }: VitalsFigureProps) 
             }}
           />
         </g>
-
-        <ellipse
-          cx="200"
-          cy="358"
-          rx="86"
-          ry="6"
-          fill="#6fe8dc"
-          filter={`url(#${softId})`}
-          className="vf-beat"
-          style={{ animationPlayState: playState }}
-        />
       </svg>
     </div>
   );
