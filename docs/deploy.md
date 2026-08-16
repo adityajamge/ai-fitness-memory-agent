@@ -150,11 +150,16 @@ Run once per account; after this every deploy is fully automatic.
 # 1. Store the two secrets (reads from .env so the values never enter shell history).
 #    DATABASE_URL's sslrootcert must point at the in-image cert path, not a local one — see
 #    "What is set where" above. Confirm .env has that before running this, or the deployed
-#    task will fail exactly as the 2026-08 incident did (see below).
+#    task will fail exactly as the 2026-08-15 incident did (see below).
+#    `tr -d '\n\r'` is required, not decorative — the 2026-08-16 incident (see below) was a
+#    trailing newline that slipped into the stored secret, which h11/httpcore then rejected
+#    as an illegal header value and which the Anthropic SDK reported as a generic
+#    "Connection error.", indistinguishable from a real network outage without reading the
+#    full exception chain.
 aws secretsmanager create-secret --name ai-fitness/DATABASE_URL \
-  --secret-string "$(grep -E '^DATABASE_URL=' .env | cut -d= -f2-)"
+  --secret-string "$(grep -E '^DATABASE_URL=' .env | cut -d= -f2- | tr -d '\n\r')"
 aws secretsmanager create-secret --name ai-fitness/ANTHROPIC_API_KEY \
-  --secret-string "$(grep -E '^ANTHROPIC_API_KEY=' .env | cut -d= -f2-)"
+  --secret-string "$(grep -E '^ANTHROPIC_API_KEY=' .env | cut -d= -f2- | tr -d '\n\r')"
 
 # 2. Let the EXECUTION role read them (it is what injects secrets at task start)
 aws iam put-role-policy --role-name <EXECUTION_ROLE_NAME> \
@@ -260,6 +265,38 @@ exactly what the workflow's `environment-variables` and `secrets` inputs supply.
 > committed at [`deploy/cockroachdb-ca.crt`](../deploy/cockroachdb-ca.crt) and baked into the
 > image (`Dockerfile`), and `DATABASE_URL` must set
 > `sslrootcert=/app/certs/cockroachdb-ca.crt` explicitly (see "What is set where" above).
+
+> **Incident, 2026-08-16 — every chat turn failed with `claude api planning failed:
+> Connection error.`, despite `/healthz` and every DB-backed route (`/api/profile`,
+> `/api/threads`, `/api/turns`, `/api/stats`, `/api/auth/*`) returning 200.** CloudWatch's
+> first log line pointed at the network — `anthropic.APIConnectionError`'s `str()` is a
+> hardcoded `"Connection error."` regardless of cause, which reads exactly like a blocked
+> egress path. A live audit of the running task's security group, NACL, route table (→ IGW),
+> subnet public-IP mapping, VPC DNS settings, and Route53 DNS Firewall/Network
+> Firewall/Transit Gateway/VPC-endpoint config found nothing wrong at any layer — consistent
+> with CockroachDB Cloud (an equally external, TLS-secured endpoint) connecting successfully
+> through the same task. The infra was never the problem.
+>
+> Root cause, once [`api/routers/chat.py`](../api/routers/chat.py)'s `exc_info=True` logging
+> (added for exactly this reason, then sitting undeployed for several hours until this
+> incident's redeploy) surfaced the full chain: `httpcore.LocalProtocolError: Illegal header
+> value b'sk-ant-...\n'`. The `ANTHROPIC_API_KEY` secret in Secrets Manager had a **literal
+> trailing newline** baked into its value. `h11`/`httpcore` reject a header value containing
+> `\n` client-side, before ever opening a socket — the SDK maps that rejection to
+> `APIConnectionError`, the same exception class (and message) a real DNS/TCP/TLS failure
+> would produce. The request never reached the network layer at all.
+>
+> The likely source: the one-time setup script below originally read secrets with
+> `--secret-string "$(...)"` typed/pasted across multiple lines in a terminal, which can
+> embed a trailing `\n` in the captured value; the corresponding local `.env` had a stray,
+> uncommented multi-line `aws secretsmanager create-secret` fragment matching this exact
+> failure shape. Fixed: the script now pipes through `tr -d '\n\r'` so a wrapped or
+> copy-pasted invocation can't reintroduce a newline into the stored secret.
+>
+> **Takeaway:** a hardcoded, cause-agnostic exception message (`APIConnectionError` here) can
+> make a client-side validation failure look identical to a network outage. When a "connection
+> error" survives every infra check, check what's actually in the secret before spending more
+> time on the network path.
 
 ## Operational notes
 
