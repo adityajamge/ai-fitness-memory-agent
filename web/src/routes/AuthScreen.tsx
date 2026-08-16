@@ -136,8 +136,13 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
 
       <div className="relative flex min-h-dvh items-center px-6 md:px-[max(6vw,48px)]">
         <div className="w-full max-w-[380px]">
-          <Link to="/" aria-label="AyuMind AI home" className="inline-block">
-            <Logo size={20} animated={false} glowStrength={0} />
+          {/* Matches the landing nav's mark+wordmark treatment exactly (`Logo` size 36, same
+              `text-dense font-medium` label) — the icon-only footer treatment sits at the bottom
+              of a page next to other text, but this sits at the top the way the nav's does, and
+              icon-only here was the first thing "this looks like a different website" traced to. */}
+          <Link to="/" className="inline-flex items-center gap-3">
+            <Logo size={36} animated={false} glowStrength={0} />
+            <span className="text-dense font-medium text-foreground">AyuMind AI</span>
           </Link>
 
           <h1 className="mt-8 text-h2 text-foreground">{copy.title}</h1>

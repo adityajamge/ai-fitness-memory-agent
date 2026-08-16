@@ -9,13 +9,20 @@
  * single spinning ring group (soft blur / mid blur / crisp, layered via SVG `<use>`), a pulsing
  * radial halo, a heartbeat-shaped trace whose bright dot sweeps the path on a loop, and a slow
  * whole-mark drift — all built around the source raster figure (`vitals-figure.png`), which cannot
- * be recolored, so the SVG accent colors are picked to match its cyan glow rather than the brand
- * mark's own teal/green ramp. The source export's fourth element, a blurred ellipse standing in
- * for a ground shadow beneath the figure, was dropped: at this element's actual `stdDeviation`
- * it read as a flat glowing bar/rectangle rather than a soft glow once seen against this screen's
- * plain background (the source's own dark radial-gradient backdrop, not reused here, had hidden
- * that same edge). DESIGN.md's own restraint rule (no shadows outside `--shadow-overlay`/
+ * be recolored. The source export's fourth element, a blurred ellipse standing in for a ground
+ * shadow beneath the figure, was dropped: at this element's actual `stdDeviation` it read as a
+ * flat glowing bar/rectangle rather than a soft glow once seen against this screen's plain
+ * background (the source's own dark radial-gradient backdrop, not reused here, had hidden that
+ * same edge). DESIGN.md's own restraint rule (no shadows outside `--shadow-overlay`/
  * `--shadow-popover`) argues for cutting it rather than re-tuning it.
+ *
+ * **Recolored 2026-08-16** (explicit user instruction, after the auth screens read as "not the
+ * same website" as the landing page): the ring, ECG trace, and halo now draw from `Logo.tsx`'s own
+ * three gradients (`mainId`/`coolId`/`warmId` — same hex stops, copied rather than re-derived) in
+ * place of a single flat `#6fe8dc` this component picked up from the source export's own cyan
+ * figure. The raster figure itself still can't be recolored, so its `drop-shadow` tint was moved
+ * to `#1fc9a6` (the brand ramp's own middle stop) so the glow around it at least reads as the same
+ * hue family the ring is now drawn in, rather than a third, unrelated cyan.
  *
  * **This breaks rules 6 and 12 on purpose** (hardcoded hex colors, no gradients), the same
  * documented trade-off `Logo.tsx` and `MoltenMetal.tsx` already made — see DESIGN.md §16 Decisions
@@ -49,6 +56,9 @@ export function VitalsFigure({ className, animated = true }: VitalsFigureProps) 
   const midId = `vf-mid-${uid}`;
   const haloId = `vf-halo-${uid}`;
   const ringId = `vf-ring-${uid}`;
+  const mainId = `vf-main-${uid}`;
+  const coolId = `vf-cool-${uid}`;
+  const warmId = `vf-warm-${uid}`;
 
   const ecgPath = "M146 282 H182 L188 274 L193 282 H201 L207 252 L215 320 L222 262 L228 282 H239 L244 276 L249 282 H254";
 
@@ -70,9 +80,25 @@ export function VitalsFigure({ className, animated = true }: VitalsFigureProps) 
           <filter id={midId} x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur stdDeviation="2.4" />
           </filter>
+          {/* Same three stops as Logo.tsx's mainId/coolId/warmId — copied, not re-derived, so this
+              mark's ring and ECG trace read as the brand mark's own palette rather than a fourth,
+              unrelated hue introduced just for this screen. */}
+          <linearGradient id={mainId} x1="0.1" y1="1" x2="0.9" y2="0">
+            <stop offset="0%" stopColor="#0fa3cf" />
+            <stop offset="50%" stopColor="#1fc9a6" />
+            <stop offset="100%" stopColor="#4ade80" />
+          </linearGradient>
+          <linearGradient id={coolId} x1="0" y1="1" x2="1" y2="0">
+            <stop offset="0%" stopColor="#1490d4" />
+            <stop offset="100%" stopColor="#22c9c4" />
+          </linearGradient>
+          <linearGradient id={warmId} x1="0" y1="1" x2="1" y2="0">
+            <stop offset="0%" stopColor="#1fc9a6" />
+            <stop offset="100%" stopColor="#6ef08e" />
+          </linearGradient>
           <radialGradient id={haloId} cx="50%" cy="52%" r="50%">
-            <stop offset="0%" stopColor="#2ee0d8" stopOpacity="0.28" />
-            <stop offset="55%" stopColor="#1a8f9d" stopOpacity="0.1" />
+            <stop offset="0%" stopColor="#22c9c4" stopOpacity="0.28" />
+            <stop offset="55%" stopColor="#1490d4" stopOpacity="0.1" />
             <stop offset="100%" stopColor="#0a1017" stopOpacity="0" />
           </radialGradient>
           <g id={ringId}>
@@ -80,16 +106,16 @@ export function VitalsFigure({ className, animated = true }: VitalsFigureProps) 
               cx="200"
               cy="200"
               r="150"
-              stroke="#6fe8dc"
+              stroke={`url(#${coolId})`}
               strokeWidth="1.9"
               fill="none"
               strokeDasharray="245 28.3 179.1 28.3 226.2 28.3 179.1 28.3"
               strokeLinecap="round"
             />
-            <circle cx="176.5" cy="348" r="4.6" fill="#6fe8dc" />
-            <circle cx="50.1" cy="204.7" r="4.6" fill="#6fe8dc" />
-            <circle cx="214.1" cy="50.6" r="4.6" fill="#6fe8dc" />
-            <circle cx="349.4" cy="185.9" r="4.6" fill="#6fe8dc" />
+            <circle cx="176.5" cy="348" r="4.6" fill={`url(#${warmId})`} />
+            <circle cx="50.1" cy="204.7" r="4.6" fill={`url(#${coolId})`} />
+            <circle cx="214.1" cy="50.6" r="4.6" fill={`url(#${warmId})`} />
+            <circle cx="349.4" cy="185.9" r="4.6" fill={`url(#${coolId})`} />
           </g>
         </defs>
 
@@ -103,7 +129,7 @@ export function VitalsFigure({ className, animated = true }: VitalsFigureProps) 
           style={{ animationPlayState: playState }}
         />
 
-        <circle cx="200" cy="200" r="150" stroke="#6fe8dc" strokeWidth="1.1" fill="none" opacity="0.13" />
+        <circle cx="200" cy="200" r="150" stroke="#22c9c4" strokeWidth="1.1" fill="none" opacity="0.13" />
 
         <g className="vf-spin" style={{ animationPlayState: playState }}>
           <use href={`#${ringId}`} filter={`url(#${softId})`} opacity="0.55" />
@@ -121,7 +147,7 @@ export function VitalsFigure({ className, animated = true }: VitalsFigureProps) 
           top: "21%",
           width: "60%",
           height: "67%",
-          filter: "saturate(1.06) drop-shadow(0 0 14px rgba(111, 232, 220, 0.35))",
+          filter: "saturate(1.06) drop-shadow(0 0 14px rgba(31, 201, 166, 0.35))",
         }}
       />
 
@@ -129,7 +155,7 @@ export function VitalsFigure({ className, animated = true }: VitalsFigureProps) 
         <g transform="translate(200 250) scale(0.9) translate(-200 -282)">
           <path
             d={ecgPath}
-            stroke="#6fe8dc"
+            stroke={`url(#${mainId})`}
             strokeWidth="5"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -138,7 +164,7 @@ export function VitalsFigure({ className, animated = true }: VitalsFigureProps) 
           />
           <path
             d={ecgPath}
-            stroke="#e8fff6"
+            stroke="#b9ffd0"
             strokeWidth="1.9"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -151,7 +177,7 @@ export function VitalsFigure({ className, animated = true }: VitalsFigureProps) 
             style={{
               offsetPath: `path('${ecgPath}')`,
               offsetRotate: "0deg",
-              filter: "drop-shadow(0 0 6px #6fe8dc) drop-shadow(0 0 14px #6fe8dc)",
+              filter: "drop-shadow(0 0 6px #22c9c4) drop-shadow(0 0 14px #4ade80)",
               animationPlayState: playState,
             }}
           />
