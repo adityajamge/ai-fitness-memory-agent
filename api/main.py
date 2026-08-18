@@ -115,6 +115,8 @@ def create_app(
                 checkpointer=saver,
                 default_tz=settings.default_tz,
                 consolidation=consolidation,
+                history_max_turns=settings.history_max_turns,
+                history_max_chars=settings.history_max_chars,
             )
         except psycopg.OperationalError:
             logger.warning(

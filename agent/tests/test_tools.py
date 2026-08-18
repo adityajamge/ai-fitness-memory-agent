@@ -32,7 +32,6 @@ from agent.tools import (
     build_tool_specs,
     execute,
     is_log_memory,
-    log_memory_text,
     prepare_call,
 )
 from engine.assembly import RetrievalOutcome, assemble
@@ -99,7 +98,20 @@ def test_required_slots_are_declared() -> None:
     by_name = {s.name: s.input_schema for s in build_tool_specs()}
     assert set(by_name[AGGREGATE_MEMORIES]["required"]) == {"metric", "start", "end"}
     assert by_name[RECALL_MEMORIES]["required"] == ["query"]
-    assert by_name[LOG_MEMORY]["required"] == ["text"]
+
+
+def test_log_memory_takes_no_arguments_at_all() -> None:
+    """ADR-14.15, the ingestion-source invariant, asserted at the schema.
+
+    ``log_memory`` is a *signal* that the current turn is loggable — never a payload. The
+    text that reaches ingestion is ``state["question"]``, so there is deliberately no slot a
+    planner could put text in. This test is the tripwire: re-adding one (``text``, ``content``,
+    ``summary``, anything) reopens the channel through which a fact from an earlier
+    conversation turn could be copied into this turn and re-dated to today.
+    """
+    by_name = {s.name: s.input_schema for s in build_tool_specs()}
+    assert by_name[LOG_MEMORY]["properties"] == {}
+    assert by_name[LOG_MEMORY]["required"] == []
 
 
 # ── 2. validation: raw arguments → typed specs ────────────────────────────────────────
@@ -215,26 +227,29 @@ def test_missing_date_range_is_not_defaulted_to_a_guessed_window() -> None:
 
 
 def test_log_memory_is_dispatched_by_the_graph_not_prepare_call() -> None:
-    call = _call(LOG_MEMORY, text="250g curd")
+    call = _call(LOG_MEMORY)
     assert is_log_memory(call)
-    assert log_memory_text(call) == "250g curd"
     with pytest.raises(ToolCallError):
         _prepare(call)
 
 
-def test_log_memory_requires_non_empty_text() -> None:
-    with pytest.raises(ToolCallError):
-        log_memory_text(_call(LOG_MEMORY, text="  "))
-    with pytest.raises(ToolCallError):
-        log_memory_text(_call(LOG_MEMORY))
+def test_stray_arguments_on_log_memory_are_ignored_not_rejected() -> None:
+    """A model that attaches text anyway is still a valid ingest signal.
+
+    Rejecting the call would cost the user their turn over a model quirk (never-lose-input,
+    ADR-13.5); reading the text would reopen the hole ADR-14.15 closes. So the call is
+    recognised and the arguments are simply never consulted — ``ingest_node`` reads
+    ``state["question"]`` and nothing else. ``agent/tests/test_ingestion_source.py`` proves
+    that end to end against the real graph.
+    """
+    assert is_log_memory(_call(LOG_MEMORY, text="3 eggs from yesterday"))
+    assert is_log_memory(ToolCall(tool=LOG_MEMORY, arguments=None))  # type: ignore[arg-type]
 
 
 def test_non_dict_arguments_fail_as_validation_errors_not_crashes() -> None:
     # A malformed provider payload must surface as ToolCallError, never AttributeError.
     with pytest.raises(ToolCallError):
         _prepare(ToolCall(tool=AGGREGATE_MEMORIES, arguments=None))  # type: ignore[arg-type]
-    with pytest.raises(ToolCallError):
-        log_memory_text(ToolCall(tool=LOG_MEMORY, arguments=None))  # type: ignore[arg-type]
 
 
 def test_empty_types_filter_is_rejected_not_read_as_no_filter() -> None:

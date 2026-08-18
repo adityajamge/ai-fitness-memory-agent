@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import base64
 import logging
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -52,6 +53,7 @@ from agent.providers._prompts import (
     SYSTEM_PROMPT,
     VISION_SYSTEM,
     extract_tool_schema,
+    history_messages,
     nutrition_items_prompt,
     nutrition_tool_schema,
     parse_extracted_events,
@@ -63,6 +65,7 @@ from engine.model import (
     EmbeddingError,
     ExtractedEvent,
     ExtractionError,
+    HistoryTurn,
     NarrationError,
     NutritionError,
     PlanningError,
@@ -242,10 +245,21 @@ class ClaudeAPIProvider:
 
     # ── planning ──────────────────────────────────────────────────────────────────────
     def plan(
-        self, question: str, tools: list[ToolSpec], *, now: datetime, tz: str
+        self,
+        question: str,
+        tools: list[ToolSpec],
+        *,
+        now: datetime,
+        tz: str,
+        history: Sequence[HistoryTurn] = (),
     ) -> list[ToolCall]:
         """Tool selection with ``tool_choice: auto`` so an empty plan stays expressible
-        (M4-2: calling nothing is a deliberate outcome, not a failure)."""
+        (M4-2: calling nothing is a deliberate outcome, not a failure).
+
+        Prior turns ride ahead of the current one as real messages; the current turn is always
+        the final message and is the only one carrying ``Current time``, so "now" is
+        unambiguous no matter how much history precedes it.
+        """
         prompt = (
             f"Current time: {now.isoformat()}\nCurrent timezone: {tz}\n\nUser turn:\n{question}"
         )
@@ -254,7 +268,7 @@ class ClaudeAPIProvider:
                 model=self._model_id,
                 max_tokens=_MAX_TOKENS_STRUCTURED,
                 system=PLAN_SYSTEM,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[*history_messages(history), {"role": "user", "content": prompt}],
                 tools=[
                     {"name": t.name, "description": t.description, "input_schema": t.input_schema}
                     for t in tools
@@ -276,13 +290,22 @@ class ClaudeAPIProvider:
         return calls
 
     # ── narration ─────────────────────────────────────────────────────────────────────
-    def narrate(self, question: str, context: ContextBlock) -> str:
+    def narrate(
+        self, question: str, context: ContextBlock, *, history: Sequence[HistoryTurn] = ()
+    ) -> str:
+        """Prior turns give continuity; the evidence block is the final message and is the
+        only thing that may be cited. Keeping history *outside* ``render_context`` is what
+        makes that separation structural rather than a prompt instruction — the evidence
+        prompt has no channel through which a conversational line could arrive."""
         try:
             response = self._client.messages.create(
                 model=self._model_id,
                 max_tokens=_MAX_TOKENS_PROSE,
                 system=NARRATE_SYSTEM,
-                messages=[{"role": "user", "content": render_context(question, context)}],
+                messages=[
+                    *history_messages(history),
+                    {"role": "user", "content": render_context(question, context)},
+                ],
                 **self._effort_kwargs(),
             )
         except anthropic.APIError as exc:

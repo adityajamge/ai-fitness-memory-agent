@@ -485,6 +485,76 @@ response shape is designed so Phase 6 *adds* fields rather than reshaping. ADR-1
 ("a trace exists whenever context was assembled") already holds — only its storage is
 deferred.
 
+### 14.15 The ingestion source is the current turn, and `log_memory` carries no text
+
+`log_memory` is a **zero-argument signal**: selecting it asserts *"the current turn states
+something loggable"* and nothing more. `ingest_node` passes `state["question"]` — the bytes the
+user submitted with this request — to `IngestionService`, always, and never reads anything off
+the tool call. Extraction is anchored to `state["now"]`, the turn's own clock, so a relative
+date resolves against the request that contained the word. However many `log_memory` calls a
+plan contains, the turn is ingested at most once.
+
+**Why the `text` slot was removed** (it existed through Phase 6): once conversation history is
+visible to the planner (14.16), a model-authored string is the one channel through which a fact
+from an earlier day can be re-ingested and re-dated to today — verbatim ("3 eggs"), merged
+("3 eggs and 100g paneer", the dangerous shape, since one call yields two events), split across
+parallel calls, or resolved from a reference ("same as yesterday", where the model is doing
+exactly what history was added for). The write path has **no dedupe**, so any of those commits a
+permanent duplicate that inflates every aggregate, insight and nutrition total over that range
+while the glass box cites it as genuine evidence.
+
+Prompt instruction alone was rejected as the defence: it reduces how often a model tries and
+guarantees nothing. The slot's own description already said "copy the user's own words
+verbatim" — a model-authored field whose only correct value is data the graph already holds is
+pure liability, so deleting it costs nothing and closes the class. Stray arguments on the call
+are **ignored, not rejected**: refusing would cost the user their turn over a model quirk
+(never-lose-input, ADR-13.5).
+
+*Enforced by* `agent/tests/test_ingestion_source.py` (the Aug-16/Aug-17 scenario, with a
+planner that deliberately tries to re-log) and a schema tripwire in `test_tools.py`.
+*Amends 14.1: routing is still tool selection; only the payload is gone.*
+
+### 14.16 Short-term conversation memory is context, never an ingestion source
+
+Recent messages from the current thread are loaded at the start of every turn
+(`engine/history.py`) and passed to **`plan` and `narrate` only**, as real prior `messages[]`
+entries with the current turn last. Window: 12 messages (~6 exchanges), 8000 characters total,
+2000 per message, oldest dropped first — characters not tokens, because no tokenizer is in the
+dependency tree and the two providers tokenize differently. `HISTORY_MAX_TURNS=0` restores the
+previous stateless behaviour without a code change.
+
+**The separation, which is the whole point:**
+
+| | Short-term | Long-term |
+|---|---|---|
+| Question | "what are we talking about now?" | "what do I know about this user?" |
+| Source | `turns` (this thread, last N) | `memories` (retrieved, ranked) |
+| Reaches | `plan`, `narrate` | `plan`, `narrate` |
+| Citable | never | by `[memory-id]` |
+| In the trace | never | always |
+| Ingestion source | **never** | n/a |
+
+Three consequences follow structurally rather than by instruction: history stays out of
+`ContextBlock`, so `citable_ids` cannot grow from it; `extract_events(text, now, tz)` has no
+parameter through which it could arrive; and it rides `TurnCarrier`, not `GraphState`, so the
+M5-1 channel allowlist is unchanged and the checkpoint does not accumulate a second, staler copy
+of rows the database already owns.
+
+**Read from `turns`, not the checkpointer's `messages` channel**, though that channel exists and
+accumulates already. `turns` takes a `LIMIT`; it is the designated read/UI truth under ADR-13.14
+while the checkpoint is execution state; and decisively, `POST /api/chat/photo` never runs the
+graph, so photo turns exist in `turns` and are absent from `messages` — sourcing the checkpoint
+would leave the assistant blind to every photo the user sent.
+
+Each message is rendered with its absolute date (`[Aug 16] …`) in the user's timezone, so an
+earlier "today" cannot be read as the current date. Assistant messages are stripped of
+`[memory-id]` markers first: replayed verbatim they invite the model to reuse an id this turn's
+evidence does not support, which `validate_citations` then correctly flags — a broken glass box
+caused by our own prompt. A history read failure is best-effort like stages (F₀) and (G): the
+turn answers without conversational memory rather than 502-ing.
+
+*Enforced by* `engine/tests/test_history.py` and `agent/tests/test_history_flow.py`.
+
 ## <a name="adr-15"></a>ADR-15 — Phase 4 decisions (history bootstrap / replay, 2026-07-29 → 2026-08-02)
 
 Decisions taken during Phase 4 and **now proven by a production run**: 424 records of the

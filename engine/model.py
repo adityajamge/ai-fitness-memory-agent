@@ -12,6 +12,7 @@ cited prose); vision (Phase 5) extends this Protocol later.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
@@ -84,6 +85,38 @@ class ToolSpec:
     name: str
     description: str
     input_schema: dict  # JSON Schema for the tool's arguments
+
+
+@dataclass(frozen=True, slots=True)
+class HistoryTurn:
+    """One earlier message in the current conversation thread — **short-term memory**.
+
+    The distinction this type exists to hold, and which the whole design turns on:
+
+    * **Short-term** (this) — *"what are we talking about right now?"* Recent messages from
+      this thread, read from the ``turns`` table. Context for resolving references ("how did
+      you find that?", "what about last week?"). It is **never evidence**: it carries no
+      memory ids, never enters ``ContextBlock`` or ``EvidenceTrace``, is never citable, and —
+      load-bearing — is never an ingestion source (ADR-14.15).
+    * **Long-term** (``ContextBlock``) — *"what do I know about this user?"* Typed rows
+      retrieved deterministically from ``memories``, cited by id, shown in the glass box.
+
+    ``at`` is **when the message was sent** — ``turns.created_at``, already converted to the
+    user's timezone by ``engine.history.fetch_history``, so rendering it is pure formatting at
+    the prompt boundary (decision D-5) and no consumer needs to know the user's zone.
+
+    It is deliberately the row's write time rather than the turn's logical clock
+    (``state["now"]``). "When was this said" is a fact about the conversation, and the write
+    time is the only record of it; in production the two coincide, and where they diverge — a
+    test that backdates ``now`` — the write time is still the honest answer.
+    That date prefix is not cosmetic: without it a model reads an earlier message's "today"
+    as meaning the current date, which is exactly the confusion the ingestion invariant is
+    defending against one layer down.
+    """
+
+    role: str  # 'user' | 'assistant'
+    content: str
+    at: datetime
 
 
 @dataclass(frozen=True)
@@ -199,13 +232,32 @@ class ModelProvider(Protocol):
         ...
 
     def plan(
-        self, question: str, tools: list[ToolSpec], *, now: datetime, tz: str
+        self,
+        question: str,
+        tools: list[ToolSpec],
+        *,
+        now: datetime,
+        tz: str,
+        history: Sequence[HistoryTurn] = (),
     ) -> list[ToolCall]:
         """Turn a user turn into typed tool calls — the **only** natural-language
         understanding step in the system (05 query-planning boundary). The planner
         classifies the turn and selects tools by filling their typed slots; it never
         executes anything and never issues SQL. ``now``/``tz`` ground relative date ranges
         ("last 30 days").
+
+        ``history`` is the recent conversation (short-term memory), oldest first, **excluding
+        the current turn**. Implementations ship it as real prior ``messages`` entries with
+        ``question`` last, so the current turn is unambiguously the one being answered. It is
+        here because reference resolution is language understanding, and this is the one place
+        language understanding lives: "how did you find that?" and "what about last week?"
+        cannot be planned without it.
+
+        **It is context, never an ingestion source.** ``log_memory`` takes no arguments, so
+        selecting it says only *"the current turn is loggable"*; the graph ingests
+        ``state["question"]`` regardless (ADR-14.15). A planner cannot cause an earlier turn's
+        content to be recorded as a new memory, and this contract must never grow a way for it
+        to try.
 
         Routing is tool selection: with ``log_memory`` among ``tools``, selecting it is an
         *ingest* turn, selecting retrieval tools is a *query* turn, selecting both is a
@@ -230,12 +282,22 @@ class ModelProvider(Protocol):
         """
         ...
 
-    def narrate(self, question: str, context: ContextBlock) -> str:
+    def narrate(
+        self, question: str, context: ContextBlock, *, history: Sequence[HistoryTurn] = ()
+    ) -> str:
         """Turn assembled evidence into a natural-language answer. The narrator produces
         **prose only** (05 answer contract): every factual claim carries a ``[memory-id]``
         citation marker drawn from the IDs present in ``context`` (``context.citable_ids``).
         It must not invent numbers, dates, or IDs; an empty context yields an honest
         "no logged data" reply.
+
+        ``history`` gives the answer conversational continuity — pronouns, follow-ups, and not
+        re-introducing what was just said. **The two inputs are not interchangeable and must
+        not be blurred:** ``context`` is evidence and may be cited; ``history`` is what was
+        said and may never be. Answering "75 kg" from an earlier assistant message, with no
+        citation and no retrieval behind it, is the precise failure mode that would let
+        short-term memory quietly corrupt the glass box. ``NARRATE_SYSTEM`` states the rule;
+        ``citable_ids`` enforces the ceiling, since history contributes none.
 
         Mechanical citation validation is Phase 6 (T7) and numeric/directional fidelity is
         the citation eval's job (ADR-13.13); at this layer the markers are produced by

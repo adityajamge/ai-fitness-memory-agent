@@ -42,16 +42,16 @@ from agent.tools import (
     execute,
     is_analyze_series,
     is_log_memory,
-    log_memory_text,
     prepare_call,
 )
 from engine.assembly import ContextBlock, RetrievalOutcome, assemble
 from engine.citations import CitationReport, validate_citations
 from engine.consolidation import ConsolidationService, SeriesOutcome
 from engine.db import Database
+from engine.history import DEFAULT_MAX_CHARS, DEFAULT_MAX_TURNS, fetch_history
 from engine.ingestion import IngestionService, Receipt
 from engine.insights import SeriesKey, UnknownSeries
-from engine.model import EmbeddingError, ModelProvider, ToolCall
+from engine.model import EmbeddingError, HistoryTurn, ModelProvider, ToolCall
 from engine.profile import get_profile, render_profile_note
 from engine.repository import latest_weight
 from engine.trace import EvidenceTrace
@@ -95,6 +95,12 @@ class TurnCarrier:
     #: What ``analyze_series`` derived this turn. Turn-local like everything else here, so it
     #: never enters checkpointed state (M5-1).
     consolidation: list[SeriesOutcome] = field(default_factory=list)
+    #: Short-term memory: recent messages from this thread, oldest first (ADR-14.16). Lives
+    #: here rather than in ``GraphState`` on purpose — it is *derived* from the ``turns`` table
+    #: at the start of every turn, so checkpointing it would persist a second, staler copy of
+    #: rows we already own and grow the checkpoint without bound. Keeping it turn-local also
+    #: means the M5-1 channel allowlist stays exactly as it was.
+    history: list[HistoryTurn] = field(default_factory=list)
     context: ContextBlock | None = None
     trace: EvidenceTrace | None = None
     errors: list[str] = field(default_factory=list)
@@ -178,38 +184,102 @@ def build_graph(
     checkpointer: Any,
     default_tz: str,
     consolidation: ConsolidationService | None = None,
+    history_max_turns: int = DEFAULT_MAX_TURNS,
+    history_max_chars: int = DEFAULT_MAX_CHARS,
 ):
     """Compile the turn graph. Dependencies are injected (same composition-root style as
     ``api.main.create_app``), so tests drive a real database with a fake provider."""
     tool_specs = build_tool_specs()
 
+    def history_node(state: GraphState, config: RunnableConfig) -> dict:
+        """Load short-term memory: the recent messages of this thread (ADR-14.16).
+
+        First node in the turn, because both model calls downstream want it — the planner to
+        resolve what the user is referring to, the narrator to answer without re-introducing
+        what was just said.
+
+        **The current turn cannot appear in its own history, structurally.** Stage (G) persists
+        a turn in ``persist_node``, at the *end* of the graph; this reads at the start, so the
+        question being answered has no row yet. Nothing filters it out because nothing has to.
+
+        **Best-effort, like stages (F₀) and (G).** History is an enhancement to two model
+        calls, not a precondition for either: a read failure costs the turn its conversational
+        memory and nothing else, so it degrades to a stateless-but-correct answer rather than a
+        502. Recorded in ``carrier.errors`` and logged — never silent (I-24).
+        """
+        carrier = carrier_of(config)
+        thread_id = (config or {}).get("configurable", {}).get("thread_id")
+        if not thread_id:
+            return {}  # no thread, no conversation — a one-shot turn is legal
+        try:
+            with db.transaction() as cur:
+                carrier.history = fetch_history(
+                    cur,
+                    UUID(state["user_id"]),
+                    thread_id,
+                    tz=state.get("tz") or default_tz,
+                    max_turns=history_max_turns,
+                    max_chars=history_max_chars,
+                )
+        except Exception as exc:  # noqa: BLE001 — see the docstring; never fail a good turn
+            logger.warning(
+                "could not load conversation history for user %s: %s", state["user_id"], exc
+            )
+            carrier.errors.append(f"conversation history unavailable: {exc}")
+        return {}
+
     def plan_node(state: GraphState, config: RunnableConfig) -> dict:
-        """The one NL-understanding step (05 query-planning boundary)."""
+        """The one NL-understanding step (05 query-planning boundary).
+
+        Sees short-term memory so a follow-up ("what about last week?") can be planned at all.
+        That is safe *because* ``log_memory`` carries no text: the planner decides whether this
+        turn is loggable, never what gets logged (ADR-14.15).
+        """
+        carrier = carrier_of(config)
         calls = model.plan(
             state["question"],
             tool_specs,
             now=_now_of(state),
             tz=state.get("tz") or default_tz,
+            history=carrier.history,
         )
         return {"tool_calls": [{"tool": c.tool, "arguments": dict(c.arguments)} for c in calls]}
 
     def ingest_node(state: GraphState, config: RunnableConfig) -> dict:
-        """Run every ``log_memory`` call through the Phase 2 ingestion pipeline."""
+        """Ingest **the current user turn**, once, if the planner signalled it is loggable.
+
+        **The ingestion-source invariant (ADR-14.15) lives here, and it is structural.** The
+        only string that can reach ``IngestionService`` is ``state["question"]`` — the bytes
+        the user submitted with *this* request. ``log_memory`` is a zero-argument signal
+        (``agent/tools.py``), so there is no model-authored text to prefer, fall back to, or
+        validate: the planner decides *whether* to ingest, never *what*.
+
+        That is what makes conversation history safe to show the planner. With prior turns
+        visible, a ``text`` slot would let a fact from an earlier day be copied into this
+        turn's call — verbatim ("3 eggs"), merged ("3 eggs and 100g paneer"), or resolved from
+        a reference ("same as yesterday") — and be re-ingested with *today's* date, silently
+        double-counting it in every aggregate forever. None of those are expressible now.
+
+        **At most one ingestion per turn**, however many ``log_memory`` calls the planner
+        emits. Both providers collect every tool_use block, so a model that selects the tool
+        twice would otherwise ingest the same turn twice; N calls now mean the same as one.
+
+        ``now`` is the turn's own clock (``state["now"]``, set once in ``_turn_input``), not
+        wall-clock. Extraction resolves "today"/"yesterday" against it, so a relative date is
+        anchored to the request that contained the words — never to an earlier message's date,
+        and never to whenever this node happened to run.
+        """
         carrier = carrier_of(config)
-        user_id = UUID(state["user_id"])
-        for call in _calls_of(state):
-            if not is_log_memory(call):
-                continue
-            try:
-                text = log_memory_text(call)
-            except ToolCallError:
-                # Never lose the input (ADR-13.5 posture): if the planner mangled the text
-                # slot, log the user's own words rather than dropping the turn's content.
-                logger.info("log_memory call had no usable text; falling back to the raw turn")
-                text = state["question"]
-            carrier.receipts.append(
-                ingestion.ingest_text(user_id, text, tz=state.get("tz") or default_tz)
+        if not any(is_log_memory(call) for call in _calls_of(state)):
+            return {}
+        carrier.receipts.append(
+            ingestion.ingest_text(
+                UUID(state["user_id"]),
+                state["question"],
+                now=_now_of(state),
+                tz=state.get("tz") or default_tz,
             )
+        )
         return {}
 
     def consolidate_node(state: GraphState, config: RunnableConfig) -> dict:
@@ -300,7 +370,7 @@ def build_graph(
         """Prose only, with citation markers the engine can resolve (05 answer contract)."""
         carrier = carrier_of(config)
         context = carrier.context
-        answer = model.narrate(state["question"], context)
+        answer = model.narrate(state["question"], context, history=carrier.history)
         # T7b: validate against the *trace's* citable set, not the context's. They are the
         # same set (assembly copies it), but the trace is what gets persisted and what the
         # UI reads, so validating against it keeps runtime and rendered verdicts identical.
@@ -354,6 +424,7 @@ def build_graph(
     # Every node goes through _checked: the L1 developer signal is on by construction, so a
     # node cannot quietly grow a heavy channel (M5-1).
     for name, node in (
+        ("history", history_node),
         ("plan", plan_node),
         ("ingest", ingest_node),
         ("consolidate", consolidate_node),
@@ -364,7 +435,11 @@ def build_graph(
     ):
         builder.add_node(name, _checked(name, node))
 
-    builder.add_edge(START, "plan")
+    # Short-term memory loads before anything reads it. Like `plan`, this node is absent from
+    # STAGE_LABELS: it is a single indexed read with nothing evidentiary to show, so the SSE
+    # stage sequence the UI renders is byte-identical to before.
+    builder.add_edge(START, "history")
+    builder.add_edge("history", "plan")
     stages = {
         "ingest": "ingest",
         "consolidate": "consolidate",

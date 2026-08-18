@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -52,6 +53,7 @@ from agent.providers._prompts import (
 )
 from agent.providers._prompts import (
     extract_tool_schema,
+    history_messages,
     nutrition_items_prompt,
     nutrition_tool_schema,
     parse_extracted_events,
@@ -63,6 +65,7 @@ from engine.model import (
     EmbeddingError,
     ExtractedEvent,
     ExtractionError,
+    HistoryTurn,
     NarrationError,
     NutritionError,
     PlanningError,
@@ -271,11 +274,20 @@ class BedrockProvider:
 
     # ── planning (the only NL-understanding step, 05 query-planning boundary) ────────────
     def plan(
-        self, question: str, tools: list[ToolSpec], *, now: datetime, tz: str
+        self,
+        question: str,
+        tools: list[ToolSpec],
+        *,
+        now: datetime,
+        tz: str,
+        history: Sequence[HistoryTurn] = (),
     ) -> list[ToolCall]:
         """Select tools + fill typed slots via Converse tool-use. ``toolChoice=auto`` lets
         the model return zero calls — the empty-plan 'no memory operation' assertion
-        (engine/model.py). Any failure or malformed output raises PlanningError."""
+        (engine/model.py). Any failure or malformed output raises PlanningError.
+
+        Short-term history precedes the current turn as real Converse messages; the current
+        turn is last and is the only one stamped with ``Current time`` (ADR-14.16)."""
         prompt = (
             f"Current time: {now.isoformat()}\nCurrent timezone: {tz}\n\nUser turn:\n{question}"
         )
@@ -283,7 +295,10 @@ class BedrockProvider:
             response = self._client.converse(
                 modelId=self._extraction_model_id,
                 system=[{"text": _PLAN_SYSTEM}],
-                messages=[{"role": "user", "content": [{"text": prompt}]}],
+                messages=[
+                    *_converse_history(history),
+                    {"role": "user", "content": [{"text": prompt}]},
+                ],
                 toolConfig={"tools": _plan_tools(tools), "toolChoice": {"auto": {}}},
                 inferenceConfig={"maxTokens": 2048, "temperature": 0.0},
             )
@@ -293,16 +308,24 @@ class BedrockProvider:
         return _collect_tool_calls(response)
 
     # ── narration (prose only, cited; 05 answer contract) ───────────────────────────────
-    def narrate(self, question: str, context: ContextBlock) -> str:
+    def narrate(
+        self, question: str, context: ContextBlock, *, history: Sequence[HistoryTurn] = ()
+    ) -> str:
         """Turn assembled evidence into cited prose. Renders the ContextBlock to a compact
         evidence prompt (provider-owned, mirroring extract_events); the model produces
-        natural language only. Any failure or empty output raises NarrationError."""
+        natural language only. Any failure or empty output raises NarrationError.
+
+        History travels as prior messages, never inside ``render_context`` — evidence and
+        conversation stay separate channels so only the former can be cited."""
         prompt = render_context(question, context)
         try:
             response = self._client.converse(
                 modelId=self._extraction_model_id,
                 system=[{"text": _NARRATE_SYSTEM}],
-                messages=[{"role": "user", "content": [{"text": prompt}]}],
+                messages=[
+                    *_converse_history(history),
+                    {"role": "user", "content": [{"text": prompt}]},
+                ],
                 inferenceConfig={"maxTokens": 1024, "temperature": 0.2},
             )
         except (ClientError, BotoCoreError) as exc:
@@ -315,6 +338,20 @@ class BedrockProvider:
 
 
 # ── Converse plumbing for plan/narrate (module-level, provider-agnostic shapes) ─────────
+def _converse_history(history: Sequence[HistoryTurn]) -> list[dict]:
+    """Short-term memory in Converse's message shape.
+
+    The dated rendering itself lives in ``_prompts.history_messages`` — shared with the Claude
+    API provider, because *what* the model is told is the contract and only *how* it is shipped
+    is this file's business (the same split every other prompt here follows). This wraps each
+    rendered message in Converse's ``content: [{"text": ...}]`` envelope and nothing else.
+    """
+    return [
+        {"role": message["role"], "content": [{"text": message["content"]}]}
+        for message in history_messages(history)
+    ]
+
+
 def _plan_tools(tools: list[ToolSpec]) -> list[dict]:
     """Render provider-agnostic ToolSpecs into Converse toolConfig entries."""
     return [

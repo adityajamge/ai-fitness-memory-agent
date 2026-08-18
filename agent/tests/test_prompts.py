@@ -9,6 +9,8 @@ note, so a working extraction became an "incomplete parse".
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from agent.providers._prompts import (
@@ -16,8 +18,10 @@ from agent.providers._prompts import (
     _describe_field,
     _is_engine_owned,
     extract_tool_schema,
+    history_messages,
     payload_field_guide,
 )
+from engine.model import HistoryTurn
 from engine.types import ENGINE_ONLY_TYPES, MEMORY_TYPE_REGISTRY, MealPayload
 
 #: Types the extraction model may be offered — the registry minus ENGINE_ONLY_TYPES (ADR-17.1:
@@ -146,3 +150,68 @@ def test_empty_result_contract_still_enforced_at_schema_level(required) -> None:
     """The D1 flag must stay required — adding the payload guide must not disturb it."""
     schema = extract_tool_schema()["input_schema"]
     assert required in schema["required"]
+
+
+# ── short-term memory renders to a LEGAL message array (ADR-14.16) ────────────────────
+#
+# Both providers reject a malformed conversation, and the malformed shapes are produced by
+# ordinary budget/scrub behaviour rather than by anything exotic — so these are regression
+# tests for a 400/ValidationException in production, not style checks.
+def _h(role: str, content: str, day: int = 16) -> HistoryTurn:
+    return HistoryTurn(role=role, content=content, at=datetime(2026, 8, day, tzinfo=timezone.utc))
+
+
+def test_history_renders_with_absolute_dates_per_message() -> None:
+    """An earlier 'today' must be readable as the date it was said, not the current one."""
+    assert history_messages([_h("user", "today i ate 3 eggs"), _h("assistant", "Logged.", 17)]) == [
+        {"role": "user", "content": "[Aug 16] today i ate 3 eggs"},
+        {"role": "assistant", "content": "[Aug 17] Logged."},
+    ]
+
+
+def test_a_window_starting_mid_exchange_drops_the_orphan_answer() -> None:
+    """`max_turns=3` over two exchanges starts the window on an assistant message. Sent as-is
+    that is a 400 on the Claude API and a ValidationException on Converse."""
+    out = history_messages([_h("assistant", "an answer"), _h("user", "q"), _h("assistant", "a")])
+
+    assert [m["role"] for m in out] == ["user", "assistant"]
+    assert "an answer" not in out[0]["content"]
+
+
+def test_a_trailing_question_is_dropped_so_the_current_turn_can_follow() -> None:
+    """History must end with an assistant message: the provider appends the current turn as a
+    user message, and two user messages in a row break Converse's alternation rule."""
+    out = history_messages([_h("user", "q1"), _h("assistant", "a1"), _h("user", "dangling")])
+
+    assert [m["role"] for m in out] == ["user", "assistant"]
+    assert "dangling" not in out[-1]["content"]
+
+
+def test_consecutive_same_role_messages_are_merged_not_dropped() -> None:
+    """An assistant answer that was only citation markers scrubs to empty and disappears,
+    leaving two user messages adjacent. Merging keeps both, alternation stays legal."""
+    out = history_messages(
+        [_h("user", "first"), _h("user", "second"), _h("assistant", "reply")]
+    )
+
+    assert [m["role"] for m in out] == ["user", "assistant"]
+    assert "first" in out[0]["content"] and "second" in out[0]["content"]
+
+
+def test_rendered_history_always_alternates_and_brackets_correctly() -> None:
+    """The invariant every provider relies on, over every awkward shape at once."""
+    shapes = [
+        [],
+        [_h("assistant", "only an answer")],
+        [_h("user", "only a question")],
+        [_h("assistant", "a"), _h("user", "q")],
+        [_h("user", "q"), _h("assistant", "a"), _h("user", "q2"), _h("assistant", "a2")],
+    ]
+    for shape in shapes:
+        out = history_messages(shape)
+        if not out:
+            continue
+        assert out[0]["role"] == "user", shape
+        assert out[-1]["role"] == "assistant", shape
+        roles = [m["role"] for m in out]
+        assert all(a != b for a, b in zip(roles, roles[1:], strict=False)), shape

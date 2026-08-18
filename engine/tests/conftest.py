@@ -125,9 +125,22 @@ class FakeModelProvider:
         self.plan_invocations = 0
         self.narrate_invocations = 0
         self.last_tools: list[ToolSpec] = []
+        # Short-term memory (ADR-14.16), captured per role so a test can assert the two
+        # halves of the separation independently: the *agent* calls receive history, the
+        # *extraction* call must never see it. `None` distinguishes "never called" from
+        # "called with no history", which is exactly the difference several tests turn on.
+        self.last_plan_history: list | None = None
+        self.last_narrate_history: list | None = None
+        self.last_extract_text: str | None = None
+        self.last_extract_now = None
 
     def extract_events(self, text: str, *, now, tz) -> list[ExtractedEvent]:
+        # Note the signature: (text, now, tz) and nothing else. The memory-extraction model
+        # has no parameter through which conversation history could arrive, which is what
+        # makes "history never reaches long-term memory" structural rather than a promise.
         self.extract_calls += 1
+        self.last_extract_text = text
+        self.last_extract_now = now
         if self.extract_error:
             raise ExtractionError("forced extraction failure")
         if self.fail_first and self.extract_calls == 1:
@@ -161,15 +174,19 @@ class FakeModelProvider:
     nutrition_model_id = "fake-model"
     nutrition_prompt_version = "fake-prompt/v0"
 
-    def plan(self, question: str, tools: list[ToolSpec], *, now, tz) -> list[ToolCall]:
+    def plan(
+        self, question: str, tools: list[ToolSpec], *, now, tz, history=()
+    ) -> list[ToolCall]:
         self.plan_invocations += 1
         self.last_tools = list(tools)
+        self.last_plan_history = list(history)
         if self.plan_error:
             raise PlanningError("forced planning failure")
         return list(self.plan_calls)
 
-    def narrate(self, question: str, context) -> str:
+    def narrate(self, question: str, context, *, history=()) -> str:
         self.narrate_invocations += 1
+        self.last_narrate_history = list(history)
         if self.narrate_error:
             raise NarrationError("forced narration failure")
         if self.narration is not None:

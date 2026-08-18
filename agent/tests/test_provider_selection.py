@@ -21,7 +21,13 @@ import pytest
 
 from agent.providers import BEDROCK, CLAUDE_API, CompositeProvider, build_default_provider
 from engine.config import Settings
-from engine.model import EmbeddingError, ExtractedEvent, ExtractionError, ModelProvider
+from engine.model import (
+    EmbeddingError,
+    ExtractedEvent,
+    ExtractionError,
+    HistoryTurn,
+    ModelProvider,
+)
 
 NOW = datetime(2026, 8, 2, 12, 0, tzinfo=timezone.utc)
 TZ = "Asia/Kolkata"
@@ -33,6 +39,7 @@ class _RecordingProvider:
     def __init__(self, label: str) -> None:
         self.label = label
         self.calls: list[str] = []
+        self.last_history: list | None = None
 
     def extract_events(self, text: str, *, now: datetime, tz: str) -> list[ExtractedEvent]:
         self.calls.append("extract_events")
@@ -42,12 +49,18 @@ class _RecordingProvider:
         self.calls.append("embed")
         return [[0.0] * 512 for _ in texts]
 
-    def plan(self, question: str, tools, *, now: datetime, tz: str):
+    # `history` is part of the two agent-facing surfaces (ADR-14.16). Recorded rather than
+    # ignored, so `test_history_is_passed_through_to_the_llm` can assert the composite
+    # forwards it — a silently dropped window would leave the LLM stateless behind a
+    # configuration that looks correct.
+    def plan(self, question: str, tools, *, now: datetime, tz: str, history=()):
         self.calls.append("plan")
+        self.last_history = list(history)
         return []
 
-    def narrate(self, question: str, context) -> str:
+    def narrate(self, question: str, context, *, history=()) -> str:
         self.calls.append("narrate")
+        self.last_history = list(history)
         return f"narrated by {self.label}"
 
 
@@ -96,6 +109,24 @@ def test_llm_methods_go_only_to_the_llm(method: str) -> None:
 def test_narrate_returns_the_llm_result_unchanged() -> None:
     composite, _, _ = _composite()
     assert composite.narrate("q", None) == "narrated by llm"
+
+
+def test_history_is_passed_through_to_the_llm() -> None:
+    """Short-term memory must survive delegation (ADR-14.16).
+
+    The composite exists so a mixed Bedrock-embeddings + Claude-LLM deployment behaves exactly
+    like a single-vendor one. Dropping ``history`` here would make that configuration silently
+    amnesiac — every turn stateless, nothing failing, and nothing in a log to say why.
+    """
+    composite, llm, embedder = _composite()
+    window = [HistoryTurn(role="user", content="earlier", at=NOW)]
+
+    composite.plan("q", [], now=NOW, tz=TZ, history=window)
+    assert llm.last_history == window
+
+    composite.narrate("q", None, history=window)
+    assert llm.last_history == window
+    assert embedder.last_history is None  # the embedder never sees the conversation
 
 
 # ── error propagation: the load-bearing contracts must survive delegation ───────────────

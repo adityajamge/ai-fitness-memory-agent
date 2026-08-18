@@ -11,11 +11,12 @@ returned directly; only a genuinely mixed configuration builds a ``CompositeProv
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
 
 from engine.config import Settings
-from engine.model import ExtractedEvent, ModelProvider, ToolCall, ToolSpec
+from engine.model import ExtractedEvent, HistoryTurn, ModelProvider, ToolCall, ToolSpec
 
 if TYPE_CHECKING:  # same deferral as engine/model.py — avoids importing assembly eagerly
     from engine.assembly import ContextBlock
@@ -61,12 +62,20 @@ class CompositeProvider:
         return self._llm.extract_from_image(image_bytes, mime_type, now=now, tz=tz, caption=caption)
 
     def plan(
-        self, question: str, tools: list[ToolSpec], *, now: datetime, tz: str
+        self,
+        question: str,
+        tools: list[ToolSpec],
+        *,
+        now: datetime,
+        tz: str,
+        history: Sequence[HistoryTurn] = (),
     ) -> list[ToolCall]:
-        return self._llm.plan(question, tools, now=now, tz=tz)
+        return self._llm.plan(question, tools, now=now, tz=tz, history=history)
 
-    def narrate(self, question: str, context: ContextBlock) -> str:
-        return self._llm.narrate(question, context)
+    def narrate(
+        self, question: str, context: ContextBlock, *, history: Sequence[HistoryTurn] = ()
+    ) -> str:
+        return self._llm.narrate(question, context, history=history)
 
     def estimate_nutrition(self, items: list[dict], *, context: str = "") -> list[dict]:
         return self._llm.estimate_nutrition(items, context=context)

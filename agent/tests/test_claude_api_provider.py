@@ -23,6 +23,7 @@ from engine.config import Settings
 from engine.model import (
     EmbeddingError,
     ExtractionError,
+    HistoryTurn,
     ModelProvider,
     NarrationError,
     PlanningError,
@@ -30,6 +31,7 @@ from engine.model import (
 )
 from engine.tests.test_assembly import _lookup, _snap  # reuse M3 factories
 
+UTC = timezone.utc
 NOW = datetime(2026, 7, 24, 9, 0, tzinfo=timezone.utc)
 TZ = "Asia/Kolkata"
 _TOOLS = [ToolSpec(name="count_events", description="count events", input_schema={})]
@@ -249,6 +251,64 @@ def test_narrate_empty_output_raises() -> None:
     context, _ = assemble("q", [])
     with pytest.raises(NarrationError):
         _provider(_StubMessages([_text("  ")])).narrate("q", context)
+
+
+# ── short-term memory on the wire (ADR-14.16) ─────────────────────────────────────────
+_HISTORY = (
+    HistoryTurn(role="user", content="today i ate 3 eggs", at=datetime(2026, 8, 16, tzinfo=UTC)),
+    HistoryTurn(role="assistant", content="Logged 3 eggs.", at=datetime(2026, 8, 16, tzinfo=UTC)),
+)
+
+
+def test_plan_ships_history_as_prior_messages_with_the_current_turn_last() -> None:
+    """History belongs in the message array, not glued into the system prompt.
+
+    A transcript pasted into a system message reads as instructions; an actual array reads as
+    a conversation, and only the latter makes "the last user message is the one to answer"
+    unambiguous. The current turn must be last, and must be the only one carrying the clock —
+    otherwise an earlier "today" competes with this turn's date.
+    """
+    messages = _StubMessages([_tool_use("count_events", {"type": "meal"})])
+    _provider(messages).plan("what about paneer?", _TOOLS, now=NOW, tz=TZ, history=_HISTORY)
+
+    sent = messages.last_kwargs["messages"]
+    assert [m["role"] for m in sent] == ["user", "assistant", "user"]
+    assert sent[0]["content"] == "[Aug 16] today i ate 3 eggs"
+    assert sent[1]["content"] == "[Aug 16] Logged 3 eggs."
+    assert "what about paneer?" in sent[-1]["content"]
+    # Exactly one message stamps the clock, and it is the current one.
+    assert sum("Current time" in m["content"] for m in sent) == 1
+    assert "Current time" in sent[-1]["content"]
+    # And history never leaks into the system prompt.
+    assert "3 eggs" not in messages.last_kwargs["system"]
+
+
+def test_narrate_keeps_history_out_of_the_evidence_message() -> None:
+    """The separation that keeps the glass box honest: conversation and evidence are
+    different messages. Only the evidence message may be cited, so a fact that was merely
+    *said* has no route into a citation."""
+    mem = _snap(mem_id=uuid4(), summary="dinner: 100g paneer")
+    context, _ = assemble("paneer?", [_lookup(mem)])
+    messages = _StubMessages([_text("You logged paneer.")])
+
+    _provider(messages).narrate("paneer?", context, history=_HISTORY)
+
+    sent = messages.last_kwargs["messages"]
+    assert [m["role"] for m in sent] == ["user", "assistant", "user"]
+    evidence = sent[-1]["content"]
+    assert str(mem.id) in evidence
+    assert "3 eggs" not in evidence  # history stayed in its own messages
+
+
+def test_no_history_sends_exactly_what_it_always_did() -> None:
+    """The default is byte-identical to the pre-history request — a new conversation, a
+    disabled window, or a failed history read must not change the shape of the call."""
+    messages = _StubMessages([_text("hi")])
+    context, _ = assemble("q", [])
+    _provider(messages).narrate("q", context)
+
+    assert len(messages.last_kwargs["messages"]) == 1
+    assert messages.last_kwargs["messages"][0]["role"] == "user"
 
 
 # ── refusals (current models can decline with HTTP 200) ───────────────────────────────

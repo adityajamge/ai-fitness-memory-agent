@@ -111,23 +111,25 @@ def build_tool_specs() -> list[ToolSpec]:
         ToolSpec(
             name=LOG_MEMORY,
             description=(
-                "Record what the user just reported (a meal, workout, weight, sleep, "
-                "supplement, body scan...). Select this whenever the turn states something "
-                "loggable, even if it ALSO asks a question — in that case select the "
-                "retrieval tools too."
+                "Signal that THE CURRENT USER TURN states something worth remembering (a "
+                "meal, workout, weight, sleep, supplement, body scan...). Select this "
+                "whenever the current turn reports something loggable, even if it ALSO asks "
+                "a question — in that case select the retrieval tools too.\n"
+                "This tool takes NO arguments and carries no text. It is a signal, not a "
+                "payload: the system always ingests the current user turn's own words, so "
+                "there is nothing for you to copy, summarize, or restate. Selecting it twice "
+                "is the same as selecting it once.\n"
+                "NEVER select it for something reported in an EARLIER turn — that was "
+                "already recorded when it was said."
             ),
-            input_schema=_schema(
-                {
-                    "text": {
-                        "type": "string",
-                        "description": (
-                            "The user's own words describing what to log. Copy the loggable "
-                            "part of the turn verbatim; do not summarize or add facts."
-                        ),
-                    }
-                },
-                ["text"],
-            ),
+            # Zero-argument by construction (ADR-14.15). The text that reaches ingestion is
+            # `state["question"]` — the bytes the user submitted with THIS request — and the
+            # graph never reads anything off this call. A `text` slot existed until the
+            # conversation-history work: with prior turns visible to the planner, a
+            # model-authored string was the one channel through which a fact from an earlier
+            # day could be re-ingested and re-dated to today. There is no such channel now,
+            # because there is no slot to put one in.
+            input_schema=_schema({}, []),
         ),
         ToolSpec(
             name=AGGREGATE_MEMORIES,
@@ -379,12 +381,13 @@ def analyze_series_metric(call: ToolCall) -> str:
     return metric
 
 
-def log_memory_text(call: ToolCall) -> str:
-    """Extract and validate the ``text`` slot of a log_memory call."""
-    text = _args(call).get("text")
-    if not isinstance(text, str) or not text.strip():
-        raise ToolCallError("log_memory requires a non-empty 'text' argument")
-    return text
+#: Deliberately no ``log_memory_text``. ``log_memory`` is a zero-argument signal (ADR-14.15):
+#: the only text that may reach ``IngestionService`` is the current turn's own ``question``,
+#: read off graph state by ``ingest_node``. Any arguments a model attaches to the call are
+#: ignored rather than rejected — a stray slot is a model quirk, not a reason to lose the
+#: user's input (never-lose-input, ADR-13.5). If you are looking for the function that used to
+#: turn a planner-authored string into a memory: it was removed on purpose, and re-adding one
+#: would reopen the re-ingestion hole that decision closes.
 
 
 def _args(call: ToolCall) -> dict:

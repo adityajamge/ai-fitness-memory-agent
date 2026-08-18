@@ -143,6 +143,42 @@ CODE PATHS                                               USER FLOWS
 TOTAL: 33 paths  |  E2E: 4 (Playwright)  |  EVAL: 2 (live-model lane)
 ```
 
+## Conversation memory: the ingestion-source invariant (ADR-14.15 / 14.16, 2026-08-16)
+
+Short-term conversation history is the first feature that puts *previously-said content* in
+front of the planner, so it is the first that could cause a fact from an earlier day to be
+written as a new memory. There is **no dedupe in the write path**, so such a duplicate is
+permanent and silently corrupts every aggregate over its range — which makes this the highest-
+consequence, lowest-visibility failure the system can produce. It gets a dedicated obligation.
+
+**The acceptance scenario** (`agent/tests/test_ingestion_source.py`,
+`agent/tests/test_history_flow.py`), run against real CockroachDB through the real graph:
+
+| Day | Turn | Required outcome |
+|---|---|---|
+| Aug 16 | "Today at breakfast I ate 3 eggs." | one meal: 3 eggs, `event_time` Aug 16 |
+| Aug 17 | "Today at dinner I ate 100g paneer." | one *new* meal: 100g paneer, Aug 17 |
+
+with Day 1's exchange genuinely in Day 2's history window, and **no** eggs row dated Aug 17.
+
+**Every provider in these tests misbehaves on purpose.** The Day-2 planner emits `log_memory`
+carrying the previous turn's text — verbatim, merged (`"3 eggs and 100 gram paneer"`), and
+repeated across parallel calls. A test that scripted a well-behaved planner would pass on the
+broken architecture and prove nothing. The fake extractor derives events from whatever string
+it is handed, so a leak materialises as a real, wrongly-dated row rather than a silent no-op.
+
+Obligations, each a named test:
+
+- planner-authored text never reaches `extract_events` — the recorded call is `state["question"]`
+- N `log_memory` calls → exactly one ingestion
+- "today" resolves against `state["now"]`, not wall-clock (a backdated turn lands on the old date)
+- the current turn is never in its own history (stage (G) writes at END, history reads at START)
+- history never becomes citable: `citations == []`, `trace.citable_ids == frozenset()`
+- history is never checkpointed — the M5-1 channel allowlist is unchanged
+- a history read failure degrades to a stateless answer, never a 502
+- `log_memory`'s schema has **no properties** — a tripwire, since re-adding a text slot reopens
+  the whole class
+
 ## Evals (live model — separate lane from mocked CI; manual trigger + pre-demo checklist)
 
 - `evals/extraction.py`: ~30 golden logging messages → tolerance-range assertions on macros,

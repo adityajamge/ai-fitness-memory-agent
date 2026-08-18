@@ -11,6 +11,11 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+# Imported rather than re-declared so the window has exactly one definition: the module that
+# implements the budget owns the number, and this file only exposes it to the environment.
+from engine.history import DEFAULT_MAX_CHARS as HISTORY_MAX_CHARS
+from engine.history import DEFAULT_MAX_TURNS as HISTORY_MAX_TURNS
+
 # 127.0.0.1, not localhost: psycopg tries ::1 first and Windows takes ~130s to give
 # up when the node listens on IPv4 only (same reason as the canaries).
 DEFAULT_DATABASE_URL = "postgresql://root@127.0.0.1:26257/defaultdb?sslmode=disable"
@@ -78,6 +83,12 @@ class Settings:
     embedding_provider: str | None = None
     claude_api_model_id: str = DEFAULT_CLAUDE_API_MODEL_ID
     claude_api_effort: str = DEFAULT_CLAUDE_API_EFFORT
+    #: Short-term conversation memory window (ADR-14.16). Tunable without a code change
+    #: because the right window is an empirical question — too small and follow-ups stop
+    #: resolving, too large and the planner's tool selection degrades while every turn pays
+    #: for it. Defaults live in ``engine/history.py`` alongside the reasoning.
+    history_max_turns: int = HISTORY_MAX_TURNS
+    history_max_chars: int = HISTORY_MAX_CHARS
 
     @property
     def resolved_llm_provider(self) -> str:
@@ -139,4 +150,6 @@ def load_settings() -> Settings:
         embedding_provider=os.environ.get("EMBEDDING_PROVIDER"),
         claude_api_model_id=os.environ.get("CLAUDE_API_MODEL_ID", DEFAULT_CLAUDE_API_MODEL_ID),
         claude_api_effort=os.environ.get("CLAUDE_API_EFFORT", DEFAULT_CLAUDE_API_EFFORT),
+        history_max_turns=int(os.environ.get("HISTORY_MAX_TURNS", HISTORY_MAX_TURNS)),
+        history_max_chars=int(os.environ.get("HISTORY_MAX_CHARS", HISTORY_MAX_CHARS)),
     )

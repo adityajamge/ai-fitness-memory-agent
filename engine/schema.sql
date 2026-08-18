@@ -123,4 +123,10 @@ CREATE TABLE IF NOT EXISTS evidence_traces (
     trace      JSONB NOT NULL, -- persisted EvidenceTrace; references memory IDs, never copies payloads
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Short-term conversation memory reads this on EVERY turn (ADR-14.16): the newest N rows of
+-- one thread, newest first. Additive and non-destructive — it touches `turns` (the
+-- conversation), never `memories` (long-term memory), whose schema is unchanged.
+CREATE INDEX IF NOT EXISTS turns_user_thread_time_idx
+    ON turns (user_id, thread_id, created_at DESC);
+
 CREATE INDEX IF NOT EXISTS evidence_traces_turn_idx ON evidence_traces (turn_id);

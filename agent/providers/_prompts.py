@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
-from engine.model import ExtractedEvent, ExtractionError, NutritionError
+from engine.model import ExtractedEvent, ExtractionError, HistoryTurn, NutritionError
 from engine.nutrition import FOOD_KINDS, QTY_BASES
 from engine.types import ENGINE_ONLY_TYPES, MEMORY_TYPE_REGISTRY
 
@@ -89,15 +89,27 @@ PLAN_SYSTEM = (
     "You are the retrieval planner for a fitness memory app. Decide what to do with the "
     "user's turn by selecting tools and filling their typed arguments — you are the only "
     "part of the system that reads natural language.\n"
-    "- Select log_memory (when offered) to record a turn that states something loggable "
-    "(a meal, workout, weight, etc.). Select retrieval tools to answer a question. A turn "
-    "can be BOTH ('logged my run — am I improving?'): select log_memory AND the retrieval "
-    "tools.\n"
+    "- Select log_memory (when offered) to signal that THE CURRENT turn states something "
+    "loggable (a meal, workout, weight, etc.). It takes no arguments: the system always "
+    "records the current turn's own words, so there is nothing for you to copy or restate. "
+    "Select retrieval tools to answer a question. A turn can be BOTH ('logged my run — am I "
+    "improving?'): select log_memory AND the retrieval tools.\n"
     "- Issue several retrieval calls when a question needs them; they are merged downstream.\n"
     "- Ground relative dates ('today', 'last 30 days') using the provided current time and "
     "timezone; fill date ranges as concrete ISO timestamps.\n"
     "- If the turn needs no memory operation at all (small talk, thanks, a greeting), call "
-    "NO tools. Calling nothing is a valid, deliberate answer — do not force a tool."
+    "NO tools. Calling nothing is a valid, deliberate answer — do not force a tool.\n\n"
+    "EARLIER MESSAGES ARE CONTEXT, NEVER A SOURCE OF NEW MEMORIES.\n"
+    "Messages before the final one are shown ONLY so you can understand what the user is "
+    "referring to now — pronouns, follow-ups ('how did you find that?'), and comparisons. "
+    "Each is prefixed with the date it was said.\n"
+    "- Everything reported in an earlier message was ALREADY recorded on the date it was "
+    "said. Never select log_memory because of an earlier message; select it only when the "
+    "FINAL user message itself reports something loggable.\n"
+    "- Never treat an earlier message's 'today' or 'yesterday' as referring to the current "
+    "date — read those against that message's own date prefix.\n"
+    "- Use earlier turns to fill retrieval arguments when the current turn depends on them "
+    "('what about last week?'). That is what they are for."
 )
 
 #: Version of the nutrition instruction below, stored on every estimate it produces
@@ -171,6 +183,14 @@ NARRATE_SYSTEM = (
     "for personalization — you may reference it by name (e.g. comparing a logged total against "
     "their target). It is NOT evidence: never wrap a profile number in a [memory-id] citation "
     "marker, only numbers that come from the evidence below.\n"
+    "- Earlier messages in the conversation are for CONTINUITY ONLY — understanding what the "
+    "user is referring to, and not repeating yourself. They are NOT evidence and carry no "
+    "citations. Never state a fact because an earlier reply said it: if the evidence below "
+    "does not support a claim, you cannot make it, even if you said it a moment ago. When the "
+    "user asks about something you said earlier and this turn retrieved nothing, say what you "
+    "based it on rather than restating the number as fresh fact.\n"
+    "- Each earlier message is prefixed with the date it was said, e.g. '[Aug 16]'. An earlier "
+    "'today' means THAT date, never the current one.\n"
     "Be concise and factual."
 )
 
@@ -572,6 +592,66 @@ def _resolve_time(
     except ValueError:
         logger.info("unparseable event_time %r; estimating as now", raw_time)
         return now, resolved_tz, min(confidence, 0.5)
+
+
+def history_messages(history: Sequence[HistoryTurn]) -> list[dict]:
+    """Render short-term memory as real prior conversation messages (ADR-14.16).
+
+    Returns ``[{"role": ..., "content": ...}]`` — the shape both the Claude API and Bedrock
+    Converse take natively, and the shape the models are trained on. Deliberately **not**
+    flattened into the system prompt: a transcript pasted into a system message reads as
+    instructions, while an actual message array reads as a conversation, and only the latter
+    makes "the last user message is the one to answer" unambiguous.
+
+    **Every message carries its absolute date** (``[Aug 16] …``). Without it, an earlier
+    "today i ate 3 eggs" is indistinguishable from something said this morning, and the model
+    will answer — and plan retrieval ranges — against the wrong day. The prefix is the cheapest
+    possible fix and it is applied to both roles, since an assistant reply ("Logged 3 eggs
+    today") is just as capable of misdating the conversation as a user message.
+
+    ``at`` already carries the user's timezone (``engine.history.fetch_history`` converts it),
+    so this is pure formatting — no zone lookup, no policy, nothing to get wrong here.
+
+    **The returned list is always a legal message array: it alternates strictly, starts with
+    ``user``, and ends with ``assistant``.** Appending the current turn as a ``user`` message
+    therefore always yields a valid conversation, which is a hard requirement rather than a
+    nicety — Bedrock Converse rejects a non-alternating array or one that does not begin with a
+    user message (``ValidationException``), and the Claude API rejects a leading assistant
+    message. Two ordinary situations break the naive rendering:
+
+    * A window boundary can land mid-exchange. ``max_turns=3`` over two exchanges takes the
+      three newest rows — ``assistant``, ``user``, ``assistant`` — which reverses into a list
+      *starting* with an assistant message.
+    * An assistant answer that was nothing but citation markers scrubs to empty and drops out,
+      leaving two consecutive user messages.
+
+    Both are budget/scrub artifacts rather than anything the user did, so they are repaired
+    here instead of being pushed onto the two providers to each get right separately. Merging
+    same-role neighbours preserves what was said; the dangling turns that are dropped are a
+    leading answer whose question is outside the window and a trailing question whose answer
+    is the turn currently being generated — neither carries context worth an API error.
+    """
+    rendered = [
+        {"role": turn.role, "content": f"[{turn.at.strftime('%b %d')}] {turn.content}"}
+        for turn in history
+        if turn.role in ("user", "assistant") and turn.content.strip()
+    ]
+
+    merged: list[dict] = []
+    for message in rendered:
+        if merged and merged[-1]["role"] == message["role"]:
+            merged[-1] = {
+                "role": message["role"],
+                "content": f"{merged[-1]['content']}\n{message['content']}",
+            }
+        else:
+            merged.append(message)
+
+    if merged and merged[0]["role"] == "assistant":
+        merged.pop(0)  # its question fell outside the window
+    if merged and merged[-1]["role"] == "user":
+        merged.pop()  # its answer is the one being generated right now
+    return merged
 
 
 def render_context(question: str, context: ContextBlock) -> str:

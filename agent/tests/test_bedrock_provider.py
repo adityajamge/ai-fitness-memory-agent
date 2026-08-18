@@ -15,8 +15,10 @@ from botocore.exceptions import ClientError
 
 from agent.providers import bedrock as bedrock_module
 from agent.providers.bedrock import BedrockProvider
-from engine.model import ExtractionError
+from engine.assembly import assemble
+from engine.model import ExtractionError, HistoryTurn
 
+UTC = timezone.utc
 NOW = datetime(2026, 7, 21, 12, 0, tzinfo=timezone.utc)
 TZ = "Asia/Kolkata"
 
@@ -40,9 +42,11 @@ class _StubClient:
         self._raises = raises
         self._content = content
         self.converse_calls = 0
+        self.last_kwargs: dict = {}
 
     def converse(self, **kwargs) -> dict:
         self.converse_calls += 1
+        self.last_kwargs = kwargs
         if self._raises is not None:
             raise self._raises
         content = (
@@ -138,3 +142,50 @@ def test_tool_schema_requires_the_flag():
     schema = bedrock_module._tool_config()["tools"][0]["toolSpec"]["inputSchema"]["json"]
     assert "no_loggable_content" in schema["properties"]
     assert set(schema["required"]) == {"events", "no_loggable_content"}
+
+
+# ── short-term memory on the Converse wire (ADR-14.16) ────────────────────────────────
+_HISTORY = (
+    HistoryTurn(role="user", content="today i ate 3 eggs", at=datetime(2026, 8, 16, tzinfo=UTC)),
+    HistoryTurn(role="assistant", content="Logged 3 eggs.", at=datetime(2026, 8, 16, tzinfo=UTC)),
+)
+
+
+def test_plan_sends_history_in_converse_message_shape(provider):
+    """Converse takes a multi-turn array natively, so history ships as real prior messages
+    rather than as text prepended to the prompt — same contract as the Claude API provider,
+    different envelope. The current turn is last and is the only one carrying the clock."""
+    client = _StubClient(content=[{"toolUse": {"name": "count_events", "input": {}}}])
+    svc = provider(client)
+
+    svc.plan("what about paneer?", [], now=NOW, tz=TZ, history=_HISTORY)
+
+    sent = client.last_kwargs["messages"]
+    assert [m["role"] for m in sent] == ["user", "assistant", "user"]
+    assert sent[0]["content"] == [{"text": "[Aug 16] today i ate 3 eggs"}]
+    assert "Current time" in sent[-1]["content"][0]["text"]
+    assert sum("Current time" in m["content"][0]["text"] for m in sent) == 1
+
+
+def test_narrate_keeps_history_out_of_the_evidence_message(provider):
+    """Evidence and conversation are separate messages, so only evidence can be cited."""
+    client = _StubClient(content=[{"text": "You logged paneer."}])
+    svc = provider(client)
+    context, _ = assemble("paneer?", [])
+
+    svc.narrate("paneer?", context, history=_HISTORY)
+
+    sent = client.last_kwargs["messages"]
+    assert [m["role"] for m in sent] == ["user", "assistant", "user"]
+    assert "3 eggs" not in sent[-1]["content"][0]["text"]
+
+
+def test_no_history_sends_exactly_what_it_always_did(provider):
+    """The default path is byte-identical to the pre-history request."""
+    client = _StubClient(content=[{"text": "hi"}])
+    svc = provider(client)
+    context, _ = assemble("q", [])
+
+    svc.narrate("q", context)
+
+    assert len(client.last_kwargs["messages"]) == 1
