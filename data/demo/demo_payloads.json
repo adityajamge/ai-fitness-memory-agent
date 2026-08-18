@@ -1,0 +1,407 @@
+{
+  "$note": "Reviewed payload table for the demo persona (fictional; see demo-timeline.md). Canonical source for exact VALUES; demo-timeline.md stays canonical for FACTS. Keys are converter-derived: '<rtype>.<date>' for point events, '<rtype>.<start>.<end|ongoing>' for period facts. An entry with a cadence expands (Rules 1/2, docs/engineering/replay-architecture.md 4.1); one without yields a single record. Meal nutrition carries method.pipeline='replay-payload-table/1' so engine/nutrition.py's is_engine_authored() leaves it alone — replay makes zero nutrition model calls. Only protein_g is stated: the story gave no carbs/fat/kcal and this table never invents a number.",
+  "$schema_note": "entry := { payload | segments, cadence?, confidence?, summary?, event_time?, note? }",
+
+  "meal-pattern.2026-01-05.2026-02-15": {
+    "note": "Baseline eating. Protein is the persona's own estimate of a range (50-60 g), so it carries a range and a low confidence class.",
+    "cadence": "daily",
+    "confidence": 0.85,
+    "summary": "Typical day at the January baseline: fast food 4-5 times a week, breakfast skipped or tea and biscuits — about 55 g protein",
+    "payload": {
+      "meal_type": "daily_total",
+      "items": [
+        { "name": "tea and biscuits, or breakfast skipped", "qty_text": "most mornings" },
+        { "name": "restaurant or fried lunch", "qty_text": "most days" },
+        { "name": "takeaway dinner (burger, pizza or noodles)", "qty_text": "4-5 times a week" }
+      ],
+      "nutrition": {
+        "protein_g": 55.0,
+        "estimated": true,
+        "basis": "user_stated",
+        "confidence_class": "low",
+        "range": { "protein_g": [50.0, 60.0] },
+        "method": { "pipeline": "replay-payload-table/1" }
+      }
+    }
+  },
+
+  "meal-pattern.2026-02-16.2026-02-28": {
+    "cadence": "daily",
+    "confidence": 0.85,
+    "summary": "One home-cooked meal a day replacing a junk-food meal — about 70 g protein",
+    "payload": {
+      "meal_type": "daily_total",
+      "items": [
+        { "name": "home-cooked meal", "qty_text": "once a day" },
+        { "name": "restaurant or takeaway meal", "qty_text": "once a day" },
+        { "name": "tea and biscuits, or breakfast skipped", "qty_text": "most mornings" }
+      ],
+      "nutrition": {
+        "protein_g": 70.0,
+        "estimated": true,
+        "basis": "user_stated",
+        "confidence_class": "medium",
+        "method": { "pipeline": "replay-payload-table/1" }
+      }
+    }
+  },
+
+  "meal-pattern.2026-03-01.2026-03-31": {
+    "cadence": "daily",
+    "confidence": 0.85,
+    "summary": "Structured nutrition plan — eggs, paneer, curd, dal and chicken in rotation, fast food down to 1-2 meals a week — about 90 g protein",
+    "payload": {
+      "meal_type": "daily_total",
+      "items": [
+        { "name": "eggs", "qty_text": "most mornings" },
+        { "name": "dal and rice", "qty_text": "daily" },
+        { "name": "paneer or chicken", "qty_text": "most days" },
+        { "name": "curd", "qty_text": "daily" }
+      ],
+      "nutrition": {
+        "protein_g": 90.0,
+        "estimated": true,
+        "basis": "user_stated",
+        "confidence_class": "medium",
+        "method": { "pipeline": "replay-payload-table/1" }
+      }
+    }
+  },
+
+  "meal-pattern.2026-04-01.2026-04-30": {
+    "cadence": "daily",
+    "confidence": 0.85,
+    "summary": "High-protein eating through the first month of gym training — about 110 g protein",
+    "payload": {
+      "meal_type": "daily_total",
+      "items": [
+        { "name": "eggs", "qty_text": "daily" },
+        { "name": "chicken", "qty_text": "most days" },
+        { "name": "paneer or dal", "qty_text": "daily" },
+        { "name": "curd", "qty_text": "daily" }
+      ],
+      "nutrition": {
+        "protein_g": 110.0,
+        "estimated": true,
+        "basis": "user_stated",
+        "confidence_class": "medium",
+        "method": { "pipeline": "replay-payload-table/1" }
+      }
+    }
+  },
+
+  "meal-pattern.2026-05-01.2026-05-31": {
+    "cadence": "daily",
+    "confidence": 0.85,
+    "summary": "Mostly home-cooked, fast food about once a fortnight — about 120 g protein",
+    "payload": {
+      "meal_type": "daily_total",
+      "items": [
+        { "name": "eggs", "qty_text": "daily" },
+        { "name": "chicken", "qty_text": "most days" },
+        { "name": "paneer and dal", "qty_text": "daily" },
+        { "name": "curd", "qty_text": "daily" }
+      ],
+      "nutrition": {
+        "protein_g": 120.0,
+        "estimated": true,
+        "basis": "user_stated",
+        "confidence_class": "medium",
+        "method": { "pipeline": "replay-payload-table/1" }
+      }
+    }
+  },
+
+  "meal-pattern.2026-06-01.2026-07-05": {
+    "note": "Settled routine. The persona stated 125-130 g, so the row carries the midpoint with the range attached.",
+    "cadence": "daily",
+    "confidence": 0.85,
+    "summary": "Settled high-protein routine, most meals cooked at home — about 127 g protein",
+    "payload": {
+      "meal_type": "daily_total",
+      "items": [
+        { "name": "eggs", "qty_text": "daily" },
+        { "name": "chicken", "qty_text": "daily" },
+        { "name": "paneer and dal", "qty_text": "daily" },
+        { "name": "curd", "qty_text": "daily" }
+      ],
+      "nutrition": {
+        "protein_g": 127.0,
+        "estimated": true,
+        "basis": "user_stated",
+        "confidence_class": "low",
+        "range": { "protein_g": [125.0, 130.0] },
+        "method": { "pipeline": "replay-payload-table/1" }
+      }
+    }
+  },
+
+  "meal-pattern.2026-07-06.2026-08-18": {
+    "note": "The whey shake lifts the daily total from ~127 to ~130 g. That 3 g step is below the 5 g/day noise floor in engine/insights.py, so the engine correctly declines to call it a change — the standing protein claim stays the 2026-06-01 shift.",
+    "cadence": "daily",
+    "confidence": 0.85,
+    "summary": "Routine holding — home-cooked meals through the week, a shake on training days from late July — about 130 g protein",
+    "payload": {
+      "meal_type": "daily_total",
+      "items": [
+        { "name": "eggs", "qty_text": "daily" },
+        { "name": "chicken", "qty_text": "daily" },
+        { "name": "paneer and dal", "qty_text": "daily" },
+        { "name": "curd", "qty_text": "daily" }
+      ],
+      "nutrition": {
+        "protein_g": 130.0,
+        "estimated": true,
+        "basis": "user_stated",
+        "confidence_class": "medium",
+        "method": { "pipeline": "replay-payload-table/1" }
+      }
+    }
+  },
+
+  "workout-pattern.2026-04-02.2026-04-15": {
+    "note": "Thursday lane of the beginner block. Four weekly lanes materialize 'four days a week' — see demo-timeline.md conversion notes.",
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — beginner block, about 45 minutes",
+    "payload": { "activity": "beginner strength training", "duration_min": 45.0 }
+  },
+  "workout-pattern.2026-04-04.2026-04-15": {
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — beginner block, about 45 minutes",
+    "payload": { "activity": "beginner strength training", "duration_min": 45.0 }
+  },
+  "workout-pattern.2026-04-06.2026-04-15": {
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — beginner block, about 45 minutes",
+    "payload": { "activity": "beginner strength training", "duration_min": 45.0 }
+  },
+  "workout-pattern.2026-04-07.2026-04-15": {
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — beginner block, about 45 minutes",
+    "payload": { "activity": "beginner strength training", "duration_min": 45.0 }
+  },
+
+  "workout-pattern.2026-04-16.2026-04-30": {
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — progressive load, about 45 minutes",
+    "payload": { "activity": "strength training (progressive load)", "duration_min": 45.0 }
+  },
+  "workout-pattern.2026-04-18.2026-04-30": {
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — progressive load, about 45 minutes",
+    "payload": { "activity": "strength training (progressive load)", "duration_min": 45.0 }
+  },
+  "workout-pattern.2026-04-20.2026-04-30": {
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — progressive load, about 45 minutes",
+    "payload": { "activity": "strength training (progressive load)", "duration_min": 45.0 }
+  },
+  "workout-pattern.2026-04-21.2026-04-30": {
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — progressive load, about 45 minutes",
+    "payload": { "activity": "strength training (progressive load)", "duration_min": 45.0 }
+  },
+
+  "workout-pattern.2026-05-02.2026-05-31": {
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — about 50 minutes",
+    "payload": { "activity": "strength training", "duration_min": 50.0 }
+  },
+  "workout-pattern.2026-05-04.2026-05-31": {
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — about 50 minutes",
+    "payload": { "activity": "strength training", "duration_min": 50.0 }
+  },
+  "workout-pattern.2026-05-05.2026-05-31": {
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — about 50 minutes",
+    "payload": { "activity": "strength training", "duration_min": 50.0 }
+  },
+  "workout-pattern.2026-05-07.2026-05-31": {
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — about 50 minutes",
+    "payload": { "activity": "strength training", "duration_min": 50.0 }
+  },
+
+  "workout-pattern.2026-06-01.2026-07-05": {
+    "note": "June-July block asserts 4-5 sessions a week; materialized at four (the floor).",
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — progressive load, about 55 minutes",
+    "payload": { "activity": "strength training (progressive load)", "duration_min": 55.0 }
+  },
+  "workout-pattern.2026-06-02.2026-07-05": {
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — progressive load, about 55 minutes",
+    "payload": { "activity": "strength training (progressive load)", "duration_min": 55.0 }
+  },
+  "workout-pattern.2026-06-04.2026-07-05": {
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — progressive load, about 55 minutes",
+    "payload": { "activity": "strength training (progressive load)", "duration_min": 55.0 }
+  },
+  "workout-pattern.2026-06-06.2026-07-05": {
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — progressive load, about 55 minutes",
+    "payload": { "activity": "strength training (progressive load)", "duration_min": 55.0 }
+  },
+
+  "workout-pattern.2026-07-06.2026-08-18": {
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — progressive load, about 55 minutes",
+    "payload": { "activity": "strength training (progressive load)", "duration_min": 55.0 }
+  },
+  "workout-pattern.2026-07-07.2026-08-18": {
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — progressive load, about 55 minutes",
+    "payload": { "activity": "strength training (progressive load)", "duration_min": 55.0 }
+  },
+  "workout-pattern.2026-07-09.2026-08-18": {
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — progressive load, about 55 minutes",
+    "payload": { "activity": "strength training (progressive load)", "duration_min": 55.0 }
+  },
+  "workout-pattern.2026-07-11.2026-08-18": {
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Strength session — progressive load, about 55 minutes",
+    "payload": { "activity": "strength training (progressive load)", "duration_min": 55.0 }
+  },
+  "workout-pattern.2026-08-02.2026-08-18": {
+    "note": "A second activity, not a second onset: ONSET_SOURCES keys workouts on the type, not the activity, so this does not register as a new intervention.",
+    "cadence": "weekly",
+    "confidence": 0.85,
+    "summary": "Easy Sunday run — about 30 minutes",
+    "payload": { "activity": "easy run", "duration_min": 30.0 }
+  },
+
+  "supplement.2026-07-27.2026-08-18": {
+    "note": "The first row of this period is a structural `series_onset` intervention (ONSET_SOURCES keys supplements on the exact name), which is what gives the August measurements something to name.",
+    "cadence": "daily",
+    "confidence": 0.85,
+    "summary": "Whey protein — one 25 g scoop",
+    "payload": { "name": "whey protein", "serving_g": 25.0, "protein_g_per_serving": 20.0 }
+  },
+
+  "sleep-pattern.2026-07-07.2026-07-27": {
+    "cadence": "daily",
+    "confidence": 0.85,
+    "summary": "Slept about 6.9 hours",
+    "payload": { "hours": 6.9, "quality": "self-reported from the sleep log" }
+  },
+  "sleep-pattern.2026-07-28.2026-08-18": {
+    "cadence": "daily",
+    "confidence": 0.85,
+    "summary": "Slept about 7.6 hours",
+    "payload": { "hours": 7.6, "quality": "self-reported from the sleep log" }
+  },
+
+  "weight.2026-01-05": {
+    "summary": "Weight 82.4 kg",
+    "payload": { "weight_kg": 82.4 }
+  },
+  "weight.2026-01-31": {
+    "summary": "Weight 82.1 kg",
+    "payload": { "weight_kg": 82.1 }
+  },
+  "weight.2026-02-15": {
+    "summary": "Weight 82.6 kg",
+    "payload": { "weight_kg": 82.6 }
+  },
+  "weight.2026-03-16": {
+    "summary": "Weight 81.3 kg",
+    "payload": { "weight_kg": 81.3 }
+  },
+  "weight.2026-03-31": {
+    "summary": "Weight 80.7 kg",
+    "payload": { "weight_kg": 80.7 }
+  },
+  "weight.2026-04-20": {
+    "summary": "Weight 79.8 kg",
+    "payload": { "weight_kg": 79.8 }
+  },
+  "weight.2026-05-18": {
+    "summary": "Weight 78.2 kg",
+    "payload": { "weight_kg": 78.2 }
+  },
+  "weight.2026-05-31": {
+    "summary": "Weight 77.6 kg",
+    "payload": { "weight_kg": 77.6 }
+  },
+  "weight.2026-07-05": {
+    "summary": "Weight 75.8 kg",
+    "payload": { "weight_kg": 75.8 }
+  },
+  "weight.2026-07-20": {
+    "summary": "Weight 74.9 kg",
+    "payload": { "weight_kg": 74.9 }
+  },
+  "weight.2026-08-16": {
+    "summary": "Weight 73.2 kg",
+    "payload": { "weight_kg": 73.2 }
+  },
+
+  "body-scan.2026-01-05": {
+    "note": "Composition only — the weigh-in is its own `weight` row, so no measurement is stored twice. BIA is an estimate, not a measurement of truth; its value is as a repeatable baseline on one device.",
+    "summary": "Body composition: 29.8% body fat, 31.2 kg skeletal muscle (gym BIA scale)",
+    "payload": {
+      "body_fat_pct": 29.8,
+      "skeletal_muscle_kg": 31.2,
+      "method": "BIA (gym body-composition scale)"
+    }
+  },
+  "body-scan.2026-02-15": {
+    "summary": "Body composition: 30.1% body fat (gym BIA scale)",
+    "payload": { "body_fat_pct": 30.1, "method": "BIA (gym body-composition scale)" }
+  },
+  "body-scan.2026-03-16": {
+    "summary": "Body composition: 29.6% body fat (gym BIA scale)",
+    "payload": { "body_fat_pct": 29.6, "method": "BIA (gym body-composition scale)" }
+  },
+  "body-scan.2026-04-20": {
+    "summary": "Body composition: 28.7% body fat (gym BIA scale)",
+    "payload": { "body_fat_pct": 28.7, "method": "BIA (gym body-composition scale)" }
+  },
+  "body-scan.2026-05-18": {
+    "summary": "Body composition: 27.5% body fat, 31.8 kg skeletal muscle (gym BIA scale)",
+    "payload": {
+      "body_fat_pct": 27.5,
+      "skeletal_muscle_kg": 31.8,
+      "method": "BIA (gym body-composition scale)"
+    }
+  },
+  "body-scan.2026-07-05": {
+    "summary": "Body composition: 25.4% body fat, 32.4 kg skeletal muscle (gym BIA scale)",
+    "payload": {
+      "body_fat_pct": 25.4,
+      "skeletal_muscle_kg": 32.4,
+      "method": "BIA (gym body-composition scale)"
+    }
+  },
+  "body-scan.2026-08-16": {
+    "summary": "Body composition: 23.7% body fat, 33.0 kg skeletal muscle (gym BIA scale)",
+    "payload": {
+      "body_fat_pct": 23.7,
+      "skeletal_muscle_kg": 33.0,
+      "method": "BIA (gym body-composition scale)"
+    }
+  }
+}

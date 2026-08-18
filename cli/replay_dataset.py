@@ -61,8 +61,15 @@ TYPE_MAP: dict[str, str] = {
     "note": "note",
     "blood-report": "blood_report",
     "body-scan": "body_scan",
+    # A bare weigh-in, distinct from the composition scan that may accompany it. Kept separate
+    # because the consolidatable `weight_kg` series reads `weight` rows while `body_fat_pct`
+    # reads `body_scan` rows (engine/retrieval.py METRICS) — folding weigh-ins into body scans
+    # would leave the weight series empty, and writing the same number into both types would
+    # let one measurement be counted twice.
+    "weight": "weight",
     "meal-pattern": "meal",
     "workout-pattern": "workout",
+    "sleep-pattern": "sleep",
     "supplement": "supplement",
     "medication": "supplement",
     "illness": "note",
