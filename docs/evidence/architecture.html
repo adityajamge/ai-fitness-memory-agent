@@ -1,0 +1,723 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AI Fitness Memory Agent — Architecture</title>
+<style>
+  @page { size: A4 landscape; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", Inter, "Helvetica Neue", Arial, sans-serif;
+    color: #0F172A;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .page {
+    width: 297mm; height: 210mm;
+    padding: 13mm 14mm 10mm;
+    position: relative;
+    break-after: page;
+    display: flex; flex-direction: column;
+    background: #fff;
+  }
+  .page:last-child { break-after: auto; }
+
+  /* ── header / footer ─────────────────────────────────────────── */
+  .phead { display: flex; align-items: baseline; gap: 10px;
+           border-bottom: 1.5px solid #0F172A; padding-bottom: 4px; margin-bottom: 7mm; }
+  .phead .n  { font-size: 9pt; font-weight: 700; color: #F59E0B; letter-spacing: .08em; }
+  .phead h2  { font-size: 15pt; margin: 0; font-weight: 700; letter-spacing: -.01em; }
+  .phead .kicker { margin-left: auto; font-size: 8pt; color: #64748B; }
+  .pfoot { position: absolute; left: 14mm; right: 14mm; bottom: 5mm;
+           display: flex; font-size: 7.5pt; color: #94A3B8;
+           border-top: .5px solid #E2E8F0; padding-top: 2mm; }
+  .pfoot .r { margin-left: auto; }
+
+  /* ── cover ───────────────────────────────────────────────────── */
+  .cover { justify-content: flex-start; padding: 16mm 16mm 10mm; }
+  .cover h1 { font-size: 30pt; margin: 0 0 2mm; letter-spacing: -.02em; line-height: 1.08; }
+  .cover .sub { font-size: 12pt; color: #475569; margin: 0 0 8mm; max-width: 210mm; line-height: 1.45; }
+  .cover .rule { height: 3px; width: 46mm; background: #F59E0B; margin-bottom: 8mm; }
+  .meta { display: flex; gap: 0; margin-top: auto; border-top: 1px solid #E2E8F0; padding-top: 5mm; }
+  .meta div { flex: 1; padding-right: 6mm; }
+  .meta .k { font-size: 7.5pt; letter-spacing: .1em; color: #94A3B8; font-weight: 700; margin-bottom: 1.5mm; }
+  .meta .v { font-size: 9pt; color: #1E293B; line-height: 1.4; }
+  .thesis { background: #F8FAFC; border-left: 3px solid #7C3AED; padding: 5mm 6mm;
+            font-size: 10.5pt; line-height: 1.55; color: #1E293B; max-width: 235mm; }
+  .thesis b { color: #0F172A; }
+
+  /* ── diagram page ────────────────────────────────────────────── */
+  .diagram-wrap { flex: 1; display: flex; align-items: center; justify-content: center; }
+  .diagram-wrap svg { height: 174mm; width: auto; max-width: 100%; }
+
+  /* ── columns + blocks ────────────────────────────────────────── */
+  .cols { flex: 1; display: flex; gap: 8mm; }
+  .col  { flex: 1; min-width: 0; }
+  .cols-3 .col { flex: 1; }
+  h3 { font-size: 10pt; margin: 0 0 2mm; font-weight: 700; }
+  h3 .tag { font-size: 7pt; letter-spacing: .08em; color: #94A3B8; font-weight: 700; margin-left: 4px; }
+  p  { font-size: 8.6pt; line-height: 1.5; color: #334155; margin: 0 0 3mm; }
+  ul { margin: 0 0 3.5mm; padding-left: 4mm; }
+  li { font-size: 8.4pt; line-height: 1.48; color: #334155; margin-bottom: 1.2mm; }
+  b, strong { color: #0F172A; }
+  code, .mono { font-family: Consolas, "SF Mono", Menlo, monospace; font-size: 7.8pt; color: #1E293B; }
+  .sql { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 3px;
+         padding: 2.5mm 3mm; font-family: Consolas, Menlo, monospace; font-size: 7.2pt;
+         line-height: 1.5; color: #1E293B; white-space: pre; overflow: hidden; margin-bottom: 3mm; }
+  .sql .kw { color: #7C3AED; font-weight: 700; }
+  .sql .cm { color: #94A3B8; }
+
+  .card { border: 1px solid #E2E8F0; border-radius: 4px; padding: 3.5mm 4mm; margin-bottom: 3.5mm; }
+  .card.crdb { border-left: 3px solid #7C3AED; background: #FCFBFF; }
+  .card.aws  { border-left: 3px solid #F59E0B; background: #FFFCF7; }
+  .card.eng  { border-left: 3px solid #10B981; background: #F8FEFB; }
+  .card h4 { margin: 0 0 1.5mm; font-size: 9pt; }
+  .card p:last-child, .card ul:last-child { margin-bottom: 0; }
+
+  table { width: 100%; border-collapse: collapse; margin-bottom: 3.5mm; }
+  th { font-size: 7.2pt; letter-spacing: .06em; text-transform: uppercase; color: #94A3B8;
+       text-align: left; border-bottom: 1px solid #CBD5E1; padding: 0 3mm 1.2mm 0; font-weight: 700; }
+  td { font-size: 8.1pt; line-height: 1.4; color: #334155; padding: 1.6mm 3mm 1.6mm 0;
+       border-bottom: .5px solid #F1F5F9; vertical-align: top; }
+  td:first-child { color: #0F172A; font-weight: 600; white-space: nowrap; }
+  td.wrap:first-child { white-space: normal; }
+
+  .steps { counter-reset: s; }
+  .step { display: flex; gap: 3mm; margin-bottom: 2.6mm; }
+  .step .num { flex: none; width: 5.4mm; height: 5.4mm; border-radius: 50%;
+               background: #0F172A; color: #fff; font-size: 7.4pt; font-weight: 700;
+               display: flex; align-items: center; justify-content: center; margin-top: .3mm; }
+  .step .body { font-size: 8.4pt; line-height: 1.45; color: #334155; }
+  .step .body > b:first-child { display: block; font-size: 8.6pt; margin-bottom: .3mm; }
+  .step.crdb .num { background: #7C3AED; }
+  .step.aws  .num { background: #F59E0B; }
+  .step.eng  .num { background: #10B981; }
+
+  .note { font-size: 8pt; line-height: 1.5; background: #FFFBEB; border: 1px solid #FDE68A;
+          border-radius: 4px; padding: 3mm 3.5mm; color: #45309A; }
+  .note.honest { background: #F8FAFC; border-color: #CBD5E1; color: #334155; }
+  .note b { color: #0F172A; }
+
+  .pillrow { display: flex; flex-wrap: wrap; gap: 1.5mm; margin-bottom: 3mm; }
+  .pill { font-family: Consolas, Menlo, monospace; font-size: 7.4pt; padding: .8mm 2mm;
+          border: 1px solid #DDD6FE; background: #F5F3FF; border-radius: 3px; color: #5B21B6; }
+  .pill.g { border-color: #A7F3D0; background: #ECFDF5; color: #065F46; }
+  .pill.o { border-color: #FED7AA; background: #FFF7ED; color: #9A3412; }
+
+  .flowline { display: flex; align-items: stretch; gap: 0; margin-bottom: 4mm; }
+  .fnode { flex: 1; border: 1px solid #C4B5FD; background: #F5F3FF; border-radius: 4px;
+           padding: 2mm 2.5mm; text-align: center; }
+  .fnode .t { font-family: Consolas, Menlo, monospace; font-size: 7.6pt; font-weight: 700; color: #5B21B6; }
+  .fnode .s { font-size: 6.8pt; color: #64748B; margin-top: .5mm; }
+  .farrow { flex: none; width: 5mm; display: flex; align-items: center; justify-content: center;
+            color: #94A3B8; font-size: 9pt; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ PAGE 1 — COVER ═══════════════ -->
+<section class="page cover">
+  <div class="rule"></div>
+  <h1>AI Fitness Memory Agent<br>System Architecture</h1>
+  <p class="sub">How CockroachDB, AWS, and a model-agnostic LangGraph agent interact to make
+     persistent, evidence-grade memory the product rather than a feature.</p>
+
+  <div class="thesis">
+    <b>The architectural thesis.</b> Health memory is mostly <b>typed quantitative events</b>, and the
+    questions people actually ask are <b>computations</b>: <i>“show my protein during June”</i> is a
+    <code>SUM(payload-&gt;&gt;'protein_g') … GROUP BY week</code>, not a similarity search. But
+    <i>“what did I say about my knee?”</i> genuinely is one. A system that answers both, over the same
+    rows, with no window in which its computed and remembered views of the user disagree, needs
+    <b>SQL aggregation and vector search in one transactionally consistent store</b>. That requirement
+    selected CockroachDB, and it is why swapping the database out would not be a port — it would be a
+    redesign. Every claim the agent makes resolves back to the memory rows that produced it, and the
+    UI shows the user the executed queries. AWS runs the rest: Bedrock produces the embeddings that
+    fill the vector column, and ECS Express Mode, ECR, Secrets Manager, IAM, and CloudWatch carry the
+    application from a push on <code>main</code> to a live HTTPS URL.
+  </div>
+
+  <div class="meta">
+    <div>
+      <div class="k">SUBMISSION</div>
+      <div class="v">CockroachDB × AWS<br>Agentic Memory Hackathon</div>
+    </div>
+    <div>
+      <div class="k">COCKROACHDB TOOLS</div>
+      <div class="v">Distributed Vector Indexing (runtime)<br>ccloud CLI (cluster provisioning)</div>
+    </div>
+    <div>
+      <div class="k">AWS SERVICES</div>
+      <div class="v">Bedrock · ECS Express Mode (Fargate) · ECR<br>Secrets Manager · CloudWatch · IAM · ALB</div>
+    </div>
+    <div>
+      <div class="k">STACK</div>
+      <div class="v">FastAPI · LangGraph · psycopg 3<br>React 19 + Vite · one Docker image</div>
+    </div>
+    <div>
+      <div class="k">CONTENTS</div>
+      <div class="v">1 Overview · 2 System map · 3 Turn lifecycle<br>4 CockroachDB · 5 AWS · 6 Memory model</div>
+    </div>
+  </div>
+  <div class="pfoot"><span>AI Fitness Memory Agent — System Architecture</span><span class="r">Page 1 of 6</span></div>
+</section>
+
+<!-- ═══════════════ PAGE 2 — SYSTEM MAP ═══════════════ -->
+<section class="page">
+  <div class="phead">
+    <span class="n">02</span><h2>System map</h2>
+    <span class="kicker">Every component, boundary, and dependency in one view</span>
+  </div>
+  <div class="diagram-wrap">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 1330" font-family="Segoe UI, Inter, Helvetica Neue, Arial, sans-serif">
+  <defs>
+    <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <style>
+      .diagram-wrap .h1   { font-size: 30px; font-weight: 700; fill: #0F172A; }
+      .diagram-wrap .sub  { font-size: 15px; fill: #64748B; }
+      .diagram-wrap .zone { font-size: 12.5px; font-weight: 700; letter-spacing: 1.3px; }
+      .diagram-wrap .ct   { font-size: 15px; font-weight: 700; fill: #0F172A; }
+      .diagram-wrap .cs   { font-size: 12.5px; fill: #475569; }
+      .diagram-wrap .mono { font-family: Consolas, "SF Mono", Menlo, monospace; font-size: 12px; fill: #1E293B; }
+      .diagram-wrap .chipt{ font-size: 13px; font-weight: 700; fill: #0F172A; }
+      .diagram-wrap .chips{ font-size: 11.5px; fill: #64748B; }
+      .diagram-wrap .lbl  { font-size: 11.5px; font-weight: 600; fill: #334155; }
+      .diagram-wrap .foot { font-size: 12.5px; fill: #475569; }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1330" fill="#FFFFFF"/>
+
+  <!-- ── header ───────────────────────────────────────────────────────────── -->
+  <text class="h1" x="60" y="52">AI Fitness Memory Agent — System Architecture</text>
+  <text class="sub" x="60" y="80">Lifelong memory as the product: typed JSONB + VECTOR(512) in CockroachDB Cloud, a deterministic Memory Engine, and a model-agnostic LangGraph agent running on AWS.</text>
+
+  <!-- ── client band ──────────────────────────────────────────────────────── -->
+  <rect x="60" y="105" width="1420" height="105" rx="14" fill="#F8FAFC" stroke="#CBD5E1"/>
+  <text class="zone" x="84" y="132" fill="#64748B">BROWSER · VITE + REACT SPA (SERVED BY THE SAME CONTAINER)</text>
+  <g>
+    <rect x="84"   y="146" width="320" height="48" rx="10" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <text class="chipt" x="100" y="167">Chat — /app</text>
+    <text class="chips" x="100" y="185">conversation · memory receipts</text>
+    <rect x="420"  y="146" width="320" height="48" rx="10" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <text class="chipt" x="436" y="167">Review — /app/review</text>
+    <text class="chips" x="436" y="185">the memory briefing</text>
+    <rect x="756"  y="146" width="320" height="48" rx="10" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <text class="chipt" x="772" y="167">Profile — /app/profile</text>
+    <text class="chips" x="772" y="185">identity · goals · account</text>
+    <rect x="1092" y="146" width="372" height="48" rx="10" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <text class="chipt" x="1108" y="167">Glass-box engine pane</text>
+    <text class="chips" x="1108" y="185">citation → evidence rows → the SQL / K-NN that ran</text>
+  </g>
+
+  <!-- ── AWS boundary ─────────────────────────────────────────────────────── -->
+  <rect x="60" y="256" width="1420" height="594" rx="18" fill="#FFFBF5" stroke="#F59E0B" stroke-width="1.5" stroke-dasharray="8 5"/>
+  <text class="zone" x="84" y="284" fill="#B45309">AWS · US-EAST-1</text>
+
+  <!-- request / response arrows -->
+  <line x1="240" y1="212" x2="240" y2="304" stroke="#475569" stroke-width="1.6" marker-end="url(#arw)"/>
+  <text class="lbl" x="140" y="238">HTTPS request</text>
+  <line x1="292" y1="304" x2="292" y2="212" stroke="#475569" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arw)"/>
+  <text class="lbl" x="306" y="238">SSE + JSON</text>
+
+  <!-- ALB -->
+  <rect x="100" y="306" width="200" height="94" rx="12" fill="#FFF7ED" stroke="#FDBA74"/>
+  <text class="ct" x="118" y="334">ALB (shared)</text>
+  <text class="cs" x="118" y="356">managed HTTPS URL</text>
+  <text class="cs" x="118" y="376">health check → /healthz</text>
+
+  <!-- ECS task -->
+  <rect x="330" y="300" width="790" height="520" rx="14" fill="#FFF7ED" stroke="#FB923C" stroke-width="1.5"/>
+  <text class="zone" x="350" y="326" fill="#9A3412">AMAZON ECS EXPRESS MODE — FARGATE TASK · ONE DOCKER IMAGE</text>
+  <line x1="300" y1="374" x2="348" y2="374" stroke="#475569" stroke-width="1.6" marker-end="url(#arw)"/>
+  <text class="lbl" x="296" y="366">:8080</text>
+
+  <!-- FastAPI -->
+  <rect x="350" y="340" width="750" height="104" rx="12" fill="#EFF6FF" stroke="#93C5FD"/>
+  <text class="ct" x="368" y="366">FastAPI — api/</text>
+  <text class="mono" x="368" y="388">/api/auth/*   /api/chat/stream (SSE)   /api/ingest   /api/turns   /api/traces/{id}   /api/stats</text>
+  <text class="cs" x="368" y="410">session cookie auth · every query scoped by user_id (tested as a security boundary)</text>
+  <text class="cs" x="368" y="430">also serves the built SPA above — one image, one origin</text>
+
+  <!-- LangGraph agent -->
+  <rect x="350" y="460" width="350" height="230" rx="12" fill="#F5F3FF" stroke="#C4B5FD"/>
+  <text class="ct" x="368" y="486">LangGraph agent — agent/</text>
+  <text class="cs" x="368" y="506">the only natural-language layer</text>
+  <text class="mono" x="368" y="532">history → plan → ingest →</text>
+  <text class="mono" x="368" y="550">consolidate → retrieve →</text>
+  <text class="mono" x="368" y="568">assemble → narrate → persist</text>
+  <text class="cs" x="368" y="594">emits typed tool calls only:</text>
+  <text class="mono" x="368" y="614">log_memory · analyze_series</text>
+  <text class="mono" x="368" y="632">recall / aggregate / timeline / lookup</text>
+  <text class="cs" x="368" y="656">never writes SQL · never feeds the</text>
+  <text class="cs" x="368" y="674">glass box · narrates cited rows only</text>
+
+  <!-- Memory Engine -->
+  <rect x="750" y="460" width="350" height="230" rx="12" fill="#ECFDF5" stroke="#6EE7B7"/>
+  <text class="ct" x="768" y="486">Memory Engine — engine/</text>
+  <text class="cs" x="768" y="506">deterministic core — no LLM inside</text>
+  <text class="cs" x="768" y="532">ingestion + typed payload registry</text>
+  <text class="cs" x="768" y="552">hybrid retrieval: SQL filters + K-NN</text>
+  <text class="cs" x="768" y="572">event-driven consolidation → insights</text>
+  <text class="cs" x="768" y="592">(lineage · supersede · retraction)</text>
+  <text class="cs" x="768" y="612">context assembly + ranking</text>
+  <text class="cs" x="768" y="632">EvidenceTrace construction</text>
+  <text class="cs" x="768" y="658">invariant: no context without a trace;</text>
+  <text class="cs" x="768" y="676">every claim resolves to memory ids</text>
+
+  <line x1="702" y1="575" x2="748" y2="575" stroke="#475569" stroke-width="1.6" marker-end="url(#arw)" marker-start="url(#arw)"/>
+
+  <!-- model providers -->
+  <rect x="350" y="706" width="750" height="96" rx="12" fill="#FFFFFF" stroke="#CBD5E1"/>
+  <text class="ct" x="368" y="730">Model providers — per-role selection, config-only swap (ADR-13.2)</text>
+  <rect x="368" y="742" width="356" height="48" rx="9" fill="#F8FAFC" stroke="#E2E8F0"/>
+  <text class="chipt" x="382" y="763">LLM role — extract · plan · narrate</text>
+  <text class="chips" x="382" y="781">Claude API (deployed) · Amazon Bedrock (supported)</text>
+  <rect x="736" y="742" width="346" height="48" rx="9" fill="#F8FAFC" stroke="#E2E8F0"/>
+  <text class="chipt" x="750" y="763">Embedding role — embed</text>
+  <text class="chips" x="750" y="781">Amazon Bedrock · Titan Text Embeddings V2</text>
+
+  <!-- Bedrock -->
+  <rect x="1150" y="306" width="310" height="150" rx="12" fill="#FFF7ED" stroke="#FB923C"/>
+  <text class="ct" x="1168" y="332">Amazon Bedrock</text>
+  <text class="cs" x="1168" y="354">Titan Text Embeddings V2 — 512-dim,</text>
+  <text class="cs" x="1168" y="372">normalized so L2 ≡ cosine</text>
+  <text class="cs" x="1168" y="398">invoked by the ECS task role:</text>
+  <text class="mono" x="1168" y="418">bedrock:InvokeModel</text>
+  <text class="cs" x="1168" y="440">also the in-code default LLM provider</text>
+
+  <!-- Secrets Manager -->
+  <rect x="1150" y="472" width="310" height="96" rx="12" fill="#FFF7ED" stroke="#FDBA74"/>
+  <text class="ct" x="1168" y="498">AWS Secrets Manager</text>
+  <text class="mono" x="1168" y="520">DATABASE_URL · ANTHROPIC_API_KEY</text>
+  <text class="cs" x="1168" y="540">resolved at task start by the execution role;</text>
+  <text class="cs" x="1168" y="558">never in the image, workflow, or CI logs</text>
+
+  <!-- CloudWatch -->
+  <rect x="1150" y="584" width="310" height="76" rx="12" fill="#FFF7ED" stroke="#FDBA74"/>
+  <text class="ct" x="1168" y="610">Amazon CloudWatch Logs</text>
+  <text class="cs" x="1168" y="632">task logs — how the two production deploy</text>
+  <text class="cs" x="1168" y="650">incidents were actually diagnosed</text>
+
+  <!-- IAM -->
+  <rect x="1150" y="676" width="310" height="110" rx="12" fill="#FFF7ED" stroke="#FDBA74"/>
+  <text class="ct" x="1168" y="702">AWS IAM</text>
+  <text class="cs" x="1168" y="724">task role → Bedrock invoke (no keys in env)</text>
+  <text class="cs" x="1168" y="744">execution role → secrets + image pull</text>
+  <text class="cs" x="1168" y="764">ci-deploy user → ECR push + ECS deploy</text>
+
+  <!-- embeddings arrow -->
+  <polyline points="1100,766 1132,766 1132,420 1146,420" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#arw)"/>
+  <text class="lbl" x="1122" y="600" text-anchor="middle" transform="rotate(-90 1122 600)">embeddings</text>
+
+  <!-- Claude API (non-AWS) -->
+  <rect x="1510" y="430" width="260" height="150" rx="12" fill="#F8FAFC" stroke="#CBD5E1"/>
+  <text class="ct" x="1528" y="458">Anthropic Claude API</text>
+  <text class="cs" x="1528" y="480">non-AWS · currently serves the</text>
+  <text class="cs" x="1528" y="498">LLM role, because Bedrock grants</text>
+  <text class="cs" x="1528" y="516">model access per model and this</text>
+  <text class="cs" x="1528" y="534">account holds Titan but not Claude</text>
+  <text class="cs" x="1528" y="558">moving back to Bedrock is one</text>
+  <text class="cs" x="1528" y="576">env var — no code change</text>
+  <polyline points="1120,806 1640,806 1640,584" fill="none" stroke="#475569" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arw)"/>
+  <text class="lbl" x="1290" y="798">LLM calls (egress)</text>
+
+  <!-- ── CockroachDB ──────────────────────────────────────────────────────── -->
+  <rect x="60" y="890" width="1420" height="250" rx="18" fill="#F7F4FF" stroke="#7C3AED" stroke-width="1.5" stroke-dasharray="8 5"/>
+  <text class="zone" x="84" y="918" fill="#6D28D9">COCKROACHDB CLOUD — SYSTEM OF RECORD · TLS verify-full</text>
+
+  <line x1="760" y1="822" x2="760" y2="928" stroke="#475569" stroke-width="1.8" marker-end="url(#arw)" marker-start="url(#arw)"/>
+  <text class="lbl" x="778" y="862">all database traffic — psycopg, one transactionally consistent store</text>
+  <text class="lbl" x="778" y="880">SQL aggregation + vector K-NN + JSONB filtering in the same query path</text>
+
+  <rect x="100" y="932" width="520" height="190" rx="12" fill="#FFFFFF" stroke="#C4B5FD"/>
+  <text class="ct" x="118" y="958">memories — typed events + derived insights (two tiers, one table)</text>
+  <text class="mono" x="118" y="980">id · user_id · event_time (bi-temporal) · type · source</text>
+  <text class="mono" x="118" y="998">provenance · confidence · status · superseded_by · summary</text>
+  <text class="mono" x="118" y="1016">payload JSONB   ·   embedding VECTOR(512)</text>
+  <rect x="118" y="1030" width="256" height="30" rx="8" fill="#EDE9FE" stroke="#C4B5FD"/>
+  <text class="chipt" x="130" y="1050">VECTOR INDEX (C-SPANN)</text>
+  <rect x="384" y="1030" width="218" height="30" rx="8" fill="#EDE9FE" stroke="#C4B5FD"/>
+  <text class="chipt" x="396" y="1050">INVERTED INDEX payload</text>
+  <rect x="118" y="1070" width="484" height="30" rx="8" fill="#EDE9FE" stroke="#C4B5FD"/>
+  <text class="chipt" x="130" y="1090">INDEX (user_id, type, event_time) — timeline + aggregation scans</text>
+
+  <rect x="650" y="932" width="390" height="90" rx="12" fill="#FFFFFF" stroke="#C4B5FD"/>
+  <text class="ct" x="668" y="958">turns · evidence_traces</text>
+  <text class="cs" x="668" y="980">source of truth for what the UI renders —</text>
+  <text class="cs" x="668" y="1000">one persisted, replayable EvidenceTrace per turn</text>
+
+  <rect x="1060" y="932" width="380" height="90" rx="12" fill="#FFFFFF" stroke="#C4B5FD"/>
+  <text class="ct" x="1078" y="958">users · sessions</text>
+  <text class="cs" x="1078" y="980">email + password (scrypt), opaque session</text>
+  <text class="cs" x="1078" y="1000">tokens; per-user row scoping everywhere</text>
+
+  <rect x="650" y="1032" width="390" height="90" rx="12" fill="#FFFFFF" stroke="#C4B5FD"/>
+  <text class="ct" x="668" y="1058">langgraph checkpoints</text>
+  <text class="cs" x="668" y="1080">agent graph state on a custom CockroachDB</text>
+  <text class="cs" x="668" y="1100">saver — the stock PostgresSaver does not work</text>
+
+  <rect x="1060" y="1032" width="380" height="90" rx="12" fill="#FFFFFF" stroke="#C4B5FD"/>
+  <text class="ct" x="1078" y="1058">user_profile</text>
+  <text class="cs" x="1078" y="1080">current-state cache: identity, goals, targets,</text>
+  <text class="cs" x="1078" y="1100">rebuilt from profile_change memories</text>
+
+  <!-- ── dev-time band ────────────────────────────────────────────────────── -->
+  <rect x="60" y="1180" width="1710" height="110" rx="14" fill="#FFFFFF" stroke="#CBD5E1" stroke-dasharray="6 4"/>
+  <text class="zone" x="84" y="1206" fill="#64748B">BUILD &amp; PROVISIONING (DEV-TIME)</text>
+
+  <rect x="84" y="1218" width="400" height="58" rx="10" fill="#F8FAFC" stroke="#E2E8F0"/>
+  <text class="chipt" x="100" y="1240">GitHub Actions CI</text>
+  <text class="chips" x="100" y="1260">ruff · pytest against a real CockroachDB · image build + smoke test</text>
+  <line x1="492" y1="1247" x2="516" y2="1247" stroke="#475569" stroke-width="1.5" marker-end="url(#arw)"/>
+
+  <rect x="520" y="1218" width="310" height="58" rx="10" fill="#FFF7ED" stroke="#FDBA74"/>
+  <text class="chipt" x="536" y="1240">Amazon ECR</text>
+  <text class="chips" x="536" y="1260">image tagged :&lt;sha&gt; for traceable rollbacks</text>
+  <line x1="838" y1="1247" x2="862" y2="1247" stroke="#475569" stroke-width="1.5" marker-end="url(#arw)"/>
+
+  <rect x="866" y="1218" width="410" height="58" rx="10" fill="#FFF7ED" stroke="#FDBA74"/>
+  <text class="chipt" x="882" y="1240">amazon-ecs-deploy-express-service</text>
+  <text class="chips" x="882" y="1260">every green push to main redeploys the Fargate task above</text>
+
+  <rect x="1310" y="1218" width="440" height="58" rx="10" fill="#F7F4FF" stroke="#C4B5FD"/>
+  <text class="chipt" x="1326" y="1240">ccloud CLI</text>
+  <text class="chips" x="1326" y="1260">provisioned the CockroachDB Cloud cluster (2026-07-17)</text>
+  <polyline points="1500,1218 1500,1148 1486,1148" fill="none" stroke="#475569" stroke-width="1.5" marker-end="url(#arw)"/>
+
+  <text class="foot" x="60" y="1316">CockroachDB tools: Distributed Vector Indexing (runtime) · ccloud CLI (provisioning)</text>
+  <text class="foot" x="720" y="1316">AWS: Amazon Bedrock · Amazon ECS Express Mode (Fargate) · Amazon ECR · AWS Secrets Manager · Amazon CloudWatch · AWS IAM · ALB</text>
+</svg>
+
+  </div>
+  <div class="pfoot"><span>AI Fitness Memory Agent — System Architecture</span><span class="r">Page 2 of 6</span></div>
+</section>
+
+<!-- ═══════════════ PAGE 3 — TURN LIFECYCLE ═══════════════ -->
+<section class="page">
+  <div class="phead">
+    <span class="n">03</span><h2>Anatomy of a turn</h2>
+    <span class="kicker">One question, end to end — where each component and service enters</span>
+  </div>
+
+  <div class="flowline">
+    <div class="fnode"><div class="t">history</div><div class="s">short-term</div></div>
+    <div class="farrow">→</div>
+    <div class="fnode"><div class="t">plan</div><div class="s">LLM · tool calls</div></div>
+    <div class="farrow">→</div>
+    <div class="fnode"><div class="t">ingest</div><div class="s">“extracting”</div></div>
+    <div class="farrow">→</div>
+    <div class="fnode"><div class="t">consolidate</div><div class="s">“analyzing”</div></div>
+    <div class="farrow">→</div>
+    <div class="fnode"><div class="t">retrieve</div><div class="s">“retrieving”</div></div>
+    <div class="farrow">→</div>
+    <div class="fnode"><div class="t">assemble</div><div class="s">“assembling context”</div></div>
+    <div class="farrow">→</div>
+    <div class="fnode"><div class="t">narrate</div><div class="s">“generating”</div></div>
+    <div class="farrow">→</div>
+    <div class="fnode"><div class="t">persist</div><div class="s">turn + trace</div></div>
+  </div>
+
+  <div class="cols">
+    <div class="col">
+      <div class="steps">
+        <div class="step"><div class="num">1</div><div class="body"><b>Request arrives</b>
+          The SPA calls <code>POST /api/chat/stream</code>. The shared <b>ALB</b> terminates HTTPS and
+          forwards to the Fargate task on port 8080. FastAPI resolves the session cookie to a
+          <code>user_id</code>; from here every query in the turn is scoped to it.</div></div>
+        <div class="step crdb"><div class="num">2</div><div class="body"><b>history — short-term memory</b>
+          The recent messages of this thread are read from the <code>turns</code> table. They reach
+          <b>plan</b> and <b>narrate</b> only. History is never evidence: never citable, never inside an
+          EvidenceTrace, and never an ingestion source.</div></div>
+        <div class="step"><div class="num">3</div><div class="body"><b>plan — the only free-form step</b>
+          The LLM sees the question, the short-term history, and the tool vocabulary, and returns
+          <b>typed tool calls</b>. It never writes SQL. Calls are validated into typed specs before any
+          statement is composed; an unknown tool or unparseable slot fails here, not in the database.</div></div>
+        <div class="step eng"><div class="num">4</div><div class="body"><b>ingest — the write path</b>
+          <code>log_memory</code> is a <b>zero-argument signal</b>: it says whether this turn is loggable,
+          never what to log. The engine extracts typed events from the bytes of the current request
+          only — at most once per turn — validates each against the payload registry, and embeds them.</div></div>
+        <div class="step aws"><div class="num">5</div><div class="body"><b>embed — Amazon Bedrock</b>
+          Titan Text Embeddings V2 returns a 512-dim vector per memory, normalized so that L2 distance
+          is equivalent to cosine. Bedrock is invoked with the ECS <b>task role</b> — no keys in the
+          environment. If embedding fails, rows are stored with <code>NULL</code> embeddings and stay
+          eligible for backfill rather than being given fabricated vectors.</div></div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="steps">
+        <div class="step eng"><div class="num">6</div><div class="body"><b>consolidate — derived insights</b>
+          A write touching a series triggers detection on that series only, synchronously, under a time
+          budget. Confirmed level shifts and intervention outcomes are written back as
+          <code>insight</code> memories carrying <b>lineage</b> to the events that produced them, and are
+          retracted or superseded when the evidence beneath them changes.</div></div>
+        <div class="step crdb"><div class="num">7</div><div class="body"><b>retrieve — hybrid, deterministic</b>
+          Each validated spec becomes one parameterised statement: SQL aggregation, timeline scans, and
+          JSONB lookups run against the composite and inverted indexes; semantic recall runs K-NN against
+          the vector column. Same store, same transaction boundary, same instant.</div></div>
+        <div class="step eng"><div class="num">8</div><div class="body"><b>assemble — context + trace together</b>
+          Ranked context is built <b>and</b> the EvidenceTrace is constructed in the same pass: the executed
+          SQL with its bound parameters, row counts, evidence snapshots, insight references, ranking, and
+          the exact set of memory IDs the narrator is permitted to cite. The invariant is structural —
+          <b>no context without a trace</b>.</div></div>
+        <div class="step"><div class="num">9</div><div class="body"><b>narrate — constrained language</b>
+          The LLM writes prose over retrieved rows and cites them by id. It cannot reach the database, and
+          it cannot feed the glass box: the trace was already built from what actually executed.</div></div>
+        <div class="step crdb"><div class="num">10</div><div class="body"><b>persist — replayable truth</b>
+          The turn and its trace are written to <code>turns</code> and <code>evidence_traces</code>; graph
+          state goes to the checkpoint tables. Reopening the conversation weeks later re-renders the same
+          citations from stored rows, not from a re-run of the model.</div></div>
+      </div>
+      <div class="note">
+        <b>What the user sees while this happens.</b> Each stage is streamed over SSE as it actually
+        occurs — <span class="mono">extracting → analyzing → retrieving → assembling context → generating</span>.
+        The engine pane is a live view of the real graph, not a progress animation. If the stream cannot be
+        established, the client falls back to the plain endpoint automatically.
+      </div>
+    </div>
+  </div>
+  <div class="pfoot"><span>AI Fitness Memory Agent — System Architecture</span><span class="r">Page 3 of 6</span></div>
+</section>
+
+<!-- ═══════════════ PAGE 4 — COCKROACHDB ═══════════════ -->
+<section class="page">
+  <div class="phead">
+    <span class="n">04</span><h2>CockroachDB integration</h2>
+    <span class="kicker">One store, three access paths, two hackathon tools</span>
+  </div>
+
+  <div class="cols cols-3">
+    <div class="col">
+      <h3>One table, two memory tiers</h3>
+      <p>Episodic events and derived insights share the <code>memories</code> table. Structure lives in a
+        typed JSONB payload rather than rigid nutrition columns, so a new nutrient tomorrow is a new key,
+        not a migration. Time is bi-temporal: <code>event_time</code> (when it happened, possibly estimated)
+        is separate from <code>created_at</code> (when we learned it), which is what lets the system answer
+        questions about the past honestly.</p>
+      <div class="sql"><span class="cm">-- engine/schema.sql</span>
+<span class="kw">CREATE TABLE</span> memories (
+  id            UUID <span class="kw">PRIMARY KEY</span>,
+  user_id       UUID <span class="kw">NOT NULL</span>,
+  event_time    TIMESTAMPTZ, tz TEXT,
+  type          TEXT, source TEXT,
+  provenance    TEXT, confidence FLOAT,
+  status        TEXT, superseded_by UUID,
+  summary       TEXT,
+  payload       JSONB <span class="kw">NOT NULL</span>,
+  embedding     <span class="kw">VECTOR(512)</span>,
+  created_at    TIMESTAMPTZ,
+  <span class="kw">VECTOR INDEX</span>   memories_embedding_idx (embedding),
+  <span class="kw">INVERTED INDEX</span> memories_payload_idx (payload),
+  <span class="kw">INDEX</span> memories_user_type_time_idx
+        (user_id, type, event_time)
+);</div>
+      <div class="pillrow">
+        <span class="pill">meal</span><span class="pill">workout</span><span class="pill">sleep</span>
+        <span class="pill">body_scan</span><span class="pill">weight</span><span class="pill">blood_report</span>
+        <span class="pill">supplement</span><span class="pill">note</span><span class="pill">profile_change</span>
+        <span class="pill">insight</span>
+      </div>
+    </div>
+
+    <div class="col">
+      <h3>Three indexes, three questions</h3>
+      <table>
+        <tr><th>Index</th><th>Serves</th></tr>
+        <tr><td class="wrap">VECTOR INDEX<br>(C-SPANN)</td><td><b>Distributed Vector Indexing.</b> Semantic recall — “what did I say about my knee?” — as K-NN over normalized 512-dim vectors.</td></tr>
+        <tr><td class="wrap">INVERTED INDEX<br>(payload)</td><td>Containment and key filtering inside JSONB, which is what makes the migration-free payload design usable rather than merely flexible.</td></tr>
+        <tr><td class="wrap">INDEX (user_id,<br>type, event_time)</td><td>Timeline reconstruction and every aggregation — the computational questions that no vector store can answer.</td></tr>
+      </table>
+      <div class="sql"><span class="cm">-- semantic recall (engine/retrieval.py)</span>
+<span class="kw">SELECT</span> id, type, event_time, confidence,
+       provenance, summary,
+       embedding &lt;-&gt; %(qvec)s::<span class="kw">VECTOR(512)</span> <span class="kw">AS</span> distance
+<span class="kw">FROM</span> memories
+<span class="kw">WHERE</span> user_id = %(user_id)s
+  <span class="kw">AND</span> status = <span class="kw">'active'</span>
+  <span class="kw">AND</span> embedding <span class="kw">IS NOT NULL</span>
+<span class="kw">ORDER BY</span> embedding &lt;-&gt; %(qvec)s::<span class="kw">VECTOR(512)</span>
+<span class="kw">LIMIT</span> %(top_k)s</div>
+      <p>Statements are always parameterised — builder families never interpolate values — which is what
+        makes the executed SQL safe to display verbatim in the glass box.</p>
+    </div>
+
+    <div class="col">
+      <h3>The rest of the cluster</h3>
+      <table>
+        <tr><th>Table</th><th>Role</th></tr>
+        <tr><td>turns</td><td>Conversation history; the short-term memory source and the UI's record of what was said.</td></tr>
+        <tr><td>evidence_traces</td><td>One persisted, replayable trace per turn — the glass box reads stored rows, never a re-run.</td></tr>
+        <tr><td>users · sessions</td><td>Email + password (scrypt), opaque session tokens, per-user row scoping tested as a security boundary.</td></tr>
+        <tr><td>user_profile</td><td>Current-state cache — identity, goals, targets — rebuilt from <code>profile_change</code> memories.</td></tr>
+        <tr><td class="wrap">langgraph<br>checkpoints</td><td>Agent graph state on a custom CockroachDB saver; only small serde-safe channels are ever checkpointed.</td></tr>
+      </table>
+      <div class="card crdb">
+        <h4>ccloud CLI</h4>
+        <p>The CockroachDB Cloud cluster was provisioned with the ccloud CLI. The application connects
+          with <code>sslmode=verify-full</code> against a CA baked into the image, and CI runs the full
+          test suite against a real CockroachDB on every push, so the schema and both canaries can never
+          silently rot.</p>
+      </div>
+      <div class="note honest">
+        <b>Measured, not assumed.</b> The vector index is real, created, and asserted by a permanent CI
+        canary — including that the plan uses it. At the product's current query shape, the
+        <i>filtered</i> per-user K-NN falls back to a scan, because this CockroachDB version abandons the
+        vector index under residual filters. The filters are correctness boundaries (user scoping,
+        superseded-row exclusion), so they stay; the index becomes load-bearing exactly when per-user row
+        counts outgrow a scan — the lifelong-memory case the product is designed for.
+      </div>
+    </div>
+  </div>
+  <div class="pfoot"><span>AI Fitness Memory Agent — System Architecture</span><span class="r">Page 4 of 6</span></div>
+</section>
+
+<!-- ═══════════════ PAGE 5 — AWS ═══════════════ -->
+<section class="page">
+  <div class="phead">
+    <span class="n">05</span><h2>AWS integration</h2>
+    <span class="kicker">What each service does, and what breaks without it</span>
+  </div>
+
+  <div class="cols">
+    <div class="col">
+      <div class="card aws">
+        <h4>Amazon Bedrock — the intelligence layer</h4>
+        <p><b>Titan Text Embeddings V2</b> produces the 512-dim normalized vector for every memory written.
+          Normalization is an invariant, not a detail: C-SPANN is Euclidean-only, so unit vectors are what
+          make L2 distance equivalent to cosine similarity. Bedrock is therefore the direct input to the
+          CockroachDB vector column — remove it and semantic recall has nothing to search.</p>
+        <p>Bedrock is also the <b>in-code default LLM provider</b> for extraction, planning, and narration.
+          The deployed LLM role currently runs on the Claude API because Bedrock grants model access
+          per model and this account holds Titan but not Claude inference; the two roles were made
+          independently selectable for exactly this reason. Moving the LLM role back to Bedrock is one
+          environment variable and no code change — the acceptance test for the model-independence contract.</p>
+      </div>
+      <div class="card aws">
+        <h4>Amazon ECS Express Mode — the runtime</h4>
+        <p>One Docker image containing FastAPI and the built React SPA runs as a Fargate task behind a
+          shared ALB with a managed HTTPS URL, health-checked at <code>/healthz</code> on port 8080. One
+          image and one origin means no CORS surface, no second deployment target, and no drift between
+          the API a judge tests and the UI they see.</p>
+      </div>
+      <div class="card aws">
+        <h4>AWS IAM — three identities, deliberately separated</h4>
+        <table style="margin-bottom:0">
+          <tr><td>Task role</td><td><code>bedrock:InvokeModel</code> — assumed by the running container, so no credentials exist in the environment.</td></tr>
+          <tr><td class="wrap">Execution<br>role</td><td>Pulls the image and resolves secrets at task start.</td></tr>
+          <tr><td>CI user</td><td>ECR push, ECS Express deploy, and scoped PassRole — nothing else.</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="card aws">
+        <h4>AWS Secrets Manager — configuration that never leaks</h4>
+        <p>The database URL and the model API key are ECS <code>secrets</code> entries resolved by the
+          execution role at task start, so their values never appear in the image, the workflow file, the
+          task definition, or CI logs. Everything non-sensitive is a literal in the version-controlled
+          workflow, and a preflight step fails the job if a required variable is unset — a
+          half-configured service never reaches the ALB.</p>
+      </div>
+      <div class="card aws">
+        <h4>Amazon ECR + delivery</h4>
+        <p>Every push to <code>main</code> runs lint and the full test suite against a real CockroachDB,
+          builds the image, and smoke-tests it. Green builds are pushed to ECR tagged by commit SHA — so
+          a rollback is a tag, not an archaeology exercise — and deployed by the official
+          <code>amazon-ecs-deploy-express-service</code> action. There is no manual deploy step.</p>
+      </div>
+      <div class="card aws">
+        <h4>Amazon CloudWatch Logs — the debugging surface</h4>
+        <p>Task logs are how two real production incidents were diagnosed rather than guessed at: a
+          <code>verify-full</code> connection failing for want of a root certificate path inside the image,
+          and a stored secret carrying a trailing newline that the HTTP stack rejected as an illegal header
+          — surfacing as a generic “Connection error” indistinguishable from a network outage without the
+          full exception chain.</p>
+      </div>
+      <div class="note">
+        <b>Deliberately absent.</b> <b>No S3</b> — an uploaded meal photo is decoded, validated, EXIF-stripped,
+        sent to the vision model, and discarded; nothing is persisted, so there is no image store to secure.
+        <b>No Lambda, no queue, no scheduler</b> — consolidation runs synchronously inside the ingestion
+        request under a time budget. Both are stated architectural decisions: no infrastructure for
+        completeness.
+      </div>
+    </div>
+  </div>
+  <div class="pfoot"><span>AI Fitness Memory Agent — System Architecture</span><span class="r">Page 5 of 6</span></div>
+</section>
+
+<!-- ═══════════════ PAGE 6 — MEMORY MODEL ═══════════════ -->
+<section class="page">
+  <div class="phead">
+    <span class="n">06</span><h2>The memory model &amp; the glass box</h2>
+    <span class="kicker">Why the agent cannot fabricate, and how a user checks</span>
+  </div>
+
+  <div class="cols cols-3">
+    <div class="col">
+      <h3>Two memories, structurally separated</h3>
+      <div class="card">
+        <h4>Short-term</h4>
+        <p>The recent messages of the current thread, read from <code>turns</code>. Answers <i>“what are we
+          talking about right now?”</i> It reaches <b>plan</b> and <b>narrate</b> only — never citable, never
+          in a trace, never an ingestion source.</p>
+      </div>
+      <div class="card eng">
+        <h4>Long-term</h4>
+        <p>Typed rows in <code>memories</code>, retrieved deterministically and cited by id. Answers
+          <i>“what do I know about this user?”</i> This is the product.</p>
+      </div>
+      <p>The separation is enforced by construction, not convention: the log signal carries no payload, and
+        ingestion reads the bytes of the current request at most once per turn. The write path has no
+        dedupe, so a fact re-ingested from an earlier turn would become a permanent duplicate that
+        silently inflates every aggregate over its range while the glass box cites it as genuine evidence.
+        A dedicated test suite, whose providers misbehave on purpose, exists to catch any regression here.</p>
+    </div>
+
+    <div class="col">
+      <h3>The agent's closed vocabulary</h3>
+      <p>The planner may emit these calls and nothing else. Read tools are structurally incapable of
+        writing; write tools never pass through the query builders.</p>
+      <div class="pillrow">
+        <span class="pill g">aggregate_memories</span><span class="pill g">recall_memories</span>
+        <span class="pill g">get_timeline</span><span class="pill g">lookup_events</span>
+        <span class="pill g">count_events</span><span class="pill g">lookup_insights</span>
+        <span class="pill o">log_memory</span><span class="pill o">analyze_series</span>
+      </div>
+      <h3>Honesty rules the system enforces</h3>
+      <ul>
+        <li><b>No context without a trace.</b> Assembly builds both or neither — asserted as a property test.</li>
+        <li><b>Citations must be in the permitted set.</b> The trace carries the exact citable IDs; a citation outside it is invalid by construction.</li>
+        <li><b>Estimated values stay marked.</b> Provenance and confidence travel with every row and are shown, not averaged away.</li>
+        <li><b>Failure is reported, not hidden.</b> If semantic recall is unavailable, the turn degrades honestly and says so instead of answering as though it had searched.</li>
+        <li><b>Superseded rows never resurface.</b> Corrections supersede rather than overwrite, so history stays auditable.</li>
+      </ul>
+    </div>
+
+    <div class="col">
+      <h3>What the glass box actually shows</h3>
+      <p>Clicking a citation resolves it to the rows that produced it, and “how this was retrieved” shows
+        the executed statements themselves.</p>
+      <table>
+        <tr><th>Trace field</th><th>Contents</th></tr>
+        <tr><td>retrieval_steps</td><td>The exact SQL with placeholders, its bound parameters, and the number of memory rows that participated.</td></tr>
+        <tr><td>evidence</td><td>Snapshots of the rows retrieved, with type, event time, provenance, and confidence.</td></tr>
+        <tr><td>insights</td><td>References to derived insights, each traceable to its lineage.</td></tr>
+        <tr><td>timeline</td><td>The reconstructed sequence backing temporal claims.</td></tr>
+        <tr><td>ranking</td><td>Why each item made it into context.</td></tr>
+        <tr><td>citable_ids</td><td>Exactly what the narrator was permitted to cite — including aggregate contributors that never appear as snapshots.</td></tr>
+      </table>
+      <div class="note">
+        <b>Why this is the interesting part.</b> An AI coach grounded in your own data is now table stakes.
+        Resolving a claim back to the specific rows that produced it — and showing the query that found
+        them — is what a deterministic engine over a single consistent store makes possible, and what a
+        model asked to remember on its own cannot offer.
+      </div>
+    </div>
+  </div>
+  <div class="pfoot"><span>AI Fitness Memory Agent — System Architecture · CockroachDB × AWS Agentic Memory Hackathon</span><span class="r">Page 6 of 6</span></div>
+</section>
+
+</body>
+</html>

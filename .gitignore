@@ -53,8 +53,13 @@ test-results/
 # Only a sanitized derivative ever ships in the public repo. The payload table carries the
 # same class of data as the reconstruction itself (lab values, doses, clinic names), so it
 # stays local for the same reason -- see docs/engineering/replay-architecture.md 4.1.
-docs/evidence/timeline-entries.md
-docs/evidence/replay_payloads.json
+#
+# These rules are deliberately path-INDEPENDENT. The path-anchored versions
+# (docs/evidence/...) were bypassed on 2026-08-18 by a copy of the same two files under
+# data/evidence/, which reached a public remote. Match the filenames wherever they land.
+**/timeline-entries.md
+**/replay_payloads.json
+data/evidence/
 
 # Generated replay datasets (derived from the two files above; regenerable via cli.convert)
 data/replay/
