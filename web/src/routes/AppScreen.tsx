@@ -50,9 +50,10 @@ const nextId = () => `local-${++localId}`;
 /** Matches the `lg` breakpoint where the evidence pane becomes a column instead of a drawer. */
 const DESKTOP_QUERY = "(min-width: 1024px)";
 
-/** Chat's timeline window (§16 Decisions Log, 2026-08-18). Narrower than Review's default 90
- * because this rail is inset between the thread sidebar and the 420px engine pane rather than
- * spanning a full-width page — 60 days keeps each bar comfortably above the legibility floor. */
+/** Chat's timeline window (§16 Decisions Log, 2026-08-18): the last 60 days fill the rail, with
+ * everything older one scroll to the left. Explicitly requested, and kept at 60 when the rail
+ * went full-bleed later the same day — the wider viewport spends the extra room on wider bars
+ * rather than on more history, so the span the user asked to see stays the span they get. */
 const CHAT_TIMELINE_DAYS = 60;
 
 export function AppScreen() {
@@ -552,6 +553,18 @@ export function AppScreen() {
     <div className="relative flex h-dvh flex-col overflow-hidden">
       <TopBar isBusy={isSending} />
 
+      {/* The memory-density strip (§6.8), remounted in Chat 2026-08-18 (§16 Decisions Log) and
+          moved to full-bleed the same day on explicit instruction: it spans the entire window
+          directly under the top bar, ABOVE the row that holds the thread rail, the conversation
+          and the engine pane — not inset inside the conversation column, which is where it first
+          landed earlier today. One rail, one continuous span of history, edge to edge.
+
+          Deliberately outside the `isPending`/`isError`/`isEmptyAccount` branches below: the
+          strip owns its own loading, error and empty states (§6.8's "your memory starts here"
+          reads as day one, not as a broken widget), so gating it on the stats query would make
+          the whole band flicker in and out on every mount. */}
+      <Timeline onScrub={handleScrub} visibleDays={CHAT_TIMELINE_DAYS} />
+
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {/* Sidebar rail — extracted to `ThreadSidebarRail` (§16 Decisions Log, amended
             2026-08-12) so `Today` can carry the exact same sidebar + account row, ChatGPT's own
@@ -565,18 +578,6 @@ export function AppScreen() {
         />
 
         <main className="flex min-w-0 flex-1 flex-col">
-          {/* The memory-density strip (§6.8), remounted in Chat 2026-08-18 (§16 Decisions Log)
-              — but INSIDE this column, not as the full-width rail above the app shell it was
-              before 2026-08-13. It spans the conversation only, between the thread rail and the
-              engine pane, so it reads as context for the conversation rather than as a global
-              header band. 60 days fit without scrolling; older history scrolls left.
-
-              Deliberately outside the `isPending`/`isError`/`isEmptyAccount` branch below: the
-              strip owns its own loading, error and empty states (§6.8's "your memory starts
-              here" reads as day one, not as a broken widget), and hiding it while stats load
-              would make the band flicker in and out on every mount. */}
-          <Timeline onScrub={handleScrub} visibleDays={CHAT_TIMELINE_DAYS} />
-
           {stats.isPending ? (
             <div className="mx-auto flex w-full max-w-conversation flex-col gap-4 px-4 py-8 md:px-8">
               <Skeleton className="h-4 w-40" />

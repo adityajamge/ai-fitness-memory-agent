@@ -3,11 +3,11 @@
  * types this product has).
  *
  * **Two mounts** (§16 Decisions Log, 2026-08-18): `routes/Review.tsx` at its default 90-day
- * window, and `routes/AppScreen.tsx` — inside Chat's main column, between the two rails — at 60.
- * The 2026-08-13 IA revision had scoped it to Review alone; that removed it from the screen where
- * "where does this sit in my history" is asked most, and is reversed for the Chat mount only. It
- * is still not a *global* rail above every screen: Profile has no timeline, and the strip now
- * sits inside the conversation column rather than spanning the app shell above the sidebars.
+ * window, and `routes/AppScreen.tsx` at 60 — full-bleed under Chat's top bar, spanning the whole
+ * window above the thread rail, the conversation and the engine pane. The 2026-08-13 IA revision
+ * had scoped it to Review alone; that removed it from the screen where "where does this sit in my
+ * history" is asked most, and is reversed for Chat. Still not a rail on *every* screen — Profile
+ * has none.
  *
  * Rule 7 confines `--signal` to a fixed list that includes "insight caps in the timeline" —
  * nothing else here may use it, which is why a day's bar is `--faint`/`--muted-foreground` and
@@ -45,10 +45,9 @@ const DAYS_PER_BUCKET = 7;
  * width). Bar width is derived from this and the rail's own measured width, so it holds at any
  * viewport size instead of being tuned to one.
  *
- * Overridable per mount (`visibleDays`) because the two mounts have different amounts of room:
- * Review gives the rail a full single-column page, while Chat's is inset between the thread rail
- * and the 420px engine pane. Same component, same data, same scroll — a narrower window there
- * keeps each bar above `MIN_BAR_PX` instead of bottoming out on the floor. */
+ * Overridable per mount (`visibleDays`): Chat asks for 60 days specifically, Review keeps 90.
+ * Bar width is always `railWidth / visibleDays`, so a wider viewport spends the extra room on
+ * wider bars rather than on more history — the window is a span of time, not a bar count. */
 const VISIBLE_DAYS = 90;
 /** Never let a bar get thinner than this, even on a narrow viewport — the floor for both
  * legibility and (on mobile) a tappable target. */
