@@ -180,7 +180,7 @@ doing in May" queries.
 
 | Tool | Contract | Phase |
 |---|---|---|
-| `log_memory` | Ingest a user turn (text/photo/file) → typed events + receipt | 2 |
+| `log_memory` | **Zero-argument signal** that the *current* turn is loggable → typed events + receipt. Carries no text: the graph ingests the current turn's own words ([ADR-14.15](09-decisions.md#adr-14)) | 2 |
 | `aggregate_memories` | Parameterized SQL aggregation (sums, averages, group-by period, filters by type/date) | 3 |
 | `recall_memories` | Vector search over summaries/narrative, filtered by type/date/status | 3 |
 | `get_timeline` | Ordered event slice for a date range | 3 |
@@ -197,6 +197,14 @@ The LangGraph agent never issues raw SQL; the engine owns all query construction
 so no separate intent-routing step exists. Ingestion runs before retrieval within a turn, so
 a memory logged now is visible to the same turn's aggregation
 ([ADR-14.3](09-decisions.md#adr-14)).
+
+**It decides *whether* to ingest, never *what*** ([ADR-14.15](09-decisions.md#adr-14)). The
+tool takes no arguments; the graph ingests `state["question"]`, anchored to `state["now"]`.
+This is what keeps long-term memory sound now that the planner sees recent conversation
+([ADR-14.16](09-decisions.md#adr-14)): a model-authored text slot was the one channel through
+which a fact from an earlier day could be re-ingested and re-dated to today, and since the
+write path has no dedupe, such a duplicate would permanently inflate every aggregate over its
+range while the glass box cited it as genuine evidence.
 
 **Deliberately NOT a tool:** `build_evidence_trace`. Evidence traces are emitted by
 assembly itself ([module 6](#6-evidence-trace-builder-adr-12), [ADR-12](09-decisions.md#adr-12));

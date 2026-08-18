@@ -16,8 +16,9 @@
 
 ```mermaid
 flowchart LR
-    IN["User turn<br/>(text / photo / file)"] --> PLAN["PLAN — the ONLY NL-understanding layer<br/>selects tools + fills typed slots<br/>(routing IS tool selection)"]
-    PLAN -->|"log_memory selected"| LOG["log_memory<br/>(engine ingestion)"]
+    IN["User turn<br/>(text / photo / file)"] --> HIST["HISTORY — load short-term memory<br/>recent messages of THIS thread<br/>(context only, never an ingestion source)"]
+    HIST --> PLAN["PLAN — the ONLY NL-understanding layer<br/>selects tools + fills typed slots<br/>(routing IS tool selection)"]
+    PLAN -->|"log_memory selected<br/>(zero-argument SIGNAL)"| LOG["log_memory<br/>ingests the CURRENT turn's own words"]
     PLAN -->|"analyze_series selected"| CONSOLIDATE["analyze_series<br/>(engine consolidation — WRITES)"]
     PLAN -->|"retrieval tools selected"| RETRIEVE["aggregate_memories · recall_memories<br/>get_timeline · lookup_events · count_events<br/>lookup_insights (read-only set)"]
     CONSOLIDATE -->|"consolidate BEFORE retrieve"| RETRIEVE
@@ -26,6 +27,7 @@ flowchart LR
     LOG --> RECEIPT["Memory receipt"]
     RETRIEVE --> ASSEMBLE["Engine: context assembly<br/>+ ranking (memory IDs kept)"]
     ASSEMBLE --> NARRATE["LLM narrates answer<br/>with [memory-ID] citations"]
+    HIST -.->|"conversational continuity<br/>(context only — never citable)"| NARRATE
     ASSEMBLE -->|"deterministic byproduct"| TRACE["EvidenceTrace<br/>(queries · evidence · lineage · ranking)"]
     NARRATE --> VALIDATE["Engine: citation validation<br/>(T7 — Phase 6)"]
     TRACE --> VALIDATE
@@ -51,6 +53,20 @@ Notes:
 - **The two write tools are dispatched by the graph, never by the tool layer.** `log_memory`
   and `analyze_series` go to a service; the closed retrieval builder set stays **read-only**
   (invariant I-17) because the writers are not members of it. `prepare_call` refuses both.
+- **`log_memory` is a zero-argument signal; the ingestion source is the current turn**
+  ([ADR-14.15](09-decisions.md#adr-14)). Selecting it asserts only *"this turn is loggable"* —
+  it carries no text, so `ingest_node` ingests `state["question"]` (the bytes of this request),
+  at most once per turn however many calls arrive, anchored to `state["now"]`. That is what
+  makes showing the planner prior turns safe: there is no slot in which an earlier day's fact
+  could be copied forward and re-dated to today.
+- **Short-term memory is context, never an ingestion source**
+  ([ADR-14.16](09-decisions.md#adr-14)). The `history` node loads the thread's recent messages
+  and hands them to `plan` and `narrate` only, as real prior messages with the current turn
+  last. It is never evidence: it stays out of `ContextBlock`, so `citable_ids` cannot grow from
+  it; it never reaches `extract_events`, whose signature has no parameter for it; and it rides
+  `TurnCarrier`, not `GraphState`, so the M5-1 channel allowlist is unchanged. Distinct from
+  long-term memory in kind, not degree — *"what are we talking about right now?"* versus
+  *"what do I know about this user?"*
 - **Assembly runs on every turn that narrates**, so a trace always exists — honestly empty
   (zero retrieval steps) on an ingest-only or conversational turn. That keeps ADR-12's
   by-construction property uniform rather than special-cased.

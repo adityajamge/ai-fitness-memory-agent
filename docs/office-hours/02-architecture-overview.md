@@ -115,3 +115,12 @@ via the app API — **UI data never passes through the model**
 retrieval tools in the same call, and the graph runs ingestion **first**, so the event just
 reported is already committed when the same turn's aggregation scans for it
 ([ADR-14.3](09-decisions.md#adr-14)).
+
+**Two memories, deliberately separate.** Every turn also loads **short-term memory** — the
+recent messages of this conversation thread — so follow-ups resolve ("how did you find
+that?", "what about last week?"). It answers *"what are we talking about right now?"*, while
+long-term memory answers *"what do I know about this user?"*. They meet only at the two model
+calls and are kept apart everywhere else: short-term memory is never citable, never enters an
+`EvidenceTrace`, and — load-bearing — is **never an ingestion source**. `log_memory` carries
+no text, so the only thing that can become a memory is the current turn's own words
+([ADR-14.15](09-decisions.md#adr-14), [ADR-14.16](09-decisions.md#adr-14)).

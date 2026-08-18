@@ -2,6 +2,25 @@
 
 CockroachDB × AWS Agentic Memory Hackathon project (deadline 2026-08-19). An AI health companion whose core product is persistent, lifelong memory: a custom **Memory Engine** on CockroachDB (typed JSONB memories + `VECTOR(512)` embeddings, hybrid SQL+vector retrieval, deterministic EvidenceTraces driving a glass-box UI), a model-agnostic LangGraph agent (Bedrock default), FastAPI + Vite/React in one Docker image on Amazon ECS Express Mode (orig. App Runner; ADR-13.3 amendment). Standard multi-user SaaS — every account starts with empty memory.
 
+## The two memories (do not blur them)
+
+**Short-term** — the recent messages of the current thread, read from `turns`
+([engine/history.py](engine/history.py)). Answers *"what are we talking about right now?"*.
+It reaches `plan` and `narrate` **only**. It is never evidence: never citable, never in an
+`EvidenceTrace`, and **never an ingestion source**.
+
+**Long-term** — typed rows in `memories`, retrieved deterministically and cited by id.
+Answers *"what do I know about this user?"*. This is the product.
+
+**The invariant that keeps them apart is structural, not a convention (ADR-14.15/14.16).**
+`log_memory` is a **zero-argument signal**: it says *whether* this turn is loggable, never
+*what* to log. `ingest_node` ingests `state["question"]` — the bytes of the current request —
+at most once per turn, anchored to `state["now"]`. Do not add a `text` slot back, and do not
+route history into `IngestionService` or `ContextBlock`. The write path has **no dedupe**, so
+a fact re-ingested from an earlier turn becomes a permanent duplicate that silently inflates
+every aggregate over its range while the glass box cites it as genuine evidence.
+`agent/tests/test_ingestion_source.py` is the tripwire — its providers misbehave on purpose.
+
 **Source of truth: [docs/office-hours/README.md](docs/office-hours/README.md)** — read it (and its doc map) before designing, planning, or building anything. All architectural decisions live in [docs/office-hours/09-decisions.md](docs/office-hours/09-decisions.md) (ADR-1..13) — do not re-litigate them silently. **Day-to-day execution: [docs/implementation-roadmap.md](docs/implementation-roadmap.md)** (8 phases, demo checkpoints, commit milestones). Engineering backlog: [docs/office-hours/11-implementation-tasks.md](docs/office-hours/11-implementation-tasks.md) (T1–T18 details). Test obligations: [docs/office-hours/12-test-plan.md](docs/office-hours/12-test-plan.md). Deferred work: [TODOS.md](TODOS.md).
 
 ## Design System

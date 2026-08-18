@@ -342,6 +342,20 @@ TODO.
 
 ## Phase 6 — Evidence Traces & Glass-Box UI *(~5–7 days)* — **ACTIVE**
 
+> **Status 2026-08-18: short-term conversation memory shipped, and ingestion was hardened
+> first (ADR-14.15/14.16).** Chat was stateless per request — "how did you find that?" could
+> not resolve, because nothing fed prior turns back to the model. Recent messages of the
+> thread now load at the start of every turn (`engine/history.py`, read from `turns` — not the
+> checkpointer, since photo turns never enter the graph) and reach `plan`/`narrate` only.
+>
+> **The prerequisite was making ingestion incapable of reading history.** `log_memory` is now
+> a zero-argument signal and the graph ingests `state["question"]` alone, anchored to
+> `state["now"]`. Without that, a planner shown Day 1's "3 eggs" could copy it into Day 2's
+> ingest call — verbatim, merged, or via a reference like "same as yesterday" — and the write
+> path's lack of dedupe would make the re-dated duplicate permanent. Also fixed a latent
+> two-clocks-per-turn bug (`ingest_text` was defaulting to wall-clock). The Aug-16/Aug-17
+> acceptance scenario is a regression test whose fake planner misbehaves on purpose.
+
 > **Status 2026-08-13: Profile & goals moved into a dialog/sidebar pattern (`d2df0eb`'s
 > follow-up, `7817e4f`).** Two changes, both explicit instruction, both scoped to the two
 > screens Phase 6 already shipped — no new surface, no new route. **(1)** `/app/profile` now
