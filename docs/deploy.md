@@ -38,7 +38,7 @@ profile (Phase 5) should measure and document.
 ## One-time AWS setup — ✅ ALL COMPLETED 2026-07-19
 
 Everything below is done: ECR repository
-(`589077667696.dkr.ecr.us-east-1.amazonaws.com/ai-fitness-memory-agent`), IAM user
+(`<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/ai-fitness-memory-agent`), IAM user
 `ci-deploy` (ECR push + ECS Express + PassRole), GitHub secrets and variables, the
 Express service, and the first CI-driven deploy. The steps are kept for
 reproducibility (e.g. recreating the stack in another region):
@@ -73,7 +73,7 @@ reproducibility (e.g. recreating the stack in another region):
 3. **Create the service once via the console wizard** (this is also what
    creates the two roles with the right managed policies) — Console → ECS →
    **Deploy with Express Mode**:
-   - Image: `589077667696.dkr.ecr.us-east-1.amazonaws.com/ai-fitness-memory-agent:latest`
+   - Image: `<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/ai-fitness-memory-agent:latest`
    - Task execution role / infrastructure role: **Create new role** in each dropdown
    - Additional configurations: service name `ai-fitness-memory-agent`,
      container port **8080**, health check path **/healthz**,
