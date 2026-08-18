@@ -24,7 +24,8 @@
  */
 
 import { Suspense, lazy } from "react";
-import { Route, Routes } from "react-router";
+import { Outlet, Route, Routes } from "react-router";
+import { AppBackground } from "./components/effects/AppBackground";
 
 const Landing = lazy(() => import("./routes/Landing").then((m) => ({ default: m.Landing })));
 const AppScreen = lazy(() =>
@@ -46,14 +47,40 @@ const NotFound = lazy(() => import("./routes/NotFound").then((m) => ({ default: 
  * cache, and a spinner that flashes for 40ms reads as jank rather than progress (§6.10). */
 const RouteFallback = () => <div className="min-h-dvh bg-background" />;
 
+/**
+ * Layout route for the three signed-in surfaces (§16 Decisions Log, 2026-08-18) — it exists
+ * solely to hold the shared shader backdrop.
+ *
+ * A layout route rather than a mount inside each screen: only one of these routes renders at a
+ * time either way, but three separate mounts would destroy and recreate the WebGL context on
+ * every Chat ↔ Review ↔ Profile navigation, restarting the animation from its first frame each
+ * time. One instance above the `Outlet` survives the navigation.
+ *
+ * It renders no wrapper element — a fragment, so no layout box is introduced between `#root` and
+ * screens that all rely on being `h-dvh` children of it.
+ */
+function AppChrome() {
+  return (
+    <>
+      <AppBackground />
+      <Outlet />
+    </>
+  );
+}
+
 export default function App() {
   return (
     <Suspense fallback={<RouteFallback />}>
       <Routes>
         <Route path="/" element={<Landing />} />
-        <Route path="/app" element={<AppScreen />} />
-        <Route path="/app/review" element={<Review />} />
-        <Route path="/app/profile" element={<ProfileSettings />} />
+        {/* The three signed-in surfaces share one shader backdrop — see `AppChrome`. The landing
+            page is deliberately NOT inside this: it has its own hero-scoped instance with the
+            full-strength, mouse-reactive settings. */}
+        <Route element={<AppChrome />}>
+          <Route path="/app" element={<AppScreen />} />
+          <Route path="/app/review" element={<Review />} />
+          <Route path="/app/profile" element={<ProfileSettings />} />
+        </Route>
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/login" element={<AuthScreen mode="login" />} />
         <Route path="/signup" element={<AuthScreen mode="signup" />} />

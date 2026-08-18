@@ -106,7 +106,14 @@ export function ThreadList({
  * same as the engine pane) rather than a permanent fixture — mirrors §5.7's pane treatment. */
 export function Sidebar(props: ThreadListProps) {
   return (
-    <aside aria-label="Conversations" className="flex h-full flex-col bg-surface">
+    // Translucent + blurred rather than solid, so the shared shader backdrop reads through the
+    // rail (2026-08-18). `backdrop-blur` is doing the accessibility work here: it flattens
+    // whatever the shader is doing behind the panel into a smooth field, so thread titles keep
+    // their contrast instead of sitting on a moving gradient.
+    <aside
+      aria-label="Conversations"
+      className="flex h-full flex-col bg-surface/70 backdrop-blur-md"
+    >
       <ThreadList {...props} />
     </aside>
   );

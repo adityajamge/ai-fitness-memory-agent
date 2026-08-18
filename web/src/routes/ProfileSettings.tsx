@@ -359,7 +359,9 @@ function AccountSection() {
  * rather than an overlay. Direct link and refresh render exactly the same thing. */
 export function ProfileSettings() {
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-background">
+    // No `bg-background` — see Review.tsx: the shared shader backdrop renders behind this screen
+    // and an opaque plate here would cover it.
+    <div className="flex h-dvh flex-col overflow-hidden">
       <TopBar />
 
       <main className="min-h-0 flex-1 overflow-y-auto">

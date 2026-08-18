@@ -130,7 +130,7 @@ export function Composer({
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex flex-col gap-2 rounded-md border border-border bg-surface p-2 transition-colors duration-120 focus-within:border-border-strong"
+      className="flex flex-col gap-2 rounded-md border border-border bg-surface/80 p-2 backdrop-blur-md transition-colors duration-120 focus-within:border-border-strong"
     >
       {image && (
         <div className="flex items-center gap-2 rounded-sm border border-border bg-surface-2 p-1.5">

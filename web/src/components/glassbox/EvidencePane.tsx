@@ -286,7 +286,10 @@ export const EvidencePane = memo(function EvidencePane(props: EvidencePaneProps)
   return (
     <aside
       aria-label="Memory engine"
-      className="flex h-full flex-col border-l border-border bg-surface"
+      // Translucent + blurred over the shared shader backdrop (2026-08-18). The blur matters
+      // more here than anywhere else in the app: these are 13px evidence rows, the densest type
+      // in the product, and they must not be read against moving color.
+      className="flex h-full flex-col border-l border-border bg-surface/70 backdrop-blur-md"
     >
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
         <h2 className="font-mono text-micro uppercase tracking-[0.08em] text-faint">

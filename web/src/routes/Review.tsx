@@ -99,7 +99,10 @@ export function Review() {
   return (
     // `h-dvh` + `overflow-hidden`, matching AppScreen's shell: the top bar stays put and `main`
     // is the single scroll container.
-    <div className="flex h-dvh flex-col overflow-hidden bg-background">
+    // No `bg-background`: the shared shader backdrop (App.tsx's `AppChrome`) sits behind this
+    // screen, and an opaque page plate here would hide it completely. `<body>` still carries the
+    // token, so nothing is transparent all the way down.
+    <div className="flex h-dvh flex-col overflow-hidden">
       <TopBar />
 
       {/* No sidebar row here (§6.13/§6.21) — Review is full-width at every breakpoint. */}

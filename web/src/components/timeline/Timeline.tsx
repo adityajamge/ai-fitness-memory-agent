@@ -199,7 +199,7 @@ export const Timeline = memo(function Timeline({
   if (isPending) {
     return (
       <div
-        className={cn("shrink-0 border-b border-border bg-surface", RAIL_HEIGHT)}
+        className={cn("shrink-0 border-b border-border bg-surface/70 backdrop-blur-md", RAIL_HEIGHT)}
         style={RAIL_BACKGROUND}
       />
     );
@@ -209,7 +209,7 @@ export const Timeline = memo(function Timeline({
     return (
       <div
         className={cn(
-          "flex shrink-0 items-center justify-center gap-2 border-b border-border bg-surface px-4 text-meta text-faint",
+          "flex shrink-0 items-center justify-center gap-2 border-b border-border bg-surface/70 px-4 text-meta text-faint backdrop-blur-md",
           RAIL_HEIGHT,
         )}
       >
@@ -229,7 +229,7 @@ export const Timeline = memo(function Timeline({
     return (
       <div
         className={cn(
-          "relative flex shrink-0 items-center justify-center border-b border-border bg-surface",
+          "relative flex shrink-0 items-center justify-center border-b border-border bg-surface/70 backdrop-blur-md",
           RAIL_HEIGHT,
         )}
         style={RAIL_BACKGROUND}
@@ -306,7 +306,10 @@ export const Timeline = memo(function Timeline({
   return (
     <div
       ref={containerRef}
-      className={cn("relative shrink-0 border-b border-border bg-surface", RAIL_HEIGHT)}
+      className={cn(
+        "relative shrink-0 border-b border-border bg-surface/70 backdrop-blur-md",
+        RAIL_HEIGHT,
+      )}
       style={RAIL_BACKGROUND}
     >
       {/* The scrolling viewport — every breakpoint scrolls now, landed on "now" by default
