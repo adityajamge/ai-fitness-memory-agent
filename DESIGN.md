@@ -509,25 +509,30 @@ moves.
 
 ### 5.7 Grid and layout
 
-**App (wireframe v6 — timeline moved into Review, sidebar scoped to Chat only, 2026-08-13 IA
-revision, §16), desktop ≥1280px. This is Chat's layout; Review and Profile are the single-column
-layout described in §6.20/§6.19, with nothing to either side:**
+**App (wireframe v7 — timeline returns to Chat as an inset strip, 2026-08-18, §16; sidebar
+scoped to Chat only, 2026-08-13 IA revision), desktop ≥1280px. This is Chat's layout; Review and
+Profile are the single-column layout described in §6.20/§6.19, with nothing to either side:**
 
 ```
 ┌───────────────────────────────────────────────────────────┐
 │ top bar                    56px   mark · Chat Review Profile│
 ├────────────┬────────────────────────────────┬──────────────┤
-│  sidebar   │ conversation                   │ memory engine│
-│  272px     │ minmax(560px, 1fr)             │ 420px fixed  │
-│  fixed     │                                │              │
+│  sidebar   │ timeline strip     72px        │ memory engine│
+│  272px     ├────────────────────────────────┤ 420px fixed  │
+│  fixed     │ conversation                   │              │
+│            │ minmax(560px, 1fr)             │              │
 │            ├────────────────────────────────┤              │
 │            │ composer           auto        │              │
 └────────────┴────────────────────────────────┴──────────────┘
 ```
 
-There is no timeline row above this layout anymore — it rendered globally through 2026-08-13 and
-is now scoped to Review only (§6.20), where memory density has context (targets, insights,
-coverage) instead of sitting above every screen regardless of relevance.
+**The timeline is a peer of the conversation, not a band across the app shell.** It rendered
+full-width above everything through 2026-08-13, was scoped to Review only by that revision, and
+returned to Chat on 2026-08-18 (§16) *inside the conversation column* — starting at the sidebar's
+inner edge and ending at the engine pane's. That placement is the whole distinction: a strip that
+spans the shell reads as a global header and outranks the answer, while one that spans the
+conversation reads as that conversation's own history, which is exactly rank 3 of §9's hierarchy.
+Chat's window is **60 days**; Review keeps the default 90 (§6.8). Profile has no timeline.
 
 The sidebar is a **peer of the conversation and the engine pane, below the top bar**, holding
 **Chat history only** — it does not render on Review or Profile at all (§6.13). It is fixed at
@@ -749,7 +754,13 @@ green checkmark.
 
 ### 6.8 Timeline
 
-The permanent memory-density strip, full width, 72px desktop / 48px tablet / 40px mobile rail.
+The memory-density strip, 72px desktop / 48px tablet / 40px mobile rail.
+
+**Two mounts** (2026-08-18, §16): **Chat**, inset in the conversation column between the two
+rails, showing **60 days** without scrolling; and **Review**, full column width, showing **90**.
+Not a global rail — Profile has none, and neither mount spans the app shell. The day count is the
+component's one per-mount option (`visibleDays`); everything else about the rail is identical, and
+both scroll left into older history with `now` pinned right.
 
 **Anatomy:** graph-rule background (§4.4) → per-day density bars → changepoint markers
 (`◆ May 12 protein ↑`) → a `now` marker pinned right.
@@ -1760,3 +1771,4 @@ Numbered `F-T*` to stay clear of the T1–T18 backlog in
 | 2026-08-13 | **Mobile keeps the top bar as its nav mechanism; no bottom tab bar** | Considered and rejected in favor of consistency: a bottom tab bar is the convention all five competitor apps studied use, but it would be a second nav idiom alongside the top bar every other screen (auth, landing, 404) already uses, and a new component this revision does not otherwise need. One idiom across every breakpoint was chosen over matching the category default. |
 | 2026-08-13 | **"Since your last review" is tracked client-side (`localStorage`), not a new backend field** | A `last_reviewed_at` column would be more correct across devices but is new engine work, and the brief's own instruction is to preserve the existing backend absent a concrete problem. `localStorage` is sufficient for a single-session hackathon demo; revisit with a real column only if cross-device drift becomes an actual reported problem, not preemptively. |
 | 2026-08-14 | **Composer gains a photo-attach affordance, reopening §13's "Photo-ingest UI" deferral — M7 (photo ingestion) reintroduced and shipped as an ephemeral-storage variant, no S3** | Explicit user instruction: bring back Phase 5's cut M7 milestone as a real feature — attach a food photo in Chat, get a structured, honestly-labeled nutrition memory. Scoped to the smallest addition that fits the existing system rather than a redesign: one Lucide icon button (`ImagePlus`, matching the send button's existing size/style in the composer's flex row, §6.2) plus an inline preview chip with a remove control (`Composer.tsx`) — no new product surface, no change to Chat/Review/Profile's structure. **No Glass-Box changes were needed at all**: `CitationChip`'s existing `~`-prefix-when-estimated logic and `EvidenceRow`'s existing `NutritionDerivation` rendering (`qty_basis: stated\|ai_estimated`, `confidence_class`) already express "Chicken 200g stated high confidence / Rice ~150g AI-estimated medium confidence" — built for text-logged meals, it renders photo-logged meals correctly for free because the vision extraction prompt (`agent/providers/_prompts.py::VISION_SYSTEM`) never lets a visually-inferred quantity masquerade as user-stated (see `engine/model.py::ModelProvider.extract_from_image`'s docstring for the exact rule). **No S3**: AWS access was unavailable when this was built and the user explicitly declined new storage infrastructure for one feature, so a photo is decoded, validated, sent to the vision model, and discarded — never persisted (full account: `TODOS.md` → *M7 — Photo ingestion*, `docs/engineering/consolidation-architecture.md` §4.17's amendment). The composer keeps the draft and the attached image after a failed send (extends the existing "draft survives a 401" rule, §6.11.1) rather than losing them, since there is no server-side copy of a failed photo to recover from. |
+| 2026-08-18 | **Timeline remounted in Chat as an inset strip in the conversation column, 60-day window — partially reversing the 2026-08-13 decision that scoped it to Review only** | Explicit user instruction ("below the header, and above the chat area, right and left sidebar... show me last 60 days of candles, and I should be able to scroll horizontally to see memories beyond last 60 days"). What 2026-08-13 actually got wrong was the *span*, not the presence: a full-width rail above the app shell reads as a global header band and competes with the answer for rank 1 of §9's hierarchy, which is why it was cut — but cutting it entirely also removed "where does this sit in my history" (rank 3) from the one screen where that question is asked, leaving the user's own history reachable only by navigating away from the conversation to Review. The strip now starts at the thread sidebar's inner edge and ends at the engine pane's, so it spans the conversation rather than the shell: same pixels of information, one rank lower, which is where §9 says it belongs. It is still not global — Profile has none. **Chat shows 60 days, Review keeps 90** (`visibleDays`, the component's one per-mount option): Chat's rail is inset between a 272px sidebar and a 420px pane, so the same 90 bars there would sit at or near `MIN_BAR_PX` and stop reading as a chart, while Review's rail owns a full-width single column. Everything else is shared code — the week-bucketing below 768px (§5.8), the pinned `now` marker, wheel-to-scroll, the hover tooltip that is still the only place a date renders, and the `sr-only` value table §6.15 requires. No backend change: `GET /api/timeline` already served this, and `AppScreen`'s `handleScrub` (day-view + conversation scrub) was still wired from the pre-08-13 mount, so restoring the click behavior was a prop, not a feature. |

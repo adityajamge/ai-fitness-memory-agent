@@ -67,10 +67,13 @@ test.describe("first run", () => {
     // Step 6: the hand-off to asking, shown once.
     await expect(page.getByText(/now ask about it/)).toBeVisible();
 
-    // The timeline moved to Review in the 2026-08-13 IA revision (DESIGN.md §6.20) — it no
-    // longer renders inside Chat. Confirms both halves of that move: gone from Chat, present on
-    // Review, picking up the same first bar the receipt above just created.
-    await expect(page.getByRole("img", { name: /Memory timeline/ })).toHaveCount(0);
+    // The timeline is mounted on BOTH surfaces again as of 2026-08-18 (DESIGN.md §16): inside
+    // Chat's conversation column at a 60-day window, and on Review at its default 90. Step 5 of
+    // §9.1 says the timeline gains its first bar alongside the receipt and the stats — so this
+    // asserts the Chat rail picked up that first memory, then that Review shows the same one.
+    await expect(
+      page.getByRole("img", { name: /Memory timeline: 1 memor.*~60 days/ }),
+    ).toBeVisible();
     await page.getByRole("link", { name: "Review" }).click();
     await expect(page).toHaveURL(/\/app\/review$/);
     await expect(page.getByRole("img", { name: /Memory timeline: 1 memor/ })).toBeVisible();
@@ -81,8 +84,9 @@ test.describe("first run", () => {
   }) => {
     // §5.8: below 768px a months-long rail cannot render one bar per day in ~340px, so it
     // buckets by week and scrolls. This is the only test exercising that code path — everything
-    // else in this suite runs at the default desktop viewport. The timeline lives on Review now
-    // (§6.20), not Chat, so this test logs on Chat and then checks the rail on Review.
+    // else in this suite runs at the default desktop viewport. Checked on Review because that
+    // mount runs the default 90-day window; Chat's own rail (60 days, 2026-08-18) shares this
+    // exact bucketing code, so exercising it once covers both.
     await page.setViewportSize({ width: 390, height: 844 });
     await signUp(page);
     await page.getByRole("button", { name: /250g curd/ }).click();

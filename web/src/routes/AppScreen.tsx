@@ -34,6 +34,7 @@ import { Composer } from "@/components/layout/Composer";
 import { Conversation } from "@/components/layout/Conversation";
 import { ThreadSidebarRail } from "@/components/layout/ThreadSidebarRail";
 import { TopBar } from "@/components/layout/TopBar";
+import { Timeline } from "@/components/timeline/Timeline";
 import { ErrorState } from "@/components/state/ErrorState";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -48,6 +49,11 @@ const nextId = () => `local-${++localId}`;
 
 /** Matches the `lg` breakpoint where the evidence pane becomes a column instead of a drawer. */
 const DESKTOP_QUERY = "(min-width: 1024px)";
+
+/** Chat's timeline window (§16 Decisions Log, 2026-08-18). Narrower than Review's default 90
+ * because this rail is inset between the thread sidebar and the 420px engine pane rather than
+ * spanning a full-width page — 60 days keeps each bar comfortably above the legibility floor. */
+const CHAT_TIMELINE_DAYS = 60;
 
 export function AppScreen() {
   const location = useLocation();
@@ -156,8 +162,10 @@ export function AppScreen() {
   // specified alongside (§13: cut-eligible, ranked below everything else in the Phase-6 priority
   // list). `/` (focus composer) and `⌘Enter` (send) already live in Composer; this covers the
   // one that is page-level. `Esc` blurring the active element is the browser's native behavior
-  // for most controls, so there is nothing to add for it here. `T` (focus timeline) is gone: the
-  // timeline no longer renders inside Chat (2026-08-13 IA revision — it lives in Review, §6.20).
+  // for most controls, so there is nothing to add for it here. `T` (focus timeline) stays
+  // unimplemented even though the rail renders in Chat again (2026-08-18, §16): its affordances
+  // are the pointer and the scroll, and its keyboard/AT form is the `sr-only` table §6.15
+  // requires — not a roving focus target this shortcut would have to invent first.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
@@ -199,10 +207,9 @@ export function AppScreen() {
   // engine pane into day view — every memory logged that day, not whichever turn's trace
   // happened to be selected before. The two are independent (a day with no matching turn in the
   // loaded conversation still gets a day view), which is why this sets both rather than routing
-  // one through the other. Reached two ways: the `location.state.day` hand-off below (Review's
-  // timeline, an insight, or a memory row — §6.20) is the only path since the 2026-08-13 IA
-  // revision moved the timeline itself out of Chat; the name is unchanged from when a timeline
-  // bar inside Chat called this directly.
+  // one through the other. Reached two ways: Chat's own timeline bar calls it directly (remounted
+  // 2026-08-18, §16), and the `location.state.day` hand-off below carries the same action over
+  // from Review's timeline, an insight, or a memory row (§6.20).
   const handleScrub = useCallback(
     (day: string) => {
       setScrubDay(day);
@@ -558,6 +565,18 @@ export function AppScreen() {
         />
 
         <main className="flex min-w-0 flex-1 flex-col">
+          {/* The memory-density strip (§6.8), remounted in Chat 2026-08-18 (§16 Decisions Log)
+              — but INSIDE this column, not as the full-width rail above the app shell it was
+              before 2026-08-13. It spans the conversation only, between the thread rail and the
+              engine pane, so it reads as context for the conversation rather than as a global
+              header band. 60 days fit without scrolling; older history scrolls left.
+
+              Deliberately outside the `isPending`/`isError`/`isEmptyAccount` branch below: the
+              strip owns its own loading, error and empty states (§6.8's "your memory starts
+              here" reads as day one, not as a broken widget), and hiding it while stats load
+              would make the band flicker in and out on every mount. */}
+          <Timeline onScrub={handleScrub} visibleDays={CHAT_TIMELINE_DAYS} />
+
           {stats.isPending ? (
             <div className="mx-auto flex w-full max-w-conversation flex-col gap-4 px-4 py-8 md:px-8">
               <Skeleton className="h-4 w-40" />

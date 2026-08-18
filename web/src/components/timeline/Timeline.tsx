@@ -2,11 +2,16 @@
  * The timeline strip — DESIGN.md §6.8, §6.15 ("density bars", one of the two hand-rolled chart
  * types this product has).
  *
- * **Scoped to Review only** since the 2026-08-13 IA revision (§6.20, §16 Decisions Log) — it no
- * longer renders globally above every screen; `routes/Review.tsx` is its one mount now. Rule 7
- * confines `--signal` to a fixed list that includes "insight caps in the timeline" — nothing
- * else here may use it, which is why a day's bar is `--faint`/`--muted-foreground` and only the
- * 2px insight cap and the `now` marker are signal-colored.
+ * **Two mounts** (§16 Decisions Log, 2026-08-18): `routes/Review.tsx` at its default 90-day
+ * window, and `routes/AppScreen.tsx` — inside Chat's main column, between the two rails — at 60.
+ * The 2026-08-13 IA revision had scoped it to Review alone; that removed it from the screen where
+ * "where does this sit in my history" is asked most, and is reversed for the Chat mount only. It
+ * is still not a *global* rail above every screen: Profile has no timeline, and the strip now
+ * sits inside the conversation column rather than spanning the app shell above the sidebars.
+ *
+ * Rule 7 confines `--signal` to a fixed list that includes "insight caps in the timeline" —
+ * nothing else here may use it, which is why a day's bar is `--faint`/`--muted-foreground` and
+ * only the 2px insight cap and the `now` marker are signal-colored.
  *
  * Hand-rolled SVG per §12 rule 12 ("no chart library"): a generic chart library fights exact
  * token control, and this needs it for the graph-rule background and the signal cap alone.
@@ -38,7 +43,12 @@ const DAYS_PER_BUCKET = 7;
  * history being squeezed into one sliver at the far right (reported live: a several-month
  * account rendered as a wall of empty grid with all the actual bars crammed into ~2% of the
  * width). Bar width is derived from this and the rail's own measured width, so it holds at any
- * viewport size instead of being tuned to one. */
+ * viewport size instead of being tuned to one.
+ *
+ * Overridable per mount (`visibleDays`) because the two mounts have different amounts of room:
+ * Review gives the rail a full single-column page, while Chat's is inset between the thread rail
+ * and the 420px engine pane. Same component, same data, same scroll — a narrower window there
+ * keeps each bar above `MIN_BAR_PX` instead of bottoming out on the floor. */
 const VISIBLE_DAYS = 90;
 /** Never let a bar get thinner than this, even on a narrow viewport — the floor for both
  * legibility and (on mobile) a tappable target. */
@@ -102,11 +112,17 @@ const RAIL_BACKGROUND = { backgroundImage: "var(--graph-rule)" };
 export interface TimelineProps {
   /** Scrub the conversation to the nearest turn on this date (§9 "click a timeline day"). */
   onScrub?: (day: string) => void;
+  /** How many days fit without scrolling; everything older is one scroll left. Defaults to
+   * {@link VISIBLE_DAYS}. */
+  visibleDays?: number;
 }
 
 // Memoized: `onScrub` is a stable setState function passed from `AppScreen`, so this rail (up to
 // 90 SVG bars, remeasured and re-bucketed) has no reason to re-render on a composer keystroke.
-export const Timeline = memo(function Timeline({ onScrub }: TimelineProps) {
+export const Timeline = memo(function Timeline({
+  onScrub,
+  visibleDays = VISIBLE_DAYS,
+}: TimelineProps) {
   const { data, isPending, isError, refetch } = useTimeline();
   const [hover, setHover] = useState<{ day: TimelineDay; x: number } | null>(null);
   const [isMobile, setIsMobile] = useState(
@@ -164,9 +180,9 @@ export const Timeline = memo(function Timeline({ onScrub }: TimelineProps) {
   const bars = useMemo(() => (isMobile ? bucketByWeek(days) : days), [days, isMobile]);
   const maxN = useMemo(() => Math.max(1, ...bars.map((d) => d.n)), [bars]);
 
-  // One bar = one day on desktop, one bucket = seven days on mobile — so "90 visible days" is
-  // 90 bars on one and ~13 on the other, and both land on the same real span of history.
-  const visibleBars = isMobile ? Math.ceil(VISIBLE_DAYS / DAYS_PER_BUCKET) : VISIBLE_DAYS;
+  // One bar = one day on desktop, one bucket = seven days on mobile — so "60 visible days" is
+  // 60 bars on one and ~9 on the other, and both land on the same real span of history.
+  const visibleBars = isMobile ? Math.ceil(visibleDays / DAYS_PER_BUCKET) : visibleDays;
   const barPx = railWidth > 0 ? Math.max(railWidth / visibleBars, MIN_BAR_PX) : 0;
   // Bar width is always `barPx` regardless of history length — a 3-day-old account's bars are
   // the same width as they'd be in a 90-day rail, not stretched to fill it (reported live: a
@@ -175,8 +191,8 @@ export const Timeline = memo(function Timeline({ onScrub }: TimelineProps) {
   // `justify-end` below) so the bars still sit next to the pinned `now` marker.
   const contentWidth = barPx > 0 ? barPx * bars.length : undefined;
 
-  // Lands on "now" by default — the most recent ~90 days are what's visible without scrolling;
-  // everything older is one scroll away, never rendered as a barely-visible sliver.
+  // Lands on "now" by default — the most recent `visibleDays` are what's visible without
+  // scrolling; everything older is one scroll away, never rendered as a barely-visible sliver.
   useEffect(() => {
     scrollRef.current?.scrollTo({ left: scrollRef.current.scrollWidth, behavior: "auto" });
   }, [contentWidth, bars.length]);
@@ -286,7 +302,7 @@ export const Timeline = memo(function Timeline({ onScrub }: TimelineProps) {
     el.scrollLeft += event.deltaY;
   }
 
-  const svgLabel = `Memory timeline: ${total} ${total === 1 ? "memory" : "memories"} across ${days.length} ${days.length === 1 ? "day" : "days"}, from ${firstDay?.day} to ${lastDay?.day}. Showing the most recent ~${VISIBLE_DAYS} days by default — scroll left for earlier history.`;
+  const svgLabel = `Memory timeline: ${total} ${total === 1 ? "memory" : "memories"} across ${days.length} ${days.length === 1 ? "day" : "days"}, from ${firstDay?.day} to ${lastDay?.day}. Showing the most recent ~${visibleDays} days by default — scroll left for earlier history.`;
 
   return (
     <div
